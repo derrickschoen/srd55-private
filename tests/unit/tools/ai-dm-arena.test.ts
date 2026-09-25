@@ -2619,6 +2619,17 @@ describe('LUNA6 Luna lift wiring', () => {
   it('every call of a lifted escalation round is logged at the adapter boundary in protocol order', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-luna6-w3-'));
     const outPath = join(directory, 'w3.jsonl');
+    // Review r2: every leg of this simulated round, the escalation leg included (1dec101d), is handed the in-process
+    // DM tool session. A leg handed none would spawn a real engine MCP child, slow enough to reach Vitest's 5 s
+    // timeout, so the observer refuses that leg before it is dispatched: a missing session fails the `legs`
+    // assertion below instead of timing the test out. Launcher names: `${key}-initial`, `${key}-correction` and
+    // `${key}-escalation` with key `room-<room>-round-<round>`, each written as `<name>-launcher.json`.
+    const legs: Array<{
+      readonly launcher: string;
+      readonly callPhase: AgentInvocation['callPhase'];
+      readonly inProcessToolSession: boolean;
+    }> = [];
+    let failure: string | null = null;
     const [row] = await runArena(parseArenaArgs([
       '--rooms', '1', '--reps', '1', '--seed', '3943001', '--out', outPath, '--dry-run', '--cli', 'codex',
       '--model', 'gpt-6-luna', '--effort', 'xhigh', '--escalation-model', 'gpt-6-luna', '--escalation-effort', 'xhigh',
@@ -2628,12 +2639,32 @@ describe('LUNA6 Luna lift wiring', () => {
       failCorrection: ['room-1-round-1'],
       simulatedInProcessDispatchDelayMs: 0,
       heartbeat: () => undefined,
+      onAgentInvocation: (invocation) => {
+        const launcher = invocation.launcherToken.replace(/^.*\//u, '');
+        legs.push({
+          launcher, callPhase: invocation.callPhase, inProcessToolSession: invocation.toolSession !== undefined,
+        });
+        if (invocation.toolSession === undefined) {
+          throw new Error(`W3: ${launcher} was dispatched without the in-process DM tool session`);
+        }
+      },
+    }).catch((error: unknown) => {
+      failure = error instanceof Error ? error.message : String(error);
+      return [];
     });
     expect({
+      legs,
+      failure,
       callLog: luna6CallLog(outPath),
       callsPerRound: row?.callsPerRound,
       escalated: row?.escalated,
     }).toEqual({
+      legs: [
+        { launcher: 'room-1-round-1-initial-launcher.json', callPhase: 'initial', inProcessToolSession: true },
+        { launcher: 'room-1-round-1-correction-launcher.json', callPhase: 'correction', inProcessToolSession: true },
+        { launcher: 'room-1-round-1-escalation-launcher.json', callPhase: 'correction', inProcessToolSession: true },
+      ],
+      failure: null,
       callLog: [LUNA6_P1, LUNA6_P3, LUNA6_P4].map((call) => ({
         ...call, model: 'gpt-6-luna', reasoningEffort: 'xhigh', timeoutMs: 1_800_000, cellKey: '1:1',
         boundKind: 'hang_guard', exit: 'completed', hangGuardFired: false, elapsedMs: '<n>',
