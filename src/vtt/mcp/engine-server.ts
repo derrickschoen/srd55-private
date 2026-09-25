@@ -1097,6 +1097,7 @@ export function renderBlindEnginePrompt(
 function reactionAttackInput(
   state: EncounterState,
   decision: Extract<EncounterState['pendingDecisions'][number], { readonly kind: 'reaction_offer' }>,
+  queries: EngineQueryPort,
 ): TacticalAttackInput | null {
   const command = decision.opportunityAttack.command;
   const attacker = state.combatants.find((candidate) => candidate.profile.id === command.actor);
@@ -1131,6 +1132,7 @@ function reactionAttackInput(
     targetCanSeeAttacker: command.targetCanSeeAttacker,
     rollModeSources: [],
     featureRollModeInput: null,
+    closeCombatEnemies: queries.closeCombatEnemies(state, command.actor),
     target: {
       hitPoints: target.hitPoints,
       usesDeathSaves: target.profile.rules.usesDeathSaves,
@@ -1199,13 +1201,16 @@ function actorKnowledgeReports(
     .sort((left, right) => left.actor_id.localeCompare(right.actor_id));
 }
 
-function reactionSpendHoldReports(state: EncounterState): readonly Readonly<Record<string, unknown>>[] {
+function reactionSpendHoldReports(
+  state: EncounterState,
+  queries: EngineQueryPort,
+): readonly Readonly<Record<string, unknown>>[] {
   const futureTurnStarts = state.initiative
     .slice(state.activeInitiativeIndex === null ? state.initiative.length : state.activeInitiativeIndex + 1)
     .map((entry) => ({ combatant: entry.combatant, round: state.round }));
   return state.pendingDecisions.flatMap((decision): readonly Readonly<Record<string, unknown>>[] => {
     if (decision.kind !== 'reaction_offer') return [];
-    const tacticalAttack = reactionAttackInput(state, decision);
+    const tacticalAttack = reactionAttackInput(state, decision, queries);
     if (tacticalAttack === null) return [];
     const evaluation = evaluateTacticalAttack(tacticalAttack);
     const spend = evaluation.damage.status === 'resolved'
@@ -1370,7 +1375,7 @@ function capsuleIntelReports(
   ) === true;
   return {
     actorKnowledge: actorKnowledgeReports(state, queries, capsule),
-    reactionSpendHold: reactionSpendHoldReports(state),
+    reactionSpendHold: reactionSpendHoldReports(state, queries),
     legendaryWindows: legendary.full,
     legendaryWindowsCompact: legendary.compact,
     legendaryHasDetails: legendary.hasDetails,

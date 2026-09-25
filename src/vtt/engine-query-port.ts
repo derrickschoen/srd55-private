@@ -31,12 +31,14 @@ import type { EffectPayload, EncounterEffect } from '../combat/effects';
 import { monsterAttackRange, monsterAttackRollModeSources } from '../combat/monster-commands';
 import { declaredMonsterTraits } from '../combat/monster-traits';
 import {
+  CLOSE_COMBAT_DISTANCE_FEET,
   TACTICAL_EVALUATOR_POLICY,
   evaluateTacticalAttack,
   foldTacticalAttackSequence,
   tacticalRangeVerdict,
   tacticalRangeVerdictAtDistance,
   type AttackRollModeSource,
+  type CloseCombatEnemy,
   type MonsterRollModeCombatantFacts,
   type MonsterRollModeFeatureInput,
   type TacticalAttackInput,
@@ -281,6 +283,8 @@ export interface EngineQueryPort {
     readonly sense: 'normal_sight' | 'darkvision' | 'blindsight' | 'truesight' | 'unknown';
     readonly reason: string | null;
   } | null;
+  /** The actor's enemies within 5 feet, for Ranged Attacks in Close Combat (see planningCloseCombatEnemies). */
+  closeCombatEnemies(state: EncounterState, actorId: CombatantId): readonly CloseCombatEnemy<boolean>[];
 }
 
 type PlanningRollDefenseEffect = EncounterEffect & {
@@ -1322,6 +1326,37 @@ function reach(state: EncounterState, request: EngineReachRequest): EngineReachR
   };
 }
 
+/**
+ * The actor's enemies within 5 feet of its space, for Ranged Attacks in Close
+ * Combat (rangedCloseCombatVerdict), on this port's planning basis: its own
+ * detection and planning conditions, as for every other fact of an attack
+ * plan. It states the reducer's closeCombatEnemies (encounter.ts): a placed
+ * opposing creature that is not dead, whether it sees the actor, and whether
+ * it is Incapacitated (a creature at 0 Hit Points is Unconscious).
+ */
+function planningCloseCombatEnemies(
+  state: EncounterState,
+  actorId: CombatantId,
+): readonly CloseCombatEnemy<boolean>[] {
+  const actorSpace = queryCombatantSpace(state, actorId);
+  return state.combatants.flatMap((candidate): readonly CloseCombatEnemy<boolean>[] => {
+    const id = candidate.profile.id;
+    if (
+      id === actorId || candidate.life === 'dead' ||
+      !state.tokens.some((token) => token.combatantId === id) ||
+      combatantsAreAllies(state, actorId, id)
+    ) return [];
+    const distanceFeet = minimumSpaceDistance(actorSpace, queryCombatantSpace(state, id));
+    if (distanceFeet > CLOSE_COMBAT_DISTANCE_FEET) return [];
+    return [{
+      id,
+      distanceFeet,
+      seesAttacker: detect(state, id, actorId)?.kind === 'seen',
+      incapacitated: candidate.life !== 'living' || isIncapacitated(enginePlanningConditions(state, id)),
+    }];
+  });
+}
+
 /** Builds the immutable attack input shared by single-attack and sequence queries. */
 export function engineTacticalAttackInput(
   state: EncounterState,
@@ -1451,6 +1486,7 @@ export function engineTacticalAttackInput(
       ),
     ],
     featureRollModeInput,
+    closeCombatEnemies: planningCloseCombatEnemies(state, actorId),
     attackRollModifiers,
     target: {
       hitPoints: enginePlanningHitPoints(state, targetId),
@@ -1639,6 +1675,35 @@ function projectedMovementState(
   };
 }
 
+/**
+ * The PC's close-combat enemies with its space anchored at `position`, from
+ * actor-local knowledge: every perceived opponent whose footprint is within
+ * 5 feet of that space. It sees the PC when the projection says it does now,
+ * the reading the attack itself takes for its target at every square;
+ * otherwise that fact is unknown (the verdict may then be unresolved). It is
+ * Incapacitated when the PC perceives a condition that includes it.
+ */
+export function projectedCloseCombatEnemies(
+  state: EncounterState,
+  projection: ActorKnowledgeProjection,
+  position: GridCell,
+): readonly CloseCombatEnemy[] {
+  const actorSpace = queryCombatantSpaceAt(state, projection.actorId, position);
+  return projection.targets.flatMap((target): readonly CloseCombatEnemy[] => {
+    if (target.kind !== 'perceived') return [];
+    const distanceFeet = minimumSpaceDistance(actorSpace, decodeProjectedCreatureSpace(target));
+    if (distanceFeet > CLOSE_COMBAT_DISTANCE_FEET) return [];
+    return [{
+      id: target.targetId,
+      distanceFeet,
+      seesAttacker: target.reciprocalVisibility.kind === 'perceived'
+        ? target.reciprocalVisibility.targetCanSeeActor
+        : { kind: 'unknown' },
+      incapacitated: isIncapacitated(projectedTargetConditions(target)),
+    }];
+  });
+}
+
 interface ProjectedAttackPlanning {
   readonly actor: EncounterCombatantState;
   readonly start: GridCell;
@@ -1708,6 +1773,7 @@ function projectedAttackPlanning(
         targetCanSeeAttacker: true,
         rollModeSources: request.attack.rollModeSources,
         featureRollModeInput: null,
+        closeCombatEnemies: projectedCloseCombatEnemies(state, projection, position),
         ...(request.attack.attackRollModifiers === undefined
           ? {}
           : { attackRollModifiers: request.attack.attackRollModifiers }),
@@ -2019,6 +2085,7 @@ const engineQueryPort: EngineQueryPort = {
       reason: detection.kind === 'undetected' ? detection.reason : null,
     };
   },
+  closeCombatEnemies: planningCloseCombatEnemies,
 };
 
 export const canonicalEngineQueryPort: EngineQueryPort = Object.freeze(engineQueryPort);

@@ -29,6 +29,7 @@ function opportunityAttack(overrides: Partial<TacticalAttackInput> = {}): Tactic
     targetCanSeeAttacker: true,
     rollModeSources: [],
     featureRollModeInput: null,
+    closeCombatEnemies: [],
     target: { hitPoints: 20, usesDeathSaves: true },
     ...overrides,
   };

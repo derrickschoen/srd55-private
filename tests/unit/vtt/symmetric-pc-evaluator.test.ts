@@ -388,6 +388,7 @@ describe('symmetric scripted-PC evaluator', () => {
       range, attackBonus: 5, targetArmorClass: 18, criticalFloor: 20,
       damageTerms: [{ dice: { count: 1, sides: 8, modifier: 3 } }], attackerConditions: [], targetConditions: [],
       attackerCanSeeTarget: true, targetCanSeeAttacker: true, rollModeSources: [], featureRollModeInput: null,
+      closeCombatEnemies: [],
       target: { hitPoints: 1, usesDeathSaves: false },
     });
     const fullBeta = evaluateTacticalAttack({
@@ -395,6 +396,7 @@ describe('symmetric scripted-PC evaluator', () => {
       range, attackBonus: 5, targetArmorClass: 10, criticalFloor: 20,
       damageTerms: [{ dice: { count: 1, sides: 8, modifier: 3 } }], attackerConditions: [], targetConditions: [],
       attackerCanSeeTarget: true, targetCanSeeAttacker: true, rollModeSources: [], featureRollModeInput: null,
+      closeCombatEnemies: [],
       target: { hitPoints: 40, usesDeathSaves: false },
     });
     if (fullAlpha.damage.status !== 'resolved' || fullBeta.damage.status !== 'resolved') {
@@ -1166,10 +1168,16 @@ describe('PCAC approach: with no legal attack the scripted PC plans its moves wi
  * 1d8 + 2 (hit 6.5, Critical Hit 11), against a Goblin Warrior (AC 15).
  * - Adjacent, both are legal (the Longbow at normal range). Battleaxe: faces
  *   8-20 hit, 13/20: ED = 12/20 x 8.5 + 1/20 x 13 = 5.1 + 0.65 = 5.75.
- *   Longbow: faces 10-20, 11/20: ED = 10/20 x 6.5 + 1/20 x 11 = 3.8. Both are
- *   in bucket 2; the canonical text alone ("attackBonus":5 before 7) would
- *   take the Longbow.
- * - 30 feet away, only the Longbow is legal, and it is taken over every move.
+ *   Longbow: a ranged attack roll within 5 feet of an enemy (this goblin) who
+ *   can see the fighter and is not Incapacitated has Disadvantage (Ranged
+ *   Attacks in Close Combat, :911-917). One d20 hits on faces 10-20, 11/20;
+ *   with Disadvantage hit (11/20)^2 = 121/400, critical (1/20)^2 = 1/400:
+ *   ED = 120/400 x 6.5 + 1/400 x 11 = 1.95 + 0.0275 = 1.9775. (Without the
+ *   close-combat rule it would be 10/20 x 6.5 + 1/20 x 11 = 3.8.) Both are in
+ *   bucket 2; the canonical text alone ("attackBonus":5 before 7) would take
+ *   the Longbow.
+ * - 30 feet away, only the Longbow is legal, no enemy is within 5 feet, and
+ *   the shot (3.8) is taken over every move.
  *
  * RANGER FIRING SQUARE. The third commit's ranger board (walls (4,2) and
  * (4,3), goblin at (5,3), ranger at (3,2) after its action), now through the
@@ -1326,7 +1334,7 @@ describe('PCAC range: PC attack commands carry their weapon\'s real range', () =
     expect(() => reduceEncounter(beyond, longbowForm, () => 0.5)).toThrow('The target is out of attack range.');
   });
 
-  it('PCAC-RANGE-ATTACK-BY-DAMAGE: adjacent, the fighter takes his Battleaxe (5.75) over his Longbow (3.8); 30 feet away, the Longbow', () => {
+  it('PCAC-RANGE-ATTACK-BY-DAMAGE: adjacent, the fighter takes his Battleaxe (5.75) over his close-combat Longbow (1.9775); 30 feet away, the Longbow (3.8)', () => {
     const members = fighterPack('pcac-damage');
     const fighter = members[0]!;
     const goblinProfile = goblin('pcac-damage-goblin');
@@ -1353,7 +1361,7 @@ describe('PCAC range: PC attack commands carry their weapon\'s real range', () =
     const adjacent = decide(at(1));
     expect(attacks(adjacent)).toEqual([
       { attackId: 'attack:pcac-battleaxe', bucket: 2, damage: 5.75 },
-      { attackId: 'attack:pcac-longbow', bucket: 2, damage: 3.8 },
+      { attackId: 'attack:pcac-longbow', bucket: 2, damage: 1.9775 },
     ]);
     // Canonical text alone would take the Longbow.
     expect(adjacent.assessments.filter((assessment) => assessment.command.type === 'attack')
@@ -1364,6 +1372,83 @@ describe('PCAC range: PC attack commands carry their weapon\'s real range', () =
     const ranged = decide(at(6));
     expect(attacks(ranged)).toEqual([{ attackId: 'attack:pcac-longbow', bucket: 2, damage: 3.8 }]);
     expect(ranged.selected.command).toMatchObject({ type: 'attack', attackId: 'attack:pcac-longbow' });
+  });
+
+  /*
+   * CC-PC-NON-TARGET. The ranger (Longbow +5, 1d8 + 3: hit 7.5, Critical Hit
+   * 12; Shortsword +5, 1d6 + 3: hit 6.5, Critical Hit 10) at (0,0), goblin A
+   * (AC 15) next to it at (1,0), goblin B at (6,2), 30 feet away and clear of
+   * A (the trace from the ranger's corner (0,1) passes below A's square). One
+   * d20 hits AC 15 on faces 10-20: 11/20, critical 1/20.
+   * - A sees the ranger and is alert, so every Longbow shot, B's included, is
+   *   a ranged attack roll within 5 feet of an enemy: Disadvantage (:911-917),
+   *   hit 121/400, critical 1/400, ED = 120/400 x 7.5 + 1/400 x 12 = 2.28.
+   *   The Shortsword on A is a melee attack: 10/20 x 6.5 + 1/20 x 10 = 3.75.
+   * - A Paralyzed (a condition that includes Incapacitated, perceived by the
+   *   ranger): B's Longbow is straight, 10/20 x 7.5 + 1/20 x 12 = 4.35.
+   * - A Blinded: A cannot see the ranger, and the ranger's knowledge says only
+   *   that A's sight of it is unknown: B's Longbow has no planned number.
+   */
+  it('CC-PC-NON-TARGET: the ranger\'s Longbow shot at a goblin 30 feet away is planned with Disadvantage while another goblin stands next to him (2.28, not 4.35)', () => {
+    const members = rangerPack('cc-pc');
+    const ranger = members[0]!;
+    const near = goblin('cc-pc-near');
+    const far = goblin('cc-pc-far');
+    const board = (condition: 'Paralyzed' | 'Blinded' | null) => {
+      const created = createEncounter({
+        bounds: { columns: 8, rows: 3 },
+        combatants: [ranger.profile, near, far],
+        tokens: [
+          combatToken(ranger.profile, { column: 0, row: 0 }),
+          combatToken(near, { column: 1, row: 0 }),
+          combatToken(far, { column: 6, row: 2 }),
+        ],
+      });
+      return ready({
+        ...created,
+        effects: condition === null ? [] : [{
+          id: encounterEffectId(`effect:cc-pc-${condition}`),
+          source: ranger.profile.id,
+          targets: [near.id],
+          createdRevision: 0,
+          duration: { kind: 'permanent' },
+          concentrationOwner: null,
+          stackingIdentity: effectStackingIdentity(`cc-pc-${condition}`),
+          stacking: 'replace_same_source',
+          repeatedSave: null,
+          payload: { kind: 'condition', condition },
+        }],
+      }, ranger.profile.id);
+    };
+    const planned = (state: EncounterState) => {
+      const decision = evaluateSymmetricPcDecision({
+        state, actorId: ranger.profile.id,
+        legalActions: loadedPartyTurnLegalActions(members)(state, ranger.profile.id).actions,
+        attackForms: loadedPartyAttackForms(members),
+      });
+      return Object.fromEntries(decision.assessments.flatMap((assessment) => {
+        if (assessment.command.type !== 'attack') return [];
+        const damage = assessment.rank[3];
+        const tactical = assessment.tactical;
+        return [[
+          `${assessment.command.attackId === LONGBOW_ID ? 'longbow' : 'shortsword'}@${assessment.command.target === near.id ? 'A' : 'B'}`,
+          {
+            damage: damage.kind === 'resolved' ? rounded(damage.expectedDamage) : damage.kind,
+            closeCombat: tactical?.status === 'evaluated'
+              ? tactical.evaluation.rollMode.reasons.includes('ranged_close_combat_disadvantage')
+              : tactical?.reason ?? null,
+          },
+        ]];
+      }));
+    };
+
+    expect(planned(board(null))).toEqual({
+      'longbow@A': { damage: 2.28, closeCombat: true },
+      'longbow@B': { damage: 2.28, closeCombat: true },
+      'shortsword@A': { damage: 3.75, closeCombat: false },
+    });
+    expect(planned(board('Paralyzed'))['longbow@B']).toEqual({ damage: 4.35, closeCombat: false });
+    expect(planned(board('Blinded'))['longbow@B']).toEqual({ damage: 'unresolved', closeCombat: false });
   });
 
   it('PCAC-RANGE-RANGER-FIRING-SQUARE: through the party-pack provider, the ranger steps to the clear firing square within the Longbow\'s normal range', () => {

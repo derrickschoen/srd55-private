@@ -213,9 +213,12 @@ import {
   deathSaveFailuresFromZeroHitPointDamage,
   evaluateTacticalAttack,
   projectMonsterRollModeSources,
+  rangedCloseCombatVerdict,
   tacticalRangeVerdict,
   tacticalRangeVerdictAtDistance,
+  CLOSE_COMBAT_DISTANCE_FEET,
   type AttackRollModeSource,
+  type CloseCombatEnemy,
   type MonsterRollModeCombatantFacts,
   type MonsterRollModeFeatureInput,
   type TacticalAttackRollModifier,
@@ -2494,6 +2497,37 @@ function coverAdjustedArmorClass(
   return armorClass(effectiveArmorClass(state, target, attacker) + coverDefenseBonus(tier));
 }
 
+/**
+ * The attacker's enemies within 5 feet of its space, with the facts the
+ * Ranged Attacks in Close Combat rule reads (rangedCloseCombatVerdict,
+ * docs/srd/full/srd-5.2.1.txt:911-917): a placed creature of the opposing
+ * side that is not dead, whether it can see the attacker, and whether it is
+ * Incapacitated. A creature at 0 Hit Points, dying or Stable, has the
+ * Unconscious condition (docs/srd/full/srd-5.2.1.txt:1079-1082, 1115-1117),
+ * which includes Incapacitated.
+ */
+export function closeCombatEnemies(
+  state: EncounterState,
+  attackerId: CombatantId,
+): readonly CloseCombatEnemy<boolean>[] {
+  const attackerSpace = combatantSpace(state, attackerId);
+  return state.combatants.flatMap((subject): readonly CloseCombatEnemy<boolean>[] => {
+    const id = subject.profile.id;
+    if (
+      id === attackerId || subject.life === 'dead' || !isCombatantOnBoard(state, id) ||
+      combatantsAreAllies(state, attackerId, id)
+    ) return [];
+    const distanceFeet = minimumSpaceDistance(attackerSpace, combatantSpace(state, id));
+    if (distanceFeet > CLOSE_COMBAT_DISTANCE_FEET) return [];
+    return [{
+      id,
+      distanceFeet,
+      seesAttacker: canCombatantSee(state, id, attackerId),
+      incapacitated: subject.life !== 'living' || isIncapacitated(combatantConditions(state, id)),
+    }];
+  });
+}
+
 function attackRollModeSources(
   state: EncounterState,
   command: Extract<
@@ -2568,6 +2602,11 @@ function attackRollModeSources(
     const range = tacticalRangeVerdictAtDistance(distance, command.tacticalRange);
     if (range.status === 'resolved' && range.band === 'long') {
       sources.push({ mode: 'disadvantage', reason: 'long_range_disadvantage' });
+    }
+    // Ranged Attacks in Close Combat: the planner's rule, on the full state.
+    if (rangedCloseCombatVerdict(command.tacticalRange, distance, closeCombatEnemies(state, command.actor)).kind ===
+      'disadvantage') {
+      sources.push({ mode: 'disadvantage', reason: 'ranged_close_combat_disadvantage' });
     }
   }
   if (includeConditionSources) {
@@ -2763,6 +2802,7 @@ export function evaluateMonsterTacticalAttack(
       ),
     ],
     featureRollModeInput: monsterAttackRollModeFeatureInput(state, actor, target),
+    closeCombatEnemies: closeCombatEnemies(state, actor),
     attackRollModifiers,
     target: {
       hitPoints: targetHitPoints,

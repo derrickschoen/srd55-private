@@ -5,11 +5,19 @@ import {
   evaluateTacticalAttack,
   foldTacticalAttackSequence,
   projectMonsterRollModeSources,
+  rangedCloseCombatVerdict,
   tacticalRangeVerdict,
+  type CloseCombatEnemy,
   type MonsterRollModeFeatureInput,
   type TacticalAttackInput,
 } from '../../../src/combat/tactical-evaluator';
-import { combatantId, feet } from '../../../src/combat/values';
+import {
+  combatantId,
+  effectStackingIdentity,
+  encounterEffectId,
+  feet,
+  type CombatantId,
+} from '../../../src/combat/values';
 import { monsterAttackCommand, monsterAttackRollModeSources } from '../../../src/combat/monster-commands';
 import type { MonsterAttackAction, MonsterTrait } from '../../../src/combat/statblock';
 import { MONSTER_SIDE } from '../../../src/combat/allies';
@@ -17,12 +25,16 @@ import {
   createEncounter,
   evaluateMonsterTacticalAttack,
   reduceEncounter,
+  type EncounterState,
 } from '../../../src/combat/encounter';
 import { monsterCombatantProfile } from '../../../src/combat/combatant';
-import { WOLF } from '../../../src/combat/statblocks/monsters';
+import { GOBLIN_WARRIOR, OGRE, WOLF } from '../../../src/combat/statblocks/monsters';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { BERSERKER } from '../../../src/combat/statblocks/mercenary-company';
 import { saveRollMode } from '../../../src/combat/combat-rules';
 import { placedToken, playerProfile } from './fixtures';
+
+const PLANNING_QUERIES = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' }).queries;
 
 function baseInput(overrides: Partial<TacticalAttackInput> = {}): TacticalAttackInput {
   return {
@@ -41,6 +53,7 @@ function baseInput(overrides: Partial<TacticalAttackInput> = {}): TacticalAttack
     targetCanSeeAttacker: true,
     rollModeSources: [],
     featureRollModeInput: null,
+    closeCombatEnemies: [],
     target: { hitPoints: 10, usesDeathSaves: true },
     ...overrides,
   };
@@ -421,5 +434,242 @@ describe('canonical tactical evaluator', () => {
       status: 'unresolved', killProbability: null,
       reasonCodes: ['attack_damage_unresolved'],
     });
+  });
+});
+
+/*
+ * RANGED ATTACKS IN CLOSE COMBAT, docs/srd/full/srd-5.2.1.txt:911-917: "When
+ * you make a ranged attack roll with a weapon, a spell, or some other means,
+ * you have Disadvantage on the roll if you are within 5 feet of an enemy who
+ * can see you and doesn't have the Incapacitated condition."
+ *
+ * EVALUATOR NUMBERS (baseInput: +4 against AC 15, 1d8 + 2, a ranged 30/60
+ * attack at 30 feet). One d20 hits on faces 11-20: hit 10/20, critical 1/20;
+ * a hit averages 6.5, a Critical Hit 2 x 4.5 + 2 = 11.
+ * - Straight: ED = 9/20 x 6.5 + 1/20 x 11 = 2.925 + 0.55 = 3.475.
+ * - Disadvantage: hit (10/20)^2 = 1/4, critical (1/20)^2 = 1/400:
+ *   ED = 99/400 x 6.5 + 1/400 x 11 = 643.5/400 + 11/400 = 1.63625.
+ *
+ * BOARD (5 columns, 3 rows; bright light, every creature sees normally): a
+ * Goblin Warrior archer at (0,0) with its Shortbow (+4, 80/320,
+ * :18985-19018), the target PC at (3,0), 15 feet away, and a second PC at
+ * (0,1), 5 feet from the goblin and off every line between the goblin and the
+ * target (so no creature cover). The PCs have AC 14 (tests/unit/combat
+ * /fixtures.ts). One d20 hits AC 14 on faces 10-20: hit 11/20, critical 1/20;
+ * with Disadvantage hit 121/400 = 0.3025, critical 1/400 = 0.0025. The
+ * reducer's d20 source is fixed at 0.5 (face 11), so the event shows two
+ * faces under Disadvantage and one otherwise.
+ */
+function enemy(overrides: Partial<CloseCombatEnemy> = {}): CloseCombatEnemy {
+  return {
+    id: combatantId('combatant:close-enemy'),
+    distanceFeet: 5,
+    seesAttacker: true,
+    incapacitated: false,
+    ...overrides,
+  };
+}
+
+function condition(key: string, target: CombatantId, name: 'Blinded' | 'Paralyzed'): EncounterState['effects'][number] {
+  return {
+    id: encounterEffectId(`effect:${key}`),
+    source: target,
+    targets: [target],
+    createdRevision: 0,
+    duration: { kind: 'permanent' },
+    concentrationOwner: null,
+    stackingIdentity: effectStackingIdentity(key),
+    stacking: 'replace_same_source',
+    repeatedSave: null,
+    payload: { kind: 'condition', condition: name },
+  };
+}
+
+function goblinArcherBoard(input: {
+  readonly key: string;
+  readonly neighbour: 'pc' | 'goblin_ally' | 'none';
+  readonly neighbourCell?: { readonly column: number; readonly row: number };
+  readonly neighbourCondition?: 'Blinded' | 'Paralyzed' | 'dying' | 'stable';
+}) {
+  const archerBase = monsterCombatantProfile(GOBLIN_WARRIOR, {
+    combatantId: `combatant:${input.key}-archer`, tokenId: `token:${input.key}-archer`,
+  });
+  const archer = { ...archerBase, rules: { ...archerBase.rules, initiativeBonus: 20 } };
+  const target = playerProfile(`${input.key}-target`, { initiativeBonus: -20 });
+  const neighbour = input.neighbour === 'pc'
+    ? playerProfile(`${input.key}-neighbour`, { initiativeBonus: -20 })
+    : input.neighbour === 'goblin_ally'
+      ? (() => {
+          const base = monsterCombatantProfile(GOBLIN_WARRIOR, {
+            combatantId: `combatant:${input.key}-ally`, tokenId: `token:${input.key}-ally`,
+          });
+          return { ...base, rules: { ...base.rules, initiativeBonus: -20 } };
+        })()
+      : null;
+  const cell = input.neighbourCell ?? { column: 0, row: 1 };
+  const created = createEncounter({
+    bounds: { columns: 5, rows: 3 },
+    combatants: [archer, target, ...(neighbour === null ? [] : [neighbour])],
+    tokens: [
+      placedToken(archer, 0, 0),
+      placedToken(target, 3, 0),
+      ...(neighbour === null ? [] : [placedToken(neighbour, cell.column, cell.row)]),
+    ],
+  });
+  const started = reduceEncounter(created, { type: 'roll_initiative' }, () => 0.5).state;
+  const conditionName = input.neighbourCondition;
+  const state: EncounterState = neighbour === null || conditionName === undefined
+    ? started
+    : conditionName === 'dying'
+      ? {
+          ...started,
+          combatants: started.combatants.map((combatant) => combatant.profile.id === neighbour.id
+            ? { ...combatant, hitPoints: 0, life: 'dying' as const, deathSaves: { successes: 0, failures: 0 } }
+            : combatant),
+        }
+      : conditionName === 'stable'
+        ? {
+            ...started,
+            combatants: started.combatants.map((combatant) => combatant.profile.id === neighbour.id
+              ? { ...combatant, hitPoints: 0, life: 'stable' as const, deathSaves: null }
+              : combatant),
+          }
+        : { ...started, effects: [...started.effects, condition(`${input.key}-condition`, neighbour.id, conditionName)] };
+  const actions = GOBLIN_WARRIOR.sourceDetails.actions;
+  if (actions.kind !== 'present') throw new Error('Goblin Warrior actions are absent.');
+  const shortbow = actions.value.find(
+    (action): action is MonsterAttackAction => action.kind === 'attack' && action.id === 'shortbow',
+  );
+  if (shortbow === undefined) throw new Error('Goblin Warrior Shortbow is absent.');
+  expect(state.activeCombatant).toBe(archer.id);
+  return { state, archer, target, neighbour, shortbow };
+}
+
+function rolledMode(state: EncounterState, command: Parameters<typeof reduceEncounter>[1]) {
+  const attack = reduceEncounter(state, command, () => 0.5).events.find((event) => event.type === 'attack_resolved');
+  if (attack?.type !== 'attack_resolved') throw new Error('The attack emitted no attack roll.');
+  return { mode: attack.attack.roll.mode, faces: attack.attack.roll.faces.length };
+}
+
+describe('Ranged Attacks in Close Combat (docs/srd/full/srd-5.2.1.txt:911-917)', () => {
+  it('CC-RULE-EVALUATOR: a ranged attack roll within 5 feet of a seeing, alert enemy has Disadvantage (3.475 -> 1.63625); melee, a distant, blind or Incapacitated enemy, or an ally do not', () => {
+    const expected = (input: TacticalAttackInput) => {
+      const evaluation = evaluateTacticalAttack(input);
+      return {
+        mode: evaluation.rollMode.mode,
+        closeCombat: evaluation.rollMode.reasons.includes('ranged_close_combat_disadvantage'),
+        hit: evaluation.probabilities.status === 'resolved' ? evaluation.probabilities.hit : evaluation.probabilities.reason,
+        damage: evaluation.damage.status === 'resolved'
+          ? Math.round(evaluation.damage.expectedDamage * 1e9) / 1e9
+          : evaluation.damage.reason,
+      };
+    };
+    const straight = { mode: 'normal', closeCombat: false, hit: 0.5, damage: 3.475 };
+    const disadvantage = { mode: 'disadvantage', closeCombat: true, hit: 0.25, damage: 1.63625 };
+
+    expect(expected(baseInput({ closeCombatEnemies: [] }))).toEqual(straight);
+    expect(expected(baseInput({ closeCombatEnemies: [enemy()] }))).toEqual(disadvantage);
+    expect(expected(baseInput({ closeCombatEnemies: [enemy({ distanceFeet: 10 })] }))).toEqual(straight);
+    expect(expected(baseInput({ closeCombatEnemies: [enemy({ incapacitated: true })] }))).toEqual(straight);
+    expect(expected(baseInput({ closeCombatEnemies: [enemy({ seesAttacker: false })] }))).toEqual(straight);
+    // A planner that does not know whether the enemy sees the attacker states no number.
+    expect(expected(baseInput({ closeCombatEnemies: [enemy({ seesAttacker: { kind: 'unknown' } })] }))).toEqual({
+      mode: 'normal', closeCombat: false, hit: 'close_combat_unresolved', damage: 'close_combat_unresolved',
+    });
+    expect(evaluateTacticalAttack(baseInput({ closeCombatEnemies: [enemy({ seesAttacker: { kind: 'unknown' } })] })).unresolved)
+      .toContain('close_combat_unresolved');
+    // One enemy known to see the attacker decides it, whatever another's sight.
+    expect(expected(baseInput({
+      closeCombatEnemies: [enemy({ id: combatantId('combatant:unknown'), seesAttacker: { kind: 'unknown' } }), enemy()],
+    }))).toEqual(disadvantage);
+
+    // A melee attack never has it; a melee-or-ranged (thrown) attack has it only beyond its reach.
+    const adjacentTarget = { targetPosition: { column: 1, row: 0 } };
+    expect(expected(baseInput({ ...adjacentTarget, range: { kind: 'melee', reachFeet: feet(5) }, closeCombatEnemies: [enemy()] })))
+      .toEqual(straight);
+    const thrown = { kind: 'melee_or_ranged', reachFeet: feet(5), normalRangeFeet: feet(30), longRangeFeet: feet(120) } as const;
+    expect(expected(baseInput({ ...adjacentTarget, range: thrown, closeCombatEnemies: [enemy()] }))).toEqual(straight);
+    expect(expected(baseInput({ range: thrown, closeCombatEnemies: [enemy()] }))).toEqual(disadvantage);
+
+    expect(rangedCloseCombatVerdict({ kind: 'ranged', normalRangeFeet: feet(30), longRangeFeet: feet(60) }, 30, [
+      enemy({ id: combatantId('combatant:blind'), seesAttacker: false }),
+      enemy({ id: combatantId('combatant:alert') }),
+      enemy({ id: combatantId('combatant:far'), distanceFeet: 10 }),
+    ])).toEqual({ kind: 'disadvantage', enemies: [combatantId('combatant:alert')] });
+    expect(rangedCloseCombatVerdict({ kind: 'melee', reachFeet: feet(5) }, 5, [enemy()])).toEqual({ kind: 'melee_attack' });
+  });
+
+  it('CC-REDUCER: the goblin archer rolls two d20s at a PC 15 feet away while a second PC stands next to it, and one when that PC is Paralyzed, Blinded, dying, Stable, 10 feet away, or a goblin ally', () => {
+    const rolled = (board: ReturnType<typeof goblinArcherBoard>, target = board.target.id) =>
+      rolledMode(board.state, monsterAttackCommand(board.shortbow, board.archer.id, target));
+    const alert = goblinArcherBoard({ key: 'cc-alert', neighbour: 'pc' });
+    expect(rolled(alert)).toEqual({ mode: 'disadvantage', faces: 2 });
+    // The adjacent PC is itself the target: it is also an enemy within 5 feet.
+    if (alert.neighbour === null) throw new Error('The board has a neighbour.');
+    expect(rolled(alert, alert.neighbour.id)).toEqual({ mode: 'disadvantage', faces: 2 });
+
+    expect(rolled(goblinArcherBoard({ key: 'cc-none', neighbour: 'none' }))).toEqual({ mode: 'normal', faces: 1 });
+    expect(rolled(goblinArcherBoard({ key: 'cc-paralyzed', neighbour: 'pc', neighbourCondition: 'Paralyzed' })))
+      .toEqual({ mode: 'normal', faces: 1 });
+    expect(rolled(goblinArcherBoard({ key: 'cc-blinded', neighbour: 'pc', neighbourCondition: 'Blinded' })))
+      .toEqual({ mode: 'normal', faces: 1 });
+    expect(rolled(goblinArcherBoard({ key: 'cc-dying', neighbour: 'pc', neighbourCondition: 'dying' })))
+      .toEqual({ mode: 'normal', faces: 1 });
+    // A Stable creature still has 0 Hit Points and the Unconscious condition (:1115-1117).
+    expect(rolled(goblinArcherBoard({ key: 'cc-stable', neighbour: 'pc', neighbourCondition: 'stable' })))
+      .toEqual({ mode: 'normal', faces: 1 });
+    expect(rolled(goblinArcherBoard({ key: 'cc-far', neighbour: 'pc', neighbourCell: { column: 0, row: 2 } })))
+      .toEqual({ mode: 'normal', faces: 1 });
+    expect(rolled(goblinArcherBoard({ key: 'cc-ally', neighbour: 'goblin_ally' }))).toEqual({ mode: 'normal', faces: 1 });
+  });
+
+  it('CC-MONSTER-PLANNER: both monster planners score the goblin\'s Shortbow with the Disadvantage the reducer rolls (0.3025, not 0.55)', () => {
+    const plan = (board: ReturnType<typeof goblinArcherBoard>) => {
+      const adapter = evaluateMonsterTacticalAttack(board.state, board.shortbow, board.archer.id, board.target.id);
+      const port = PLANNING_QUERIES.tacticalAttack(board.state, board.archer.id, board.target.id, 'shortbow');
+      if (port === null) throw new Error('The planning port has no Shortbow verdict.');
+      return [adapter, port].map((evaluation) => ({
+        mode: evaluation.rollMode.mode,
+        closeCombat: evaluation.rollMode.reasons.includes('ranged_close_combat_disadvantage'),
+        probabilities: evaluation.probabilities.status === 'resolved'
+          ? [Math.round(evaluation.probabilities.hit * 1e9) / 1e9, Math.round(evaluation.probabilities.critical * 1e9) / 1e9]
+          : evaluation.probabilities.reason,
+      }));
+    };
+    const alert = goblinArcherBoard({ key: 'cc-plan-alert', neighbour: 'pc' });
+    const disadvantage = { mode: 'disadvantage', closeCombat: true, probabilities: [0.3025, 0.0025] };
+    expect(plan(alert)).toEqual([disadvantage, disadvantage]);
+    expect(rolledMode(alert.state, monsterAttackCommand(alert.shortbow, alert.archer.id, alert.target.id)).mode)
+      .toBe('disadvantage');
+    const straight = { mode: 'normal', closeCombat: false, probabilities: [0.55, 0.05] };
+    expect(plan(goblinArcherBoard({ key: 'cc-plan-paralyzed', neighbour: 'pc', neighbourCondition: 'Paralyzed' })))
+      .toEqual([straight, straight]);
+    expect(plan(goblinArcherBoard({ key: 'cc-plan-ally', neighbour: 'goblin_ally' }))).toEqual([straight, straight]);
+  });
+
+  it('CC-THROWN: the Ogre\'s Javelin thrown at a PC 20 feet away has Disadvantage with another PC next to it; swung at that PC, a melee attack, it does not', () => {
+    const ogreBase = monsterCombatantProfile(OGRE, { combatantId: 'combatant:cc-ogre', tokenId: 'token:cc-ogre' });
+    const ogre = { ...ogreBase, rules: { ...ogreBase.rules, initiativeBonus: 20 } };
+    const far = playerProfile('cc-ogre-far', { initiativeBonus: -20 });
+    const near = playerProfile('cc-ogre-near', { initiativeBonus: -20 });
+    const created = createEncounter({
+      bounds: { columns: 7, rows: 3 },
+      combatants: [ogre, far, near],
+      tokens: [placedToken(ogre, 0, 0), placedToken(far, 6, 0), placedToken(near, 2, 2)],
+    });
+    const state = reduceEncounter(created, { type: 'roll_initiative' }, () => 0.5).state;
+    expect(state.activeCombatant).toBe(ogre.id);
+    const actions = OGRE.sourceDetails.actions;
+    if (actions.kind !== 'present') throw new Error('Ogre actions are absent.');
+    const javelin = actions.value.find(
+      (action): action is MonsterAttackAction => action.kind === 'attack' && action.id === 'javelin',
+    );
+    if (javelin === undefined) throw new Error('Ogre Javelin is absent.');
+    // The Large Ogre fills (0,0)-(1,1): the far PC is 20 feet away, the near PC 5 feet.
+    expect(rolledMode(state, monsterAttackCommand(javelin, ogre.id, far.id))).toEqual({ mode: 'disadvantage', faces: 2 });
+    expect(rolledMode(state, monsterAttackCommand(javelin, ogre.id, near.id))).toEqual({ mode: 'normal', faces: 1 });
+    expect(evaluateMonsterTacticalAttack(state, javelin, ogre.id, far.id).rollMode.reasons)
+      .toContain('ranged_close_combat_disadvantage');
+    expect(evaluateMonsterTacticalAttack(state, javelin, ogre.id, near.id).rollMode.mode).toBe('normal');
   });
 });

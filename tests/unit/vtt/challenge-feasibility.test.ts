@@ -763,9 +763,12 @@ describe('D583 reducer-backed challenge feasibility', () => {
     expect(spear).toMatchObject({ policy: 'guard_spear_hold', offeredRevision: 0 });
     expect(dodge).toMatchObject({ policy: 'guard_dodge_hold', offeredRevision: 0 });
     expect(spear.offeredOptionId).not.toBe(dodge.offeredOptionId);
+    // The policy command declares the evaluator's roll mode. The Spear thrown at the wizard 15 feet away is a
+    // ranged attack roll with the fighter, alert and seeing the Guard, next to it at (6,5): Disadvantage
+    // (Ranged Attacks in Close Combat, docs/srd/full/srd-5.2.1.txt:911-917).
     expect(spear.command).toMatchObject({
       type: 'attack', actor: 'combatant:generated-challenge-d-01-guard', target: 'combatant:wizard',
-      attackBonus: 3, criticalFloor: 20, rollMode: 'normal',
+      attackBonus: 3, criticalFloor: 20, rollMode: 'disadvantage',
       damage: { terms: [{ dice: { count: 1, sides: 6, modifier: 1 } }] },
     });
     expect(dodge.command).toEqual({

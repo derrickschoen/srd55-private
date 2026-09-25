@@ -81,6 +81,7 @@ function input(overrides: Partial<MovementEvaluationInput> = {}): MovementEvalua
         targetCanSeeAttacker: true,
         rollModeSources: [],
         featureRollModeInput: null,
+        closeCombatEnemies: [],
         target: { hitPoints: 20, usesDeathSaves: true },
       },
     }),
@@ -181,6 +182,7 @@ describe('movement-eval-v2', () => {
         targetCanSeeAttacker: true,
         rollModeSources: [],
         featureRollModeInput: null,
+        closeCombatEnemies: [],
         target: { hitPoints: 20, usesDeathSaves: true },
       },
     });
@@ -277,6 +279,7 @@ describe('movement-eval-v2', () => {
           targetCanSeeAttacker: true,
           rollModeSources: [],
           featureRollModeInput: null,
+          closeCombatEnemies: [],
           target: { hitPoints: 20, usesDeathSaves: true },
         },
       }),

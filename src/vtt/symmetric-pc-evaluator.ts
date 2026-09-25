@@ -30,6 +30,7 @@ import {
 } from './intel/actor-knowledge';
 import {
   projectedAttackFromStart,
+  projectedCloseCombatEnemies,
   projectedMovementOptions,
   type EngineProjectedMovementRequest,
 } from './engine-query-port';
@@ -327,6 +328,7 @@ function tacticalAssessment(
       targetCanSeeAttacker: true,
       rollModeSources: rollModeSources(command),
       featureRollModeInput: null,
+      closeCombatEnemies: projectedCloseCombatEnemies(state, projection, actorPosition(state, command.actor)),
       target: {
         // The actor-knowledge bands intentionally cannot be converted to HP.
         hitPoints: { kind: 'unknown' },

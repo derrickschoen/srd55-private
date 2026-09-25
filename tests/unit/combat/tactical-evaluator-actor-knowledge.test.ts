@@ -26,6 +26,7 @@ function attack(target: TacticalAttackInput['target']): TacticalAttackInput {
     targetCanSeeAttacker: true,
     rollModeSources: [],
     featureRollModeInput: null,
+    closeCombatEnemies: [],
     target,
   };
 }

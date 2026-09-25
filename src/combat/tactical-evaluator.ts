@@ -42,6 +42,7 @@ export type AttackRollModeReason =
   | 'declared_advantage'
   | 'declared_disadvantage'
   | 'long_range_disadvantage'
+  | 'ranged_close_combat_disadvantage'
   | 'unseen_target_disadvantage'
   | 'unseen_attacker_advantage'
   | 'faerie_fire_advantage'
@@ -187,6 +188,12 @@ export interface TacticalAttackRollModifier {
 export type TacticalUnresolvedReason =
   | 'attack_out_of_range'
   | 'long_range_unresolved'
+  /**
+   * A ranged attack with an enemy within 5 feet whose sight of the attacker
+   * the caller does not know, and no enemy there known to impose the
+   * close-combat Disadvantage (see CloseCombatEnemy).
+   */
+  | 'close_combat_unresolved'
   | 'target_armor_class_unresolved'
   | 'damage_unresolved'
   | 'conditional_damage_rider_unresolved'
@@ -196,6 +203,86 @@ export type TacticalUnresolvedReason =
 
 export interface TacticalUnknownTargetFact {
   readonly kind: 'unknown';
+}
+
+/**
+ * Ranged Attacks in Close Combat, docs/srd/full/srd-5.2.1.txt:911-917: "When
+ * you make a ranged attack roll with a weapon, a spell, or some other means,
+ * you have Disadvantage on the roll if you are within 5 feet of an enemy who
+ * can see you and doesn't have the Incapacitated condition."
+ */
+export const CLOSE_COMBAT_DISTANCE_FEET = 5;
+
+/**
+ * A creature on the attacker's opposing side, with the facts the close-combat
+ * rule reads. The engine knows whether it can see the attacker; an
+ * actor-local planner may not (`Sight` then admits the unknown fact).
+ */
+export interface CloseCombatEnemy<
+  Sight extends boolean | TacticalUnknownTargetFact = boolean | TacticalUnknownTargetFact,
+> {
+  readonly id: CombatantId;
+  /** The nearest distance between the attacker's space and this creature's space. */
+  readonly distanceFeet: number;
+  readonly seesAttacker: Sight;
+  /**
+   * It has the Incapacitated condition, or a condition that includes it
+   * (Paralyzed, Petrified, Stunned, Unconscious); a creature at 0 Hit Points
+   * is Unconscious.
+   */
+  readonly incapacitated: boolean;
+}
+
+/**
+ * Whether an attack with this range, against a target this far away, is a
+ * ranged attack roll: a ranged attack always; a melee-or-ranged (thrown)
+ * attack beyond its reach, as tacticalRangeVerdict bands it; a melee attack
+ * never.
+ */
+export function isRangedAttackAt(range: TacticalAttackRange, distanceFeet: number): boolean {
+  switch (range.kind) {
+    case 'melee': return false;
+    case 'ranged': return true;
+    case 'melee_or_ranged': return distanceFeet > range.reachFeet;
+  }
+}
+
+export type CloseCombatVerdict =
+  | { readonly kind: 'melee_attack' }
+  | { readonly kind: 'clear' }
+  /** The enemies that impose the Disadvantage. */
+  | { readonly kind: 'disadvantage'; readonly enemies: readonly CombatantId[] }
+  /** No enemy is known to impose it, and these may: their sight of the attacker is unknown. */
+  | { readonly kind: 'unresolved'; readonly enemies: readonly CombatantId[] };
+
+/** With every enemy's sight known, the verdict is never unresolved. */
+export type KnownCloseCombatVerdict = Exclude<CloseCombatVerdict, { readonly kind: 'unresolved' }>;
+
+/** The one statement of the close-combat rule; the reducer and every planner apply it through this function. */
+export function rangedCloseCombatVerdict(
+  range: TacticalAttackRange,
+  targetDistanceFeet: number,
+  enemies: readonly CloseCombatEnemy<boolean>[],
+): KnownCloseCombatVerdict;
+export function rangedCloseCombatVerdict(
+  range: TacticalAttackRange,
+  targetDistanceFeet: number,
+  enemies: readonly CloseCombatEnemy[],
+): CloseCombatVerdict;
+export function rangedCloseCombatVerdict(
+  range: TacticalAttackRange,
+  targetDistanceFeet: number,
+  enemies: readonly CloseCombatEnemy[],
+): CloseCombatVerdict {
+  if (!isRangedAttackAt(range, targetDistanceFeet)) return { kind: 'melee_attack' };
+  const alert = enemies.filter((enemy) =>
+    enemy.distanceFeet <= CLOSE_COMBAT_DISTANCE_FEET && !enemy.incapacitated);
+  const seeing = alert.filter((enemy) => enemy.seesAttacker === true);
+  if (seeing.length > 0) return { kind: 'disadvantage', enemies: seeing.map((enemy) => enemy.id) };
+  const unknown = alert.filter((enemy) => enemy.seesAttacker !== false);
+  return unknown.length > 0
+    ? { kind: 'unresolved', enemies: unknown.map((enemy) => enemy.id) }
+    : { kind: 'clear' };
 }
 
 export interface TacticalAttackInput {
@@ -214,6 +301,13 @@ export interface TacticalAttackInput {
   readonly targetCanSeeAttacker: boolean;
   readonly rollModeSources: readonly AttackRollModeSource[];
   readonly featureRollModeInput: MonsterRollModeFeatureInput | null;
+  /**
+   * The attacker's enemies near its space at attackerPosition, for the
+   * close-combat rule (rangedCloseCombatVerdict reads those within
+   * CLOSE_COMBAT_DISTANCE_FEET). Every caller states them: an empty list
+   * asserts that no enemy is within 5 feet.
+   */
+  readonly closeCombatEnemies: readonly CloseCombatEnemy[];
   readonly attackRollModifiers?: readonly TacticalAttackRollModifier[];
   readonly target: {
     readonly hitPoints: number | TacticalUnknownTargetFact;
@@ -255,6 +349,7 @@ export type TacticalProbabilityVerdict =
         TacticalUnresolvedReason,
         | 'attack_out_of_range'
         | 'long_range_unresolved'
+        | 'close_combat_unresolved'
         | 'target_armor_class_unresolved'
         | 'random_attack_modifier_unresolved'
         | 'target_has_total_cover'
@@ -274,6 +369,7 @@ export type TacticalDamageVerdict =
         TacticalUnresolvedReason,
         | 'attack_out_of_range'
         | 'long_range_unresolved'
+        | 'close_combat_unresolved'
         | 'target_armor_class_unresolved'
         | 'damage_unresolved'
         | 'random_attack_modifier_unresolved'
@@ -631,10 +727,15 @@ export function evaluateTacticalAttack(
     input.range,
   );
   const distanceFeet = range.distanceFeet;
-  const rangeSources: AttackRollModeSource[] =
-    range.status === 'resolved' && range.band === 'long'
-      ? [{ mode: 'disadvantage', reason: 'long_range_disadvantage' }]
-      : [];
+  const closeCombat = rangedCloseCombatVerdict(input.range, distanceFeet, input.closeCombatEnemies);
+  const rangeSources: AttackRollModeSource[] = [
+    ...(range.status === 'resolved' && range.band === 'long'
+      ? [{ mode: 'disadvantage', reason: 'long_range_disadvantage' } as const]
+      : []),
+    ...(closeCombat.kind === 'disadvantage'
+      ? [{ mode: 'disadvantage', reason: 'ranged_close_combat_disadvantage' } as const]
+      : []),
+  ];
   const conditionSources = conditionAttackRollModeSources({
     attackerId: input.attackerId,
     targetId: input.targetId,
@@ -683,7 +784,9 @@ export function evaluateTacticalAttack(
       };
   const blockingReason = firstBlockingReason(range, input.targetArmorClass);
   const probabilityBlockingReason = blockingReason ??
-    (input.unresolvedReasons?.includes('random_attack_modifier_unresolved') === true
+    (closeCombat.kind === 'unresolved'
+      ? 'close_combat_unresolved'
+      : input.unresolvedReasons?.includes('random_attack_modifier_unresolved') === true
       ? 'random_attack_modifier_unresolved'
       : input.unresolvedReasons?.includes('target_has_total_cover') === true
         ? 'target_has_total_cover'
@@ -691,6 +794,7 @@ export function evaluateTacticalAttack(
   const unresolved = [...new Set([
     ...(input.unresolvedReasons ?? []),
     ...(blockingReason === null ? [] : [blockingReason]),
+    ...(closeCombat.kind === 'unresolved' ? ['close_combat_unresolved' as const] : []),
     ...(targetHitPointsKnown ? [] : ['target_hit_points_unresolved' as const]),
     ...(input.damageTerms === null ? ['damage_unresolved' as const] : []),
   ])];

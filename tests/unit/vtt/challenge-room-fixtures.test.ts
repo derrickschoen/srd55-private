@@ -289,8 +289,19 @@ describe('D583 challenge room fixtures', () => {
     expect(Array.from({ length: 12 }, (_unused, row) => row).filter((row) =>
       !state.blockedCells.some((cell) => cell.column === 7 && cell.row === row))).toEqual([5]);
     expect(state.tokens.find((token) => token.combatantId === guard)?.position).toEqual({ column: 7, row: 5 });
+    // SRD Guard (docs/srd/full/srd-5.2.1.txt:19377-19398): Spear +3, reach 5 ft. or range 20/60 ft., 1d6 + 1
+    // (a hit averages 4.5, a Critical Hit 8). The fighter (AC 18) stands next to the Guard at (6,5); the wizard
+    // (AC 15, at (4,3)) and the cleric (AC 18, at (4,7)) are 15 feet away, so the Spear is thrown at them from
+    // (7,5): a ranged attack roll within 5 feet of an enemy (the fighter, in bright light, alert) who can see the
+    // Guard, hence Disadvantage (Ranged Attacks in Close Combat, :911-917). The offer "Spear -> fighter" resolves
+    // to a 5-foot step to (8,4) and a throw from 10 feet, with no enemy within 5 feet of (8,4) and no cover: a
+    // straight roll. Expected damage, the default's ranking key:
+    // - fighter, thrown from (8,4), faces 15-20 hit: 5/20 x 4.5 + 1/20 x 8 = 1.525;
+    // - wizard, faces 12-20 hit, (9/20)^2 = 81/400 with critical 1/400: 80/400 x 4.5 + 1/400 x 8 = 0.92
+    //   (2.2 as a straight roll, which made the wizard the default before the close-combat rule);
+    // - cleric, (6/20)^2 = 36/400: 35/400 x 4.5 + 1/400 x 8 = 0.41375.
     expect(actorOpportunityReport(state, guard, OFFER_ENVIRONMENT, 0).defaultOption.label)
-      .toBe('Spear -> combatant:wizard');
+      .toBe('Spear -> combatant:fighter');
     expect(traceCombatantLine(state, scouts[0]!, 'combatant:fighter' as CombatantId)).toMatchObject({ tier: 'half', blocksSight: false });
     expect(traceCombatantLine(state, scouts[1]!, 'combatant:wizard' as CombatantId)).toMatchObject({ tier: 'three_quarters', blocksSight: false });
   });
