@@ -1980,3 +1980,54 @@ LUNA6 Phase 0 (plan r5 §8.1):
 - Overnight dispatch (wf_cb490539-eba): LUNA6 B0 (simulate.mjs) and B1 (the lift, call log v2, guardedLunaCall, screenshot guard); pcac r4; x3's lint guard.
 
 Next free id: D894.
+
+
+## D894 — 2026-09-25 06:44 — convsplit LANDED after a re-time on the new main (−217.6 s initial, −135.9 s total); overnight dispositions of the pcac, LUNA6 B0 and LUNA6 B1 reviews (owner away: "go with your recommendations")
+
+convsplit (CONV-SPLIT-01, folded into PERF-02) is LANDED on main as a1313bb9, cc2d40db and 30937f70. Timed pair `convsplit2` (A = main 9a0f167e with x1r; B = the split on top of it):
+- initial phase 581.4 → 363.8 s
+- total 589.8 → 453.9 s
+- prewarms 590.2 → 455.5 s initial
+All 4 runs VALID. Both arms have gate verdict PASSED: no red files after retry, since x4 fixed the two docs files.
+Inventory: one D583 title changed (baseline 140 → 143) and one test added, which is the unit's declared difference. The preservation checker was already closed by my verification (D891).
+VERIFIED by me: the landed src, tools, tests, vitest.config.ts and package.json trees equal the timed B arm. Pushed to the mirror.
+This supersedes D893's "not landed": the earlier slower pair was measured without x1r, and blind-turn-context was then the slowest file.
+
+NEW TIMEOUT VICTIM, recorded as a finding against the x1r landing. tests/unit/combat/reachable-cells.test.ts "…brutal-b 6206001…" is 3.9 s solo (x1r fix-r1: 3,885–3,912 ms). It failed at 5.36 s in convsplit2-B's initial phase and passed on retry. The ≤5 s solo cap was met, but under the split's denser scheduling it has no margin. A cost cut to ≤2 s solo, with no mutant coverage lost, is dispatched (x1rcost).
+Other initial-phase timeouts in convsplit2-B that passed on retry: two room-generator-los-cover titles, which are known victims. In A: one screenshot-probe title.
+
+REVIEWS (fresh, read-only):
+- pcac r1 (gpt-6-sol xhigh) on 673c7ee3..b8275004: REVISE 1 P1 / 3 P2 / 1 P3.
+  - P1: an adjacent ranged attack gets no close-combat Disadvantage (SRD srd-5.2.1.txt:911) in either the planner or the reducer.
+  - P2: the dead-target lapse is too broad.
+  - P2: potions were added to the combined-plan alternatives beyond the ruling, and a selected potion throws in scripted planning.
+  - P2: rerank4.py takes AC+cover and roll mode from the engine.
+  - P3: the form is chosen bucket before damage, against "best expected damage".
+- LUNA6 B0 (gpt-5.6-sol high) on simulate.mjs 62a95f71: REVISE 0/3/3. P2s: the bootstrap-seed convention is unregistered; Δ80's interpolation is unregistered; the mutation evidence falls short of Part A. Verified by the reviewer: model, grid, counts, mulberry32 and the floor(q·n) percentile, q* rule and dominance, self-checks, the exact float-tie rewrite.
+- LUNA6 B1 r1 (gpt-5.6-sol high) on 9a0f167e..ba497827: REVISE 2/2/2.
+  - P1: M5's second killer T6 fails at load, which is not a kill.
+  - P1: V2's "more than 100 emitted files" is unreachable under noEmit.
+  - P2: the screenshot wiring has no runtime mutant.
+  - P2: W3 hit the 5 s timeout in 1 of 3 runs.
+  - P3: guardedLunaCall only aborts cooperatively.
+  - P3: ba497827 is out of plan.
+  - The reviewer verified: non-Luna routes are unchanged; the gpt-6-luna chain reaches the adapter with a 1,800,000 ms timeout and no round wall; the speculation window is intact; ordinals are allocated before delegation; the 7 pins are identical.
+
+SUPERVISOR DISPOSITIONS, taken under the owner's 02:20 instruction and listed for the owner in overnight-questions.md §7:
+- pcac:
+  - Close-combat Disadvantage is modelled for everyone, planner and reducer. This reverses my earlier choice of "separate unit" for pcac Q4, because pcac now plans ranged attacks.
+  - The dead-target lapse applies only to later attacks of the same action.
+  - Potions are removed from the alternatives, following the owner's "save or spell".
+  - The form is chosen by best expected damage (owner words).
+  - rerank5 re-derives AC+cover and roll mode independently for the changed decisions.
+  - "Approach with a better weapon vs the legal attack now" is added; this was pcac Q2.
+- B0: per-dataset streams are kept and registered, with the study seed applying only to the study analysis; Δ80 is reported interpolated plus bracketing points; a mutation harness is added; the P3s are fixed.
+- B1:
+  - SUPERVISOR AMENDMENT to plan r5 V2: the criterion becomes "tsc -b --force exit 0, program input counts reported" (the projects are noEmit).
+  - M5: a working second killer if one exists, else M5's killer set is amended to T1, with the frozen T6 untouched.
+  - The screenshot wiring gets an end-to-end mutant; W3 gets the in-process escalation seam; guardedLunaCall races the operation against the deadline.
+  - ba497827 is ACCEPTED: a behaviour-neutral diagnostic that gives M42 its evidence.
+- x3: the shadow ban is widened to every earlier Vite candidate (implementer's recommendation).
+All dispatched as wf_84032925-9b1.
+
+Next free id: D895.
