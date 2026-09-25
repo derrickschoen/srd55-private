@@ -61,9 +61,10 @@ import { canonicalJson } from '../src/commands/canonical-json';
  * The check does not look, on each spawn, for a new file that shadows a sealed
  * input (Vite resolves './x' to x, x.mjs, x.js or x.mts before x.ts, so such a
  * file changes what vite-node runs without changing a sealed byte), because
- * the lint gate's `scripts/check-no-js-beside-ts.mjs` bans, beside each .ts,
- * .tsx, .mts or .cts file in src/ and tools/, every same-named file Vite
- * resolves before it and every same-named .js, .mjs, .cjs or .jsx file (D893).
+ * the lint gate's `scripts/check-no-js-beside-ts.mjs` bans every file Vite
+ * tries before a .ts, .tsx, .mts or .cts file in src/ and tools/ when it
+ * resolves an import of that file, or of its directory for an index file, and
+ * every same-named .js, .mjs, .cjs or .jsx file (D893).
  *
  * `missing` and `stale` are ordinary: a source edit, a new checkout, an
  * esbuild upgrade. They fall back to the vite-node child, today's behaviour

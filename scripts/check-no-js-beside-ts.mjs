@@ -1,33 +1,45 @@
 #!/usr/bin/env node
 /**
  * Fails when a TypeScript file under src/ or tools/ (x.ts, x.tsx, x.mts or
- * x.cts) has a banned file with the same name in the same directory. Beside
- * x.E the banned files are:
+ * x.cts) has a banned file on disk. For a TypeScript file x.E the banned files
+ * are:
  *   - x.js, x.mjs, x.cjs and x.jsx: no JavaScript file beside any TypeScript
  *     file (D893);
  *   - every file Vite tries before x.E when it resolves './x': the file x
  *     itself, then x plus each of its resolve.extensions ahead of E. Beside
  *     x.ts this adds x and x.mts; beside x.tsx, x, x.mts and x.ts; beside
- *     x.mts, x. Vite never tries .cts for './x', so it adds nothing beside x.cts.
- * Vite's other routes to a TypeScript file ('./x.js' then x.ts and x.tsx,
- * './x.jsx' then x.tsx, './x.mjs' then x.mts, './x.cjs' then x.cts) try only
- * files this list already bans before they reach it.
+ *     x.mts, x. Vite never tries .cts for './x', so nothing is added for x.cts;
+ *   - when x itself ends in a JavaScript extension (a file named y.js.ts, which
+ *     './y.js' reaches): the TypeScript names Vite tries first for './y.js',
+ *     y.ts and y.tsx (y.mts for y.mjs, y.cts for y.cjs, y.tsx for y.jsx);
+ *   - when x.E is a directory's index file (d/index.ts, which './d' reaches):
+ *     everything Vite tries for './d' before the directory's index, that is d
+ *     plus each of its resolve.extensions (and the same TypeScript names for a
+ *     directory named like d.js), and d/package.json, whose fields can name
+ *     another entry.
+ * Vite's other routes to a TypeScript file named x.E ('./x.js' then x.ts and
+ * x.tsx, './x.jsx' then x.tsx, './x.mjs' then x.mts, './x.cjs' then x.cts) try
+ * only files this list already bans before they reach it. This follows Vite
+ * 7.3.6's tryCleanFsResolve, which vite-node's resolveId runs for an import by
+ * path. Not covered: a TypeScript file that a package.json names as its entry,
+ * which Vite reaches through fields this check does not read.
  *
  * Why (D893): a file Vite resolves first takes an import over from the
  * TypeScript source without changing one byte of it. The engine child bundle
  * seals its inputs by their bytes (tools/engine-child-bundle.ts); this ban is
  * why its per-spawn check does not also look for shadowing files.
  *
- * A directory x is not banned: Vite tries x.ts before a directory. A
- * declaration file x.d.mts is named x.d, so it is checked against x.d, x.d.mjs
- * and so on, never against x.mjs. Every file on disk counts, tracked or not,
- * because vite-node resolves from the disk. A missing src/ or tools/ is a
- * failure, not a pass.
+ * A candidate counts when stat says it is a file, as Vite asks: a directory x
+ * is not banned (Vite tries x.ts before a directory), and a symbolic link
+ * counts as what it points to. A declaration file x.d.mts is named x.d, so it
+ * is checked against x.d, x.d.mjs and so on, never against x.mjs. Every file on
+ * disk counts, tracked or not, because vite-node resolves from the disk. A
+ * missing src/ or tools/ is a failure, not a pass.
  *
  * usage: node scripts/check-no-js-beside-ts.mjs [--root <checkout>]
  */
-import { readdirSync } from 'node:fs';
-import { dirname, extname, join, relative, resolve } from 'node:path';
+import { readdirSync, statSync } from 'node:fs';
+import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SCANNED_DIRECTORIES = ['src', 'tools'];
@@ -41,11 +53,39 @@ const TYPESCRIPT_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts']);
 const VITE_EXTENSION_ORDER = ['.mjs', '.js', '.mts', '.ts', '.jsx', '.tsx', '.json'];
 const NAME = 'no-js-beside-ts';
 
-/** What may not follow the name x beside x + `extension`; '' is the file x itself. */
-function bannedSuffixes(extension) {
-  const position = VITE_EXTENSION_ORDER.indexOf(extension);
-  const resolvedFirst = position < 0 ? [] : ['', ...VITE_EXTENSION_ORDER.slice(0, position)];
-  return [...new Set([...resolvedFirst, ...JAVASCRIPT_EXTENSIONS])];
+/**
+ * The paths Vite tries, in order, for a relative import that spells `path`,
+ * up to a directory's index: the file itself; for a JavaScript extension, the
+ * TypeScript name Vite rewrites it to (and .tsx after .ts for .js); then
+ * `path` plus each extension.
+ */
+function viteTries(path) {
+  const tried = [path];
+  const extension = extname(path);
+  if (JAVASCRIPT_EXTENSIONS.includes(extension)) {
+    const stem = path.slice(0, -extension.length);
+    tried.push(stem + extension.replace('js', 'ts'));
+    if (extension === '.js') tried.push(`${stem}.tsx`);
+  }
+  return [...tried, ...VITE_EXTENSION_ORDER.map((candidate) => path + candidate)];
+}
+
+/** Every path banned for the TypeScript file `file`, each with the directory it is beside. */
+function bannedFor(file) {
+  const extension = extname(file);
+  const name = file.slice(0, -extension.length);
+  const banned = JAVASCRIPT_EXTENSIONS.map((javascript) => name + javascript);
+  const tried = viteTries(name);
+  const position = tried.indexOf(file);
+  if (position >= 0) {
+    banned.push(...tried.slice(0, position));
+    if (basename(name) === 'index') banned.push(...viteTries(dirname(file)), join(dirname(file), 'package.json'));
+  }
+  return [...new Set(banned)];
+}
+
+function isFile(path) {
+  return statSync(path, { throwIfNoEntry: false })?.isFile() === true;
 }
 
 function parseRoot(args) {
@@ -79,14 +119,13 @@ function check(root) {
       unreadable.push(`${scanned}/ could not be read under ${root}, so nothing in it was checked: ${error.message}`);
       continue;
     }
-    const present = new Set(files);
     for (const file of files) {
-      const extension = extname(file);
-      if (!TYPESCRIPT_EXTENSIONS.has(extension)) continue;
+      if (!TYPESCRIPT_EXTENSIONS.has(extname(file))) continue;
       typescriptFiles += 1;
-      const name = file.slice(0, -extension.length);
-      for (const suffix of bannedSuffixes(extension)) {
-        if (present.has(name + suffix)) banned.push(`${relative(root, name + suffix)} is beside ${relative(root, file)}`);
+      for (const candidate of bannedFor(file)) {
+        if (!isFile(candidate)) continue;
+        const where = dirname(candidate) === dirname(file) ? '' : `${relative(root, dirname(file))}/, the directory of `;
+        banned.push(`${relative(root, candidate)} is beside ${where}${relative(root, file)}`);
       }
     }
   }
@@ -99,9 +138,10 @@ try {
   for (const failure of [...unreadable, ...banned]) console.error(`${NAME}: ${failure}`);
   if (banned.length > 0) {
     console.error(
-      `${NAME}: Vite resolves './x' to the first of x, x.mjs, x.js, x.mts, x.ts, x.jsx and x.tsx that exists, so a ` +
-        'same-named file it tries first replaces a TypeScript file unseen; and no JavaScript file may sit beside a ' +
-        'same-named TypeScript file. Rename or delete the file (D893).',
+      `${NAME}: Vite resolves './x' to the first of x, x.mjs, x.js, x.mts, x.ts, x.jsx and x.tsx that exists, and ` +
+        "'./d' to d.mjs, d.js, d.mts, d.ts, d.jsx, d.tsx, d.json or d/package.json's entry before d/index.ts, so a " +
+        'file it tries first replaces a TypeScript file unseen; and no JavaScript file may sit beside a same-named ' +
+        'TypeScript file. Rename or delete the file (D893).',
     );
   }
   if (unreadable.length > 0 || banned.length > 0) {
@@ -109,7 +149,7 @@ try {
   } else {
     console.log(
       `${NAME}: ${String(typescriptFiles)} TypeScript files under ${SCANNED_DIRECTORIES.map((directory) => `${directory}/`).join(' and ')}, ` +
-        'none with a banned same-named file beside it',
+        'none with a banned file beside it',
     );
   }
 } catch (error) {
