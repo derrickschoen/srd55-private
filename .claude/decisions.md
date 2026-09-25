@@ -2031,3 +2031,49 @@ SUPERVISOR DISPOSITIONS, taken under the owner's 02:20 instruction and listed fo
 All dispatched as wf_84032925-9b1.
 
 Next free id: D895.
+
+
+## D895 — 2026-09-25 10:23 — x3 LANDED (−211 s gate total; engine children boot from a checked prebuilt bundle); x1rcost landed; owner rulings: land roadmap #3 and #6 first, #3 all on the board (legacy world deleted), then a WebAssembly-SIMD experiment; LUNA6 B0 APPROVED, V17 running; pcac and B1 in fix rounds
+
+OWNER, verbatim (2026-09-25):
+- "Land #3 and #6 first. Then run one contained experiment: a WebAssembly-SIMD version of a 'visibility or cover for every square' pass, compared byte for byte and timed against plain JavaScript on this pc". This also answers the open VIS-FIELD ordering question: #6 lands on main now, and the shelved claude/vis-field branch rebases onto it later.
+- "All on board, delete old (Recommended)" (#3 board scope). Malformed positions become unconstructible through an in-bounds type checked at decode; squeezing is modelled on the board byte-identically; the legacy string-keyed movement world is deleted.
+- coverself (QA2, parked in D891 over its cache-key memory cost) is folded into #6 as its own commit. The cover walk deletes the caches that finding was about.
+
+x3 (engine-child bundle) is LANDED; main was fast-forwarded to the timed arm, 10 commits, ff70ec48.
+Timed pair `x3` (A = main afd4b707), both runs VALID, both gate verdicts PASSED:
+- initial phase 372.4 → 247.5 s
+- retry phase 85.8 → 0.0 s
+- total 458.2 → 247.5 s (−210.7 s)
+- prewarms: initial 459.0 → 304.4 s
+Inventory: +54 tests (the bundle suite). The one title only in A is a rename in engine-mcp-server.test.ts: "…over real stdio" becomes "…over real stdio, byte-identical from the engine child bundle".
+One merge conflict came up while building the arm on today's main: vitest.config.ts globalSetup. The regex landing had replaced the parse-cache setup with the seeded-database setup, and x3 added the bundle setup to the same list. I resolved it by keeping both, seeded database first. With that, tsc exits 0 and the x3 test files pass 64/64.
+VERIFIED by me before timing: the widened shadow ban passes the real tree (824 TypeScript files) and exits 1 on planted `.js`, `.mts` and extensionless siblings. I included the implementer's optional second commit 1348b7ea (directory-index candidates): it is complete, and codex's reviews had asked for full coverage.
+Codex r3 findings on x3 are all closed; the last fixes were closed by my verification, per the owner's "x3 fix" ruling (D893).
+The recorder P3 is still open: 164 undeclared inputs, against 31 before.
+
+x1rcost is LANDED (afd4b707, test-only). VERIFIED by me: the brutal-b differential takes 907 ms solo (it was 3.8 s), and it still fails under hand-applied mutant M2; after restore the tree is clean. It had no own pair; the final acceptance pairs cover it.
+
+Gate now: the whole gate PASSES in 247.5 s on the x3 arm. The four Sep-22 gates took 881–1,254 s and always failed.
+
+LUNA6:
+- B0 review r2 (gpt-5.6-sol high): APPROVE for simulate.mjs 16b729c1…. V17 was started by the supervisor.
+- B1 review r2: REVISE 0/1/0. The W3 escalation seam has no named runtime mutant with a non-timeout killer. Fix round 2 is dispatched. The reviewer closed M5 (a working frozen killer), V2 (under the D894 amendment), screenshot wiring, the guard race and ba497827.
+
+pcac review r2 (gpt-6-sol xhigh): REVISE 1/2/0.
+- P1: ranged SPELL attacks skip close-combat Disadvantage (rollSpellAttack).
+- P2: planner and reducer disagree on sight inside an active obscured_area (Fog Cloud).
+- P2: PC plans reuse the current square's sight facts at a hypothetical destination.
+Round 6 is dispatched.
+
+Dispatched (wf_e783afac-6e3): board3 (#3), cover6 (#6 with coverself folded in), pcac r6, LUNA6 B1 fix r2.
+
+My SIMD answer to the owner, recorded:
+- The PERF-02 research never examined SIMD.
+- The engine also runs in the browser; the VTT screen imports vtt/encounter-app.
+- JavaScript has no SIMD. WebAssembly SIMD is 128-bit only (SSE on x86, NEON on ARM); AVX2 is unreachable from a browser.
+- Every cheap Samsung and LG phone of the last five years that I checked has NEON (ARMv8 Cortex-A53/A55/A75).
+- Their tighter limits are 32-bit browsers on Android Go models and WebAssembly memory caps.
+- Recommended order: #3 and #6 first, then the contained experiment. The owner accepted it.
+
+Next free id: D896.
