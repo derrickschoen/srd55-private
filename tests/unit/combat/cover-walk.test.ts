@@ -14,9 +14,10 @@
  * The exhaustive version (every fixture, every anchor) is experiment evidence only:
  * tools/experiments/cover-walk/exhaustive-differential.ts.
  *
- * The sparse block checks the source index on a valid 65,536 x 65,536 encounter whose sources
- * span the whole grid, too far apart to index as one dense array, against the same reference and
- * against hand-derived answers.
+ * The sparse block checks the sparse source index on the largest valid grid, 1,024 x 1,024
+ * (MAX_GRID_CELLS), whose sources span the whole grid, against the same reference and against
+ * hand-derived answers. The sparse and dense indexes answer alike by design, so each sparse test
+ * also asserts through sourceIndexKinds that its queries really read the sparse index.
  */
 import { describe, expect, it } from 'vitest';
 import { canonicalJson } from '../../../src/commands/canonical-json';
@@ -28,6 +29,7 @@ import {
   coverTierBetweenObjects,
   outerCorners,
   rasterizeCornerLine,
+  sourceIndexKinds,
   terrainLineVerdict,
   traceCombatantLine,
   traceCombatantLineToCells,
@@ -581,17 +583,18 @@ function tinyMonster(key: string) {
   return { ...profile, rules: { ...profile.rules, sizeCategory: 'Tiny' as const } };
 }
 
-/** The last row and column of the sparse encounter's 65,536 x 65,536 grid. */
-const SPARSE_LAST = 65_535;
+/** The last row and column of the sparse encounter's 1,024 x 1,024 grid. */
+const SPARSE_LAST = 1_023;
 
 /**
- * A valid 65,536 x 65,536 encounter whose cover sources reach all four corners: walls in the
- * bottom-left and top-right corners, half-cover objects in the other two. Every source index over it
- * (terrain, terrain with creatures, objects only) has a 65,536 x 65,536 bounding box of 2^32 cells,
- * one more than the longest JavaScript array, so an index that allocated its box would throw
- * RangeError at once. Near the far corners: a wall W at (65532, 2) and a Three-Quarters slit at
- * (65532, 65532). Near the bottom-left: the fighter at (3, 65530), the goblin at (7, 65530), a Tiny
- * imp and a Tiny rat sharing (5, 65530), a Large ogre at (5..6, 65527..65528).
+ * A valid 1,024 x 1,024 encounter, the largest grid MAX_GRID_CELLS allows, whose cover sources
+ * reach all four corners: walls in the bottom-left and top-right corners, half-cover objects in the
+ * other two. Every source index over it (terrain, terrain with creatures, objects only) has a
+ * 1,024 x 1,024 bounding box of 1,048,576 cells, 16 times DENSE_SOURCE_GRID_MAX_CELLS, so each one
+ * is sparse. Near the far corners: a wall W at (1020, 2) and a Three-Quarters slit at (1020, 1020);
+ * a half-cover object at (512, 512) on the long diagonal. Near the bottom-left: the fighter at
+ * (3, 1018), the goblin at (7, 1018), a Tiny imp and a Tiny rat sharing (5, 1018), a Large ogre at
+ * (5..6, 1015..1016).
  */
 function sparseHugeState() {
   const fighter = playerProfile('sparse-fighter');
@@ -616,16 +619,18 @@ function sparseHugeState() {
       feature('sparse-corner-a', [{ column: 0, row: 0 }], 'half_cover'),
       feature('sparse-corner-b', [{ column: last, row: last }], 'half_cover'),
       feature('sparse-slit', [{ column: last - 3, row: last - 3 }], 'three_quarters_cover'),
-      feature('sparse-mid', [{ column: 30_000, row: 30_000 }], 'half_cover'),
+      feature('sparse-mid', [{ column: 512, row: 512 }], 'half_cover'),
     ],
   });
   return { state, fighter: fighter.id, goblin: goblin.id, imp: imp.id, rat: rat.id, ogre: ogre.id };
 }
 
+const ALL_SPARSE = { terrain: 'sparse', terrainAndCreatures: 'sparse', objects: 'sparse' } as const;
+
 describe('PERF-02 cover6 sparse source index on a huge grid', () => {
-  it('COVER-SPARSE-HUGE-EXTENT traces a 65,536 x 65,536 encounter with sources in opposite corners like the reference', () => {
-    // The frozen reference indexes sources in a Map, so it answers here. A candidate that throws is a
-    // mismatch caught by the assertions below, not an escaped error.
+  it('COVER-SPARSE-HUGE-EXTENT traces a 1,024 x 1,024 encounter with sources in all four corners through the sparse index like the reference', () => {
+    // The frozen reference indexes sources in a Map. A candidate that throws is a mismatch caught
+    // by the assertions below, not an escaped error.
     const { state, fighter, goblin, imp, rat, ogre } = sparseHugeState();
     const last = SPARSE_LAST;
     const names: string[] = [];
@@ -689,17 +694,25 @@ describe('PERF-02 cover6 sparse source index on a huge grid', () => {
     expect(names).toHaveLength(117);
     expect(thrown).toEqual([]);
     expect(mismatches).toEqual([]);
+    // The queries above read these indexes: the state's two memoized ones and the object-only one.
+    expect(sourceIndexKinds(state)).toEqual(ALL_SPARSE);
   });
 
   it('COVER-SPARSE-HAND finds each source of a huge sparse encounter at its own cell, with every source sharing it', () => {
     const { state, fighter, goblin, imp, rat } = sparseHugeState();
     const last = SPARSE_LAST;
-    // S = (65531, 1), T = (65533, 3), wall W = (65532, 2) off the row/column diagonal symmetry.
-    // Corner (65531,1): all four lines cross W -> Total. Corner (65532,2) is W's own top-left
-    // corner: all four lines cross W -> Total. Corner (65532,1): to (65533,3) cells (65532,1),
-    // (65532,2)=W; to (65534,3) the diagonal (65532,1),(65533,2) misses W; to (65533,4) and
-    // (65534,4) through (65532,2)=W -> 3 obstructed -> Three-Quarters. Corner (65531,2) is its
-    // mirror -> Three-Quarters. The least protective tie goes to row 1: corner (65532,1).
+    expect(sourceIndexKinds(state)).toEqual(ALL_SPARSE);
+    // S = (1019, 1), T = (1021, 3), wall W = (1020, 2), off the long diagonal and off its mirror
+    // image, so a lookup with column and row swapped would miss it. S's corners:
+    // - (1019, 1): its four lines to T's corners all cross W's interior -> 4 sight-blocked -> Total.
+    // - (1020, 2), W's own top-left corner: all four lines run into W's interior -> Total.
+    // - (1020, 1): to (1021, 3) it crosses (1020, 1) then W; to (1022, 3) it runs diagonally through
+    //   (1020, 1), the lattice point (1021, 2) and (1021, 2), touching W only at that corner; to
+    //   (1021, 4) and (1022, 4) it enters W from its top edge -> 3 obstructed, sight not blocked on
+    //   all four -> Three-Quarters.
+    // - (1019, 2): the mirror image of (1020, 1) about the S-T diagonal -> Three-Quarters.
+    // The least protective corners tie at Three-Quarters; row 1 comes before row 2: corner (1020, 1),
+    // lines in T's row-major corner order [Total, none, Total, Total], naming W alone.
     const source = { column: last - 4, row: 1 };
     const target = { column: last - 2, row: 3 };
     expect(terrainLineVerdict(state, source, target)).toEqual({
@@ -709,22 +722,24 @@ describe('PERF-02 cover6 sparse source index on a huge grid', () => {
     const trace = traceTerrainLine(state, source, target);
     expect(trace.sourceCorner).toEqual({ column: last - 3, row: 1 });
     expect(trace.lines.map((line) => line.tier)).toEqual(['total', 'none', 'total', 'total']);
-    // Fighter (3, 65530) to goblin (7, 65530): from each source corner the two lines to target
-    // corners on its own row run along a grid line and cross nothing; the two others cross row
-    // 65530 between columns 4 and 6, through (5, 65530) where the imp and the rat both stand.
-    // Every corner has 2 obstructed lines -> Half, naming both creatures.
+    // Fighter (3, 1018) to goblin (7, 1018): all eight corners lie on the grid lines y = 1018 and
+    // y = 1019. From each fighter corner, the two lines to goblin corners on the same grid line run
+    // along it and cross no interior; the other two cross row 1018's interior over every column
+    // between, among them (5, 1018), where the imp and the rat both stand ((3, 1018) and (7, 1018)
+    // are the fighter's and the goblin's own cells). Every corner: 2 obstructed -> Half, naming both.
     expect(coverBetweenCombatants(state, fighter, goblin)).toEqual({
       tier: 'half', sourceIds: [`creature:${String(imp)}`, `creature:${String(rat)}`],
     });
-    // The goblin considering (9, 65530): the same geometry mirrored, and its own body at (7, 65530)
-    // goes with it (coverself), so again only the imp and the rat.
+    // The goblin considering (9, 1018): the same geometry from the other side. Its crossing lines
+    // also cross (7, 1018), where its own body stands now; the body goes with it to the anchor
+    // (coverself), so again only the imp and the rat.
     expect(coverBetweenCombatants(state, goblin, fighter, { sourceAnchor: { column: 9, row: last - 5 } })).toEqual({
       tier: 'half', sourceIds: [`creature:${String(imp)}`, `creature:${String(rat)}`],
     });
-    // (65531, 65531) to (65533, 65533) past the slit at (65532, 65532): the wall case's geometry on
-    // the diagonal. Corners (65531,65531) and (65532,65532) have 4 lines through the slit, the
-    // other two 3; each line is Three-Quarters, so every corner is Three-Quarters and the tie goes
-    // to the first corner, (65531, 65531).
+    // (1019, 1019) to (1021, 1021) past the slit at (1020, 1020): the wall case's geometry moved onto
+    // the long diagonal. Corners (1019, 1019) and (1020, 1020) have 4 lines through the slit, the
+    // other two 3. The slit does not block sight, so 4 lines clamp to Three-Quarters: every corner is
+    // Three-Quarters, and the tie goes to the first in row-major order, (1019, 1019).
     const slitSource = { column: last - 4, row: last - 4 };
     const slitTarget = { column: last - 2, row: last - 2 };
     expect(coverTierBetweenObjects(state.worldObjects, slitSource, slitTarget)).toBe('three_quarters');
@@ -732,6 +747,26 @@ describe('PERF-02 cover6 sparse source index on a huge grid', () => {
       sourceCell: slitSource, targetCell: slitTarget, tier: 'three_quarters', blocksSight: false,
       sourceIds: ['object:object:sparse-slit'],
     });
+    expect(traceTerrainLine(state, slitSource, slitTarget).sourceCorner).toEqual(slitSource);
+  });
+
+  it('COVER-SPARSE-THRESHOLD indexes a 256 x 256 box of sources densely and a 257 x 256 box sparsely', () => {
+    // DENSE_SOURCE_GRID_MAX_CELLS is 65,536 cells, and the choice is by the box's area. Both grids
+    // are 257 x 256 (65,792 cells, valid). Walls at (0, 0) and (255, 255) span a 256 x 256 box of
+    // exactly 65,536 cells: dense. A wall at (256, 255) instead spans 257 x 256 = 65,792: sparse,
+    // although neither side is longer than 257. The fighter stands inside both boxes, and there are
+    // no objects, so the object-only index is empty and dense.
+    const fighter = playerProfile('threshold-fighter');
+    const withFarWall = (far: GridCell) => createEncounter({
+      bounds: { columns: 257, rows: 256 },
+      combatants: [fighter],
+      tokens: [placedToken(fighter, 100, 100)],
+      blockedCells: [{ column: 0, row: 0 }, far],
+    });
+    expect(sourceIndexKinds(withFarWall({ column: 255, row: 255 })))
+      .toEqual({ terrain: 'dense', terrainAndCreatures: 'dense', objects: 'dense' });
+    expect(sourceIndexKinds(withFarWall({ column: 256, row: 255 })))
+      .toEqual({ terrain: 'sparse', terrainAndCreatures: 'sparse', objects: 'dense' });
   });
 });
 

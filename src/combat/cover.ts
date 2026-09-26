@@ -258,9 +258,12 @@ interface SourceCell {
 
 /**
  * The largest bounding box of source cells, in cells, that the source index stores as a dense
- * array (256 x 256, say). The box is set by the two sources farthest apart, not by how many
- * sources there are: without this bound, a valid 65,536 x 65,536 encounter with walls in two
- * opposite corners asks for 2^32 slots and throws before any line is traced.
+ * array (256 x 256, say: 512 KiB of slots). The box is set by the two sources farthest apart, not
+ * by how many sources there are. MAX_GRID_CELLS (grid-size.ts) lets it reach 1,048,576 cells, an
+ * 8 MiB array that takes about 4 ms to fill (Node 24, measured), and an index is built for every
+ * new state (terrain, then terrain with creatures) and for every coverTierBetweenObjects call. So
+ * a large encounter with walls near two opposite corners gets the sparse index instead, sized by
+ * its source cells. Every generator caps its grid at 64 x 64, so generated rooms stay dense.
  */
 const DENSE_SOURCE_GRID_MAX_CELLS = 65_536;
 
@@ -403,13 +406,13 @@ interface StateSourceGrids {
  */
 const stateSourceGrids = new WeakMap<EncounterState, StateSourceGrids>();
 
-function stateSourceGrid(state: EncounterState, obstructions: LineObstructions): SourceGrid {
+function stateSourceGrid(state: EncounterState, counted: LineObstructions['kind']): SourceGrid {
   let grids = stateSourceGrids.get(state);
   if (grids === undefined) {
     grids = { terrain: sourceGrid(terrainSources(state)) };
     stateSourceGrids.set(state, grids);
   }
-  switch (obstructions.kind) {
+  switch (counted) {
     case 'terrain': return grids.terrain;
     case 'terrain_and_creatures': {
       grids.withCreatures ??= sourceGrid([...terrainSources(state), ...creatureSources(state)]);
@@ -614,7 +617,7 @@ function traceSpaces(
   obstructions: LineObstructions,
 ): TerrainLineTrace {
   const nearest = nearestCells(sourceCells, targetCells);
-  const context = lineContext(stateSourceGrid(state, obstructions), sourceCells, targetCells, obstructions);
+  const context = lineContext(stateSourceGrid(state, obstructions.kind), sourceCells, targetCells, obstructions);
   const targetCorners = outerCorners(targetCells);
   const { corner, ranks } = chooseSourceCorner(context, targetCorners);
   const lines = targetCorners.map((targetCorner) => cornerLineTrace(context, corner, targetCorner));
@@ -677,7 +680,7 @@ function verdictSpaces(
   obstructions: LineObstructions,
 ): LineVerdict {
   const nearest = nearestCells(sourceCells, targetCells);
-  const context = lineContext(stateSourceGrid(state, obstructions), sourceCells, targetCells, obstructions);
+  const context = lineContext(stateSourceGrid(state, obstructions.kind), sourceCells, targetCells, obstructions);
   const targetCorners = outerCorners(targetCells);
   const { corner, ranks } = chooseSourceCorner(context, targetCorners);
   const ids = new Set<string>();
@@ -784,12 +787,7 @@ export function combatantLineVerdictToCells(
   });
 }
 
-/** Object-only cover between two cells (no walls, no creatures), from a bare object list. */
-export function coverTierBetweenObjects(
-  objects: readonly WorldObject[],
-  from: GridCell,
-  to: GridCell,
-): CoverTier {
+function objectSourceGrid(objects: readonly WorldObject[]): SourceGrid {
   const placed: PlacedSource[] = [];
   for (const object of objects) {
     if (object.blocking.cover === 'none') continue;
@@ -797,8 +795,41 @@ export function coverTierBetweenObjects(
       placed.push({ cell, source: { kind: 'world_object', id: String(object.id), tier: object.blocking.cover } });
     }
   }
-  const context = lineContext(sourceGrid(placed), [from], [to], { kind: 'terrain' });
+  return sourceGrid(placed);
+}
+
+/** Object-only cover between two cells (no walls, no creatures), from a bare object list. */
+export function coverTierBetweenObjects(
+  objects: readonly WorldObject[],
+  from: GridCell,
+  to: GridCell,
+): CoverTier {
+  const context = lineContext(objectSourceGrid(objects), [from], [to], { kind: 'terrain' });
   return tierOfRank(chooseSourceCorner(context, outerCorners([to])).ranks.rank);
+}
+
+/** How a source index holds its cells (see SourceGrid). */
+export type SourceIndexKind = SourceGrid['kind'];
+
+export interface SourceIndexKinds {
+  readonly terrain: SourceIndexKind;
+  readonly terrainAndCreatures: SourceIndexKind;
+  readonly objects: SourceIndexKind;
+}
+
+/**
+ * The kind of each source index the line queries over this state read: the state's terrain index,
+ * its terrain-and-creatures index (both the memoized ones), and the object-only index that
+ * coverTierBetweenObjects builds from state.worldObjects. No engine code reads it. The dense and
+ * sparse indexes give the same answers by design, so no query result can show which one a test
+ * reached; the tests of the sparse index assert it here.
+ */
+export function sourceIndexKinds(state: EncounterState): SourceIndexKinds {
+  return {
+    terrain: stateSourceGrid(state, 'terrain').kind,
+    terrainAndCreatures: stateSourceGrid(state, 'terrain_and_creatures').kind,
+    objects: objectSourceGrid(state.worldObjects).kind,
+  };
 }
 
 export type CreatureCoverOptions = CreatureLineOptions;
