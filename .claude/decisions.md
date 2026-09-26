@@ -2484,3 +2484,30 @@ Also in flight at this time (details in the next records entry): fix rounds for 
 - On the rebased pair, cover6's sparse tests exceed board3's MAX_GRID_CELLS (.tmp/runs/perf-02/landing/verify-claude-rebase/findings.md).
 
 Next free id: D900.
+
+## D900 — 2026-09-26 14:35 — owner: a creature's whole body must be on the map at placement (made impossible to express otherwise); squeezing stays, at half speed
+
+QUESTION (AskUserQuestion; recommendation was "land #3/#6 as is, fix before the study"):
+- Fixture tests/fixtures/arena-basis-brutal/seed-6203009.json puts a Huge monster (3x3) with its anchor at column 17 of a 19-column map, so one column of its body is off the map.
+- Board3 fix1 refuses an off-map anchor on load, but allows a body that overhangs the edge.
+- The room is one of D898's 40 registered study encounters (fixture sha registered) and feeds the arena pins.
+
+OWNER, verbatim: "Figure out how to refactor so that that is impossible. Still allow the squeeze through tight spaces at half speed rule, but initial map should not have that."
+
+READINGS (the owner can overturn):
+- "Impossible" means in the type system, like D895. A placed creature's position is a type that can only be minted after checking that its WHOLE footprint (all its squares, by size) is on the map. The checks happen at createEncounter, at every decoder and in the room generator; a body past the edge cannot be constructed. This subsumes board3's anchor-only check.
+- "Initial map should not have that": the room generator and all fixtures are fixed so no creature is placed overhanging. seed-6203009 is regenerated/fixed.
+  - Its sha is registered in D898 R1, so this is a PRE-RUN amendment to D898 (a new dated D-entry before any study cell runs), with the new fixture sha and the manifest update.
+  - Every pin it moves (arena-verdicts, and possibly blind rows) is re-captured independently and attributed.
+- "Still allow the squeeze ... at half speed": squeezing through a narrow opening stays legal (the engine's squeezed placement, creature-space.ts). The cost follows the SRD 5.1 text in the repo (docs/homebrew/ogl/srd-5.1/srd-5.1-ogl.txt:5316-5324): "a creature must spend 1 extra foot for every foot it moves there".
+  - The engine does not charge that today; this was pending question 5 of 2026-09-24. Adding it is a behaviour change, with its own witness, mutants and pin attribution.
+  - SRD 5.2.1 (docs/srd/full/srd-5.2.1.txt) has no squeezing section; I searched it for "queez" and "Smaller Space" and found nothing.
+  - The same 5.1 passage also gives the squeezing creature Disadvantage on attack rolls and Dexterity saves, and Advantage to attacks against it. The owner named only the speed. I do not add those without asking.
+
+SEQUENCING (keeps "Land #3 and #6 first", D895):
+- A new unit, FOOTPRINT, branched from board3's fix-2 head once that returns (board3 fix2 is changing token positions to BoardCell right now, in the same code).
+- Built and reviewed while #3/#6 are timed.
+- Lands right after #3/#6 and before any LUNA6 study cell, with the D898 pre-run amendment.
+- If board3 fix2 cannot finish the BoardCell token type, FOOTPRINT takes that over.
+
+Next free id: D901.
