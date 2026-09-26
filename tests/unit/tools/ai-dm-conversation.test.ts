@@ -65,8 +65,7 @@ import { DEFAULT_RENDERER_PROFILE } from '../../../src/vtt/renderer-profile';
 import { traceCombatantLine } from '../../../src/combat/cover';
 import {
   DEFAULT_KB_HASH,
-  BOUND_OFFER_ENVIRONMENT,
-  DIVERGENCE_OFFER_ENVIRONMENT,
+  revisionBoundOfferEnvironmentInput,
   createEngineMcpRuntime,
   minimalAlternatingInitiativeRoom,
   validRecalculationRoom,
@@ -83,6 +82,8 @@ import {
   producerMutationReceipt,
 } from './ai-dm-conversation-fixtures';
 
+const BOUND_OFFER_ENVIRONMENT = buildOfferEnvironment(revisionBoundOfferEnvironmentInput());
+const DIVERGENCE_OFFER_ENVIRONMENT = buildOfferEnvironment(revisionBoundOfferEnvironmentInput());
 const LEGACY_BLOCK_ARGS = [
   '--combat-model', 'monster_block_v1', '--initiative-profile', 'legacy',
 ] as const;

@@ -84,7 +84,10 @@ import { actorOpportunityReport } from '../../../src/vtt/intel/opportunity-cost'
 import {
   createDisabledEngineOfferFamilyPolicy,
 } from '../../../src/vtt/offers/offer-environment';
-import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import {
+  buildOfferEnvironment,
+  type OfferEnvironmentInput,
+} from '../../../src/vtt/offers/build-offer-environment';
 import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 import { engineStateHandle } from '../../../src/vtt/engine-state-capsule';
 import { engineActionId } from '../../../src/vtt/turn-proposal';
@@ -110,18 +113,17 @@ import {
 
 
 export const DEFAULT_KB_HASH = '00776f3f2d4cd7468a1eb2a63028e9c3f846b43b14a4e5787d3e9c94e02633c0';
-export const BOUND_OFFER_ENVIRONMENT = buildOfferEnvironment({
-  kind: 'configuration',
-  mode: 'revision_bound',
-  familyPolicy: createDisabledEngineOfferFamilyPolicy(),
-  partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
-});
-export const DIVERGENCE_OFFER_ENVIRONMENT = buildOfferEnvironment({
-  kind: 'configuration',
-  mode: 'revision_bound',
-  familyPolicy: createDisabledEngineOfferFamilyPolicy(),
-  partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
-});
+// Builder input only (D617: buildOfferEnvironment is the one exported environment constructor). Each caller builds its
+// own environment from it, so no fixture export builds or exposes a runtime offer environment.
+export function revisionBoundOfferEnvironmentInput(): Extract<OfferEnvironmentInput, { readonly mode: 'revision_bound' }> {
+  return {
+    kind: 'configuration',
+    mode: 'revision_bound',
+    familyPolicy: createDisabledEngineOfferFamilyPolicy(),
+    partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
+  };
+}
+const BOUND_OFFER_ENVIRONMENT = buildOfferEnvironment(revisionBoundOfferEnvironmentInput());
 export function createEngineMcpRuntime(
   state: Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[0],
   options: Omit<NonNullable<Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[1]>,
@@ -133,7 +135,7 @@ export function createEngineMcpRuntime(
   return runtime;
 }
 
-export function launcherOfferEnvironment(manifest: EngineMcpLauncherManifest) {
+function launcherOfferEnvironment(manifest: EngineMcpLauncherManifest) {
   if (manifest.offerEnvironment === undefined) throw new TypeError('Launcher offer environment is absent.');
   return buildOfferEnvironment({ kind: 'binding', binding: manifest.offerEnvironment });
 }
