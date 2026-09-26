@@ -41,6 +41,7 @@ import {
 import { sharedSpaceRelation } from '../../../src/combat/creature-space';
 import { createEncounter, type EncounterState } from '../../../src/combat/encounter';
 import type { GridCell } from '../../../src/combat/grid';
+import { requireBoardCell } from '../../../src/combat/grid';
 import { terrainBlocking } from '../../../src/combat/terrain';
 import { armorClass, worldObjectId, type CombatantId } from '../../../src/combat/values';
 import type { WorldObject } from '../../../src/combat/world-objects';
@@ -452,7 +453,7 @@ function verdictFields(line: VerdictFields): VerdictFields {
 function withTokenAt(state: EncounterState, mover: CombatantId, anchor: GridCell): EncounterState {
   return {
     ...state,
-    tokens: state.tokens.map((token) => token.combatantId === mover ? { ...token, position: { ...anchor } } : token),
+    tokens: state.tokens.map((token) => token.combatantId === mover ? { ...token, position: requireBoardCell(state.bounds, anchor, 'test anchor') } : token),
   };
 }
 
