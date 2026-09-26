@@ -106,6 +106,19 @@ export class HistoricalLunaBatchResumeError extends Error {
   }
 }
 
+/** LUNA6: a fresh v2 run never replaces a v1 batch's manifest, which is that batch's only provenance record. */
+export class HistoricalLunaBatchOverwriteError extends Error {
+  override readonly name = 'HistoricalLunaBatchOverwriteError' as const;
+
+  constructor(readonly manifestPath: string, stored: HistoricalGenerateDataManifest) {
+    super(
+      `LUNA6: ${manifestPath} is an ${stored.format} ${stored.model} ${stored.effort} batch; a fresh ` +
+      `${GENERATE_DATA_MANIFEST_FORMAT} ${LUNA_MODEL} ${GENERATE_DATA_EFFORT} run never overwrites it, which would ` +
+      'lose its provenance. Start a new --target-dir.',
+    );
+  }
+}
+
 export type ArenaBatchRunner = (config: ArenaConfig) => Promise<readonly Pick<
   ArenaRow,
   'serviceNull' | 'outcome' | 'flapRetries'
@@ -210,13 +223,17 @@ function manifestName(range: SeedRange): string {
   return `batch-${String(range.start)}-${String(range.end)}.manifest.json`;
 }
 
+/**
+ * The manifest a run continues from: with --resume, the stored v2 manifest of this exact batch configuration; without
+ * it, none. Either way a stored manifest is read first, and a v1 manifest, or one that does not parse, stops the run
+ * before anything is written over it (LUNA6: a v1 batch is never resumed into v2 and never overwritten by v2).
+ */
 async function existingManifest(
   path: string,
   config: GenerateDataConfig,
   range: SeedRange,
   provenance: ManifestProvenance,
 ): Promise<GenerateDataManifest | null> {
-  if (!config.resume) return null;
   let source: string;
   try { source = await readFile(path, 'utf8'); }
   catch (error) {
@@ -224,6 +241,10 @@ async function existingManifest(
     throw error;
   }
   const stored = JSON.parse(source) as GenerateDataManifest | HistoricalGenerateDataManifest;
+  if (!config.resume) {
+    if (stored.format === HISTORICAL_MANIFEST_FORMAT) throw new HistoricalLunaBatchOverwriteError(path, stored);
+    return null;
+  }
   if (stored.format === HISTORICAL_MANIFEST_FORMAT) throw new HistoricalLunaBatchResumeError(path, stored);
   if (stored.format !== GENERATE_DATA_MANIFEST_FORMAT || stored.range.start !== range.start ||
     stored.range.end !== range.end || stored.reps !== config.reps || stored.basis !== config.basis ||

@@ -12,6 +12,97 @@ import {
 import { readRepoCommit } from '../../../tools/rl/repo-commit';
 import { mkdtempSync, readFileSync, writeFileSync } from '../../helpers/test-filesystem';
 
+/**
+ * One batch (seeds 3943001-3943003, reps 2), typed by hand in the pre-LUNA6 schema (tools/rl/generate-data.ts at
+ * 71940c8f: arena-rl-batch-v1 on gpt-5.6-luna low) or in the v2 schema. Only the format and the model differ between
+ * the two, so a refusal is the route's and not a configuration mismatch.
+ */
+async function storedBatch(targetDirectory: string, format: string, model: string) {
+  const kbHash = createHash('sha256').update(readFileSync(
+    join(process.cwd(), 'tests/fixtures/ai-dm-kb/k6.txt'),
+  )).digest('hex');
+  const repoCommit = await readRepoCommit(process.cwd());
+  const outputPath = (seed: number): string =>
+    join(targetDirectory, 'batch-3943001-3943003', `seed-${String(seed)}.jsonl`);
+  return {
+    format,
+    range: { start: 3_943_001, end: 3_943_003 },
+    reps: 2,
+    model,
+    effort: 'low',
+    adapterCliName: 'codex',
+    adapterCliVersion: null,
+    kbId: 'K6',
+    kbHash,
+    repoCommit,
+    toolArgv: ['--seed-range', '3943001-3943003', '--reps', '2', '--target-dir', targetDirectory],
+    flapPolicy: 'arena-retry-then-resume-seed',
+    basis: 'standard',
+    combatModel: 'initiative_segments_v1',
+    initiativeProfile: 'derived_v1',
+    seeds: [
+      {
+        seed: 3_943_001, outputPath: outputPath(3_943_001), status: 'complete',
+        rows: 1, flapRetries: 0, serviceNullRows: 0, error: null,
+      },
+      {
+        seed: 3_943_002, outputPath: outputPath(3_943_002), status: 'flapped',
+        rows: 1, flapRetries: 2, serviceNullRows: 1, error: null,
+      },
+      {
+        seed: 3_943_003, outputPath: outputPath(3_943_003), status: 'complete',
+        rows: 1, flapRetries: 0, serviceNullRows: 0, error: null,
+      },
+    ],
+    totals: {
+      seeds: 3, completeSeeds: 2, flappedSeeds: 1, failedSeeds: 0,
+      rows: 3, flapRetries: 2, serviceNullRows: 1,
+    },
+  };
+}
+
+/**
+ * Runs the batch into a target directory whose manifest path already holds `storedBatch` (or the `bytes` of it given),
+ * and records the outcome as { ok } or { error }, the seeds the arena was called for, and whether the stored bytes
+ * survived.
+ */
+async function generateOverStoredBatch(stored: {
+  readonly format: string;
+  readonly model: string;
+  readonly resume: boolean;
+  readonly bytes?: (manifest: string) => string;
+}) {
+  const targetDirectory = mkdtempSync(join(tmpdir(), 'luna6-generate-over-'));
+  const manifestPath = join(targetDirectory, 'batch-3943001-3943003.manifest.json');
+  const manifest = `${JSON.stringify(await storedBatch(targetDirectory, stored.format, stored.model))}\n`;
+  const bytes = stored.bytes === undefined ? manifest : stored.bytes(manifest);
+  writeFileSync(manifestPath, bytes, 'utf8');
+  const calls: number[] = [];
+  const outcome = await generateData(parseGenerateDataArgs([
+    '--seed-range', '3943001-3943003', '--reps', '2', '--target-dir', targetDirectory,
+    ...(stored.resume ? ['--resume'] : []),
+  ]), {
+    arenaRunner: async (config) => {
+      calls.push(config.seed);
+      return [{ outcome: 'authorized', serviceNull: false, flapRetries: 0 }];
+    },
+    heartbeat: () => undefined,
+  }).then(
+    (manifests) => ({
+      ok: manifests.map((written) => ({ format: written.format, model: written.model, effort: written.effort })),
+    }),
+    (error: unknown) => ({
+      // A JSON parse error's wording is V8's, not ours; its name is the contract.
+      error: error instanceof SyntaxError
+        ? error.name
+        : error instanceof Error
+          ? `${error.name}: ${error.message.replace(manifestPath, '<manifest>')}`
+          : String(error),
+    }),
+  );
+  return { outcome, calls, storedBytesKept: readFileSync(manifestPath, 'utf8') === bytes };
+}
+
 describe('RL arena batch generator', () => {
   it('writes per-batch manifests and resumes only incomplete or flapped seeds', async () => {
     const targetDirectory = mkdtempSync(join(tmpdir(), 'd410-generate-'));
@@ -116,83 +207,10 @@ describe('RL arena batch generator', () => {
   });
 
   it('refuses to resume a v1 gpt-5.6-luna batch manifest into a v2 gpt-6-luna batch', async () => {
-    // A batch written before LUNA6, typed by hand in the pre-LUNA6 schema (tools/rl/generate-data.ts at 71940c8f:
-    // arena-rl-batch-v1 on gpt-5.6-luna low), beside the same batch in the v2 schema as the control. Only the format
-    // and the model differ, so the refusal is the route's and not a configuration mismatch.
-    const kbHash = createHash('sha256').update(readFileSync(
-      join(process.cwd(), 'tests/fixtures/ai-dm-kb/k6.txt'),
-    )).digest('hex');
-    const repoCommit = await readRepoCommit(process.cwd());
-    const storedBatch = (targetDirectory: string, format: string, model: string) => {
-      const outputPath = (seed: number): string =>
-        join(targetDirectory, 'batch-3943001-3943003', `seed-${String(seed)}.jsonl`);
-      return {
-        format,
-        range: { start: 3_943_001, end: 3_943_003 },
-        reps: 2,
-        model,
-        effort: 'low',
-        adapterCliName: 'codex',
-        adapterCliVersion: null,
-        kbId: 'K6',
-        kbHash,
-        repoCommit,
-        toolArgv: ['--seed-range', '3943001-3943003', '--reps', '2', '--target-dir', targetDirectory],
-        flapPolicy: 'arena-retry-then-resume-seed',
-        basis: 'standard',
-        combatModel: 'initiative_segments_v1',
-        initiativeProfile: 'derived_v1',
-        seeds: [
-          {
-            seed: 3_943_001, outputPath: outputPath(3_943_001), status: 'complete',
-            rows: 1, flapRetries: 0, serviceNullRows: 0, error: null,
-          },
-          {
-            seed: 3_943_002, outputPath: outputPath(3_943_002), status: 'flapped',
-            rows: 1, flapRetries: 2, serviceNullRows: 1, error: null,
-          },
-          {
-            seed: 3_943_003, outputPath: outputPath(3_943_003), status: 'complete',
-            rows: 1, flapRetries: 0, serviceNullRows: 0, error: null,
-          },
-        ],
-        totals: {
-          seeds: 3, completeSeeds: 2, flappedSeeds: 1, failedSeeds: 0,
-          rows: 3, flapRetries: 2, serviceNullRows: 1,
-        },
-      };
-    };
-    const resumeInto = async (format: string, model: string) => {
-      const targetDirectory = mkdtempSync(join(tmpdir(), 'luna6-generate-resume-'));
-      const manifestPath = join(targetDirectory, 'batch-3943001-3943003.manifest.json');
-      const stored = `${JSON.stringify(storedBatch(targetDirectory, format, model))}\n`;
-      writeFileSync(manifestPath, stored, 'utf8');
-      const calls: number[] = [];
-      const outcome = await generateData(parseGenerateDataArgs([
-        '--seed-range', '3943001-3943003', '--reps', '2', '--target-dir', targetDirectory, '--resume',
-      ]), {
-        arenaRunner: async (config) => {
-          calls.push(config.seed);
-          return [{ outcome: 'authorized', serviceNull: false, flapRetries: 0 }];
-        },
-        heartbeat: () => undefined,
-      }).then(
-        (manifests) => ({
-          ok: manifests.map((manifest) =>
-            ({ format: manifest.format, model: manifest.model, effort: manifest.effort })),
-        }),
-        (error: unknown) => ({
-          error: error instanceof Error
-            ? `${error.name}: ${error.message.replace(manifestPath, '<manifest>')}`
-            : String(error),
-        }),
-      );
-      return { outcome, calls, storedBytesKept: readFileSync(manifestPath, 'utf8') === stored };
-    };
-
+    // A batch written before LUNA6 (storedBatch in the v1 schema), beside the same batch in the v2 schema as the control.
     expect([
-      await resumeInto('arena-rl-batch-v1', 'gpt-5.6-luna'),
-      await resumeInto('arena-rl-batch-v2', 'gpt-6-luna'),
+      await generateOverStoredBatch({ format: 'arena-rl-batch-v1', model: 'gpt-5.6-luna', resume: true }),
+      await generateOverStoredBatch({ format: 'arena-rl-batch-v2', model: 'gpt-6-luna', resume: true }),
     ]).toEqual([
       {
         outcome: {
@@ -208,6 +226,35 @@ describe('RL arena batch generator', () => {
         calls: [3_943_002],
         storedBytesKept: false,
       },
+    ]);
+  });
+
+  it('refuses a fresh run over a v1 gpt-5.6-luna batch manifest and keeps its bytes', async () => {
+    // LUNA6 (B2 review r1 P3): a run without --resume used to replace whatever manifest its batch path held, so a fresh
+    // v2 run over a v1 batch erased the v1 batch's provenance. A v1 manifest is now refused and left byte for byte;
+    // so is a manifest that does not parse (a write cut short). A v2 manifest is still replaced (the control).
+    expect([
+      await generateOverStoredBatch({ format: 'arena-rl-batch-v1', model: 'gpt-5.6-luna', resume: false }),
+      await generateOverStoredBatch({ format: 'arena-rl-batch-v2', model: 'gpt-6-luna', resume: false }),
+      await generateOverStoredBatch({
+        format: 'arena-rl-batch-v2', model: 'gpt-6-luna', resume: false, bytes: (manifest) => manifest.slice(0, 100),
+      }),
+    ]).toEqual([
+      {
+        outcome: {
+          error: 'HistoricalLunaBatchOverwriteError: LUNA6: <manifest> is an arena-rl-batch-v1 gpt-5.6-luna low ' +
+            'batch; a fresh arena-rl-batch-v2 gpt-6-luna low run never overwrites it, which would lose its ' +
+            'provenance. Start a new --target-dir.',
+        },
+        calls: [],
+        storedBytesKept: true,
+      },
+      {
+        outcome: { ok: [{ format: 'arena-rl-batch-v2', model: 'gpt-6-luna', effort: 'low' }] },
+        calls: [3_943_001, 3_943_002, 3_943_003],
+        storedBytesKept: false,
+      },
+      { outcome: { error: 'SyntaxError' }, calls: [], storedBytesKept: true },
     ]);
   });
 
