@@ -5,9 +5,8 @@ import type { EncounterCombatantState, EncounterState } from './encounter';
 import type { BoardCell, GridCell } from './grid';
 import {
   buildMovementBoard,
-  cellIndex,
+  squareAnchor,
   squareCell,
-  squareFits,
   NO_OPENING,
   type CellIndex,
   type FootprintSide,
@@ -202,8 +201,8 @@ export function encounterMovementWorld(state: EncounterState): MovementWorld<Com
     occupiedCells: (actorId, anchor) => combatantSpaceAt(state, actorId, anchor).cells,
     canTraverseStep: (actorId, _from, to) => {
       const mover = profile(actorId, to);
-      if (!squareFits(board, to, mover.side)) return false;
-      const anchor = cellIndex(board, to);
+      const anchor = squareAnchor(board, to, mover.side);
+      if (anchor === null) return false;
       return mover.squeezedInto === null
         ? clearOfSmallerOpenings(mover, anchor)
         : insideOneOpening(mover, mover.squeezedInto, anchor);
@@ -211,8 +210,8 @@ export function encounterMovementWorld(state: EncounterState): MovementWorld<Com
     traversal: (actorId, from, to) => {
       const mover = profile(actorId, from);
       const side = mover.side;
-      if (!squareFits(board, to, side)) return OUTSIDE_GRID;
-      const anchor = cellIndex(board, to);
+      const anchor = squareAnchor(board, to, side);
+      if (anchor === null) return OUTSIDE_GRID;
 
       let enteredCount = 0;
       for (let row = 0; row < side; row += 1) {

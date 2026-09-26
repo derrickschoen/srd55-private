@@ -1,7 +1,7 @@
 import { creatureSizes, type KnownCreatureSize } from '../domain/enums';
 import type { Brand } from '../domain/ids';
 import type { EncounterState } from './encounter';
-import { boardCell, type BoardCell, type GridCell } from './grid';
+import { isCellInside, type BoardCell, type GridCell } from './grid';
 import { terrainPassabilityAt } from './terrain';
 
 /**
@@ -9,15 +9,15 @@ import { terrainPassabilityAt } from './terrain';
  *
  * Every cell is one integer and every per-cell fact is one byte in a typed array, so a
  * movement question is arithmetic and array reads: no string keys, no `Set`s, no
- * `CreatureSpace` per step. Cells enter the board only through `boardCell`, the
- * decode-time bounds check, so an authored cell that is negative, fractional or off the
- * grid marks nothing. Such a cell can never lie under an in-bounds footprint either, so
+ * `CreatureSpace` per step. Authored cells enter the board only through the grid's bounds
+ * check (isCellInside), so an authored cell that is negative, fractional or off the grid
+ * marks nothing. Such a cell can never lie under an in-bounds footprint either, so
  * dropping it changes no answer.
  *
  * The board is built once per state and never changes; states are immutable.
  */
 
-/** Row-major ordinal of a cell of one board, `row * columns + column`. Minted only here. */
+/** Row-major ordinal of a cell of one board, `row * columns + column`. Minted only in this module. */
 export type CellIndex = Brand<number, 'CellIndex'>;
 
 /** Side of a creature's square footprint in cells (SRD Creature Size table: 1, 2, 3 or 4). */
@@ -55,20 +55,21 @@ export interface MovementBoard {
   readonly occupantOrdinals: Int32Array;
 }
 
-/** The index of a board cell. The brand says it is inside the grid, so no check is needed here. */
-export function cellIndex(board: MovementBoard, cell: BoardCell): CellIndex {
-  return (cell.row * board.columns + cell.column) as CellIndex;
-}
-
 /**
- * Whether the `side` x `side` square anchored at `anchor` lies on the board. A footprint
- * that reaches past the grid from an in-bounds anchor is an answer, not an error.
+ * The index of the anchor of the `side` x `side` square at `anchor`, or null when the
+ * square does not lie on this board. A footprint that reaches past the grid from an
+ * in-bounds anchor is an answer (null), not an error. This is the only way a question
+ * gets a CellIndex, and it checks the whole square against this board's own columns and
+ * rows, so an index is never out of range, whatever grid the BoardCell was decoded
+ * against (a BoardCell is never negative).
  */
-export function squareFits(board: MovementBoard, anchor: BoardCell, side: FootprintSide): boolean {
-  return anchor.column + side <= board.columns && anchor.row + side <= board.rows;
+export function squareAnchor(board: MovementBoard, anchor: BoardCell, side: FootprintSide): CellIndex | null {
+  return anchor.column + side <= board.columns && anchor.row + side <= board.rows
+    ? (anchor.row * board.columns + anchor.column) as CellIndex
+    : null;
 }
 
-/** The cell `columnOffset`, `rowOffset` inside a square that `squareFits` accepted. */
+/** The cell `columnOffset`, `rowOffset` (each below the side) inside a square `squareAnchor` accepted. */
 export function squareCell(
   board: MovementBoard,
   anchor: CellIndex,
@@ -98,10 +99,8 @@ export function buildMovementBoard(
   const cellCount = wholeGridCellCount(state);
   const columns = cellCount === 0 ? 0 : state.bounds.columns;
   const rows = cellCount === 0 ? 0 : state.bounds.rows;
-  const at = (cell: GridCell): CellIndex | null => {
-    const decoded = boardCell(state.bounds, cell);
-    return decoded === null ? null : (decoded.row * columns + decoded.column) as CellIndex;
-  };
+  const at = (cell: GridCell): CellIndex | null =>
+    isCellInside(state.bounds, cell) ? (cell.row * columns + cell.column) as CellIndex : null;
   const mark = (mask: Uint8Array, cell: GridCell): void => {
     const index = at(cell);
     if (index !== null) mask[index] = 1;

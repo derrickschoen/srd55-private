@@ -26,16 +26,28 @@ function isWholeNumber(value: number): boolean {
 
 /**
  * A cell inside the grid it was decoded against: whole-number coordinates with
- * 0 <= column < columns and 0 <= row < rows. `boardCell` is the only function that
- * mints one, so a negative, fractional or off-grid position cannot be asked a
- * movement question: that program does not compile. The brand exists only in the
- * type; the value is the caller's own cell object, unchanged.
+ * 0 <= column < columns and 0 <= row < rows. Only this module mints one (`boardCell`,
+ * and `adjacentCells` for the neighbours of one), so a negative, fractional or off-grid
+ * position cannot be asked a movement question: that program does not compile. Every
+ * BoardCell is a fresh frozen {column, row}; no caller holds a reference through which
+ * it could change.
+ *
+ * The brand does not name its grid, and need not: one encounter has one immutable
+ * bounds. createEncounter and every decoder fix it (grid-size.ts), no reducer changes
+ * it, and every movement board and BoardCell of the encounter's states is decoded
+ * against it. A BoardCell from some other grid still cannot index a board out of range:
+ * the movement board mints a cell index only through its square fit check against its
+ * own columns and rows (movement-board.ts, squareAnchor), and no BoardCell is negative.
  */
 export type BoardCell = Brand<GridCell, 'BoardCell'>;
 
-/** The decode-time bounds check: the cell itself when it lies inside `bounds`, otherwise null. */
+function mintBoardCell(column: number, row: number): BoardCell {
+  return Object.freeze({ column, row }) as BoardCell;
+}
+
+/** The decode-time bounds check: a fresh frozen copy of the cell when it lies inside `bounds`, otherwise null. */
 export function boardCell(bounds: GridBounds, cell: GridCell): BoardCell | null {
-  return isCellInside(bounds, cell) ? cell as BoardCell : null;
+  return isCellInside(bounds, cell) ? mintBoardCell(cell.column, cell.row) : null;
 }
 
 /** A position that must be a cell of its grid and is not: a loaded token anchor, an actor's own anchor. */
@@ -113,20 +125,14 @@ export function adjacentCells(
     return [];
   }
 
+  // `cell` is a whole-number cell of a whole-number grid, so every neighbour inside the
+  // four edges is a cell of the grid.
   const cells: BoardCell[] = [];
   for (let row = cell.row - 1; row <= cell.row + 1; row += 1) {
-    for (
-      let column = cell.column - 1;
-      column <= cell.column + 1;
-      column += 1
-    ) {
-      if (column === cell.column && row === cell.row) {
-        continue;
-      }
-      const candidate = boardCell(bounds, { column, row });
-      if (candidate !== null) {
-        cells.push(candidate);
-      }
+    if (row < 0 || row >= bounds.rows) continue;
+    for (let column = cell.column - 1; column <= cell.column + 1; column += 1) {
+      if (column < 0 || column >= bounds.columns || (column === cell.column && row === cell.row)) continue;
+      cells.push(mintBoardCell(column, row));
     }
   }
   return cells;

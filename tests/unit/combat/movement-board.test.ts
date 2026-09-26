@@ -3,7 +3,7 @@ import type { CombatantProfile } from '../../../src/combat/combatant';
 import { narrowOpeningRegion, sharedSpaceRelation } from '../../../src/combat/creature-space';
 import { createEncounter, type EncounterSetup, type EncounterState } from '../../../src/combat/encounter';
 import { encounterMovementWorld } from '../../../src/combat/encounter-movement-world';
-import { boardCell, type GridCell } from '../../../src/combat/grid';
+import { adjacentCells, boardCell, type GridCell } from '../../../src/combat/grid';
 import type { MovementWorld } from '../../../src/combat/movement';
 import { persistentAreaContains, type PersistentArea } from '../../../src/combat/persistent-areas';
 import { feetPoint } from '../../../src/combat/templates';
@@ -66,7 +66,7 @@ function difficultSphere(id: string, owner: CombatantId, sequence: number, point
 const PASS_BLOCKED = { kind: 'blocked', reason: 'creature space cannot be traversed' } as const;
 
 describe('movement board: the in-bounds cell type', () => {
-  it('decodes only whole-number cells inside the grid, and returns the caller\'s own cell', () => {
+  it('decodes only whole-number cells inside the grid, as a fresh frozen copy the caller cannot change', () => {
     const bounds = { columns: 3, rows: 2 };
     for (const outside of [
       { column: -1, row: 0 }, { column: 0, row: -1 }, { column: 0.5, row: 0 }, { column: 1, row: 1.5 },
@@ -75,8 +75,34 @@ describe('movement board: the in-bounds cell type', () => {
       expect(boardCell(bounds, outside), JSON.stringify(outside)).toBeNull();
     }
     const inside = { column: 2, row: 1 };
-    expect(boardCell(bounds, inside)).toBe(inside);
+    const decoded = boardCell(bounds, inside);
+    expect(decoded).toEqual({ column: 2, row: 1 });
+    expect(decoded).not.toBe(inside);
+    expect(Object.isFrozen(decoded)).toBe(true);
+    // The caller's own object stays its own: changing it leaves the decoded cell inside the grid.
+    inside.column = 7;
+    expect(decoded).toEqual({ column: 2, row: 1 });
     expect(boardCell({ columns: 2.5, rows: 2 }, { column: 0, row: 0 })).toBeNull();
+    // Neighbours are minted the same way, in row-major order.
+    const neighbours = adjacentCells(bounds, { column: 1, row: 0 });
+    expect(neighbours).toEqual([{ column: 0, row: 0 }, { column: 2, row: 0 }, { column: 0, row: 1 }, { column: 1, row: 1 }, { column: 2, row: 1 }]);
+    expect(neighbours.every((cell) => Object.isFrozen(cell))).toBe(true);
+    // From the far corner only the three cells behind it are on the grid.
+    expect(adjacentCells(bounds, { column: 2, row: 1 })).toEqual([{ column: 1, row: 0 }, { column: 2, row: 0 }, { column: 1, row: 1 }]);
+  });
+
+  it('answers a cell decoded against a larger grid as outside this board, never reading past it', () => {
+    // One encounter has one bounds, so this never happens in the engine; the board still
+    // checks every square against its own columns and rows before it indexes anything.
+    const mover = playerProfile('board-cross-grid-mover');
+    const { state, world } = encounter({ bounds: { columns: 3, rows: 2 }, combatants: [mover], tokens: [placedToken(mover, 0)] });
+    const from = onBoard(state.bounds, { column: 0, row: 0 });
+    for (const foreign of [{ column: 3, row: 0 }, { column: 0, row: 2 }, { column: 5, row: 4 }]) {
+      const cell = onBoard({ columns: 6, rows: 5 }, foreign);
+      expect(world.canTraverseStep(mover.id, from, cell), JSON.stringify(foreign)).toBe(false);
+      expect(world.traversal(mover.id, from, cell), JSON.stringify(foreign))
+        .toEqual({ kind: 'blocked', reason: 'creature footprint is outside the grid' });
+    }
   });
 
   it('refuses at compile time to ask a movement world about a cell that was never decoded', () => {
