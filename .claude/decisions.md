@@ -2511,3 +2511,20 @@ SEQUENCING (keeps "Land #3 and #6 first", D895):
 - If board3 fix2 cannot finish the BoardCell token type, FOOTPRINT takes that over.
 
 Next free id: D901.
+
+## D901 — 2026-09-26 15:20 — owner: delete path()'s second whole-map search (x1r question), after #3/#6 land
+
+QUESTION (AskUserQuestion, with my recommendation): src/vtt/engine-query-port.ts:1166-1175.
+- On a miss, path() runs a second search with an unbounded budget, only to return insufficient_movement instead of destination_unreachable.
+- Verified by me: none of the 4 callers reads the code; each checks legal only:
+  - arena-legality.ts:75
+  - intent-resolver.ts:362
+  - speculative-planning.ts:575
+  - mcp/engine-server.ts:3148
+- No docs/specs schema carries either code.
+
+OWNER, verbatim choice: "Delete, after #3/#6 land (Recommended)".
+- Unit PATH-ONE: remove the second search. The failure union collapses to one "not reachable within budget" code (plus actor_not_placed), so the compiler proves no caller relied on the distinction. Witness and mutant per Part A.
+- Lands after #3/#6. It sits alongside FOOTPRINT (D900).
+
+Next free id: D902.
