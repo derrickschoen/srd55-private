@@ -19,7 +19,7 @@ import {
   referenceTurnLegalActions,
 } from '../../../src/vtt/reference-encounter';
 import { decodeReplayBundle, exportReplayBundle, replayBundle, type ReplayBundle } from '../../../src/vtt/replay';
-import { EngineRoundSession } from '../../../src/vtt/engine-round-session';
+import { canonicalEncounterState, EngineRoundSession } from '../../../src/vtt/engine-round-session';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { adjacentOpenCell, recordScriptedReferenceSkirmish } from '../../../src/vtt/scripted-skirmish';
 import {
@@ -383,6 +383,12 @@ describe('a token anchor is an in-bounds cell in the EncounterState type', () =>
 
   it('the engine round session re-mints anchors after its canonical JSON round trip, and refuses a state spread off its grid', () => {
     const created = createEncounter(referenceEncounterSetup());
+    const withAbsent: EncounterState = { ...created, absentTokens: [anchoredAt(created, 3, { column: 9, row: 6 }).tokens[3] as CombatToken] };
+    const canonical = canonicalEncounterState(withAbsent);
+    const parsed = (JSON.parse(canonical.fixtureJson) as { readonly encounter: { readonly state: JsonState } }).encounter.state;
+    expect(json(canonical.state)).toEqual(json(withAbsent));
+    expect(mintedAnchors(canonical.state.tokens, parsed.tokens)).toBe(true);
+    expect(mintedAnchors(canonical.state.absentTokens ?? [], parsed['absentTokens'] as readonly unknown[])).toBe(true);
     // The Training Brute stands at (3, 3); on a 3-column grid its anchor is not a cell.
     const spread: EncounterState = { ...created, bounds: { columns: 3, rows: 7 } };
     const session = new EngineRoundSession(spread, mulberry32(6_203_004), { kind: 'unattended', askDefault: 'decline' },

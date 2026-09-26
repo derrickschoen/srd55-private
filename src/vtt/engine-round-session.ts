@@ -132,7 +132,7 @@ export interface AppliedScriptedPcTurn extends EngineBoundaryResolutions {
 
 type EngineTurnApplication = AuthorizedEngineTurnProposal;
 
-interface CanonicalEncounterState {
+export interface CanonicalEncounterState {
   readonly state: EncounterState;
   readonly fixtureJson: string;
 }
@@ -141,9 +141,9 @@ interface CanonicalEncounterState {
  * The state after a canonical JSON round trip (sorted keys, plain values), for fixtures that must
  * match byte for byte. JSON parsing forgets every brand, so the token anchors are re-minted
  * against the state's grid (decodeTokenAnchors) rather than cast: a state spread onto a grid its
- * anchors are not on is refused here with OffGridAnchorError.
+ * anchors are not on is refused here with OffGridAnchorError. Exported for its direct witness.
  */
-function canonicalEncounterState(state: EncounterState): CanonicalEncounterState {
+export function canonicalEncounterState(state: EncounterState): CanonicalEncounterState {
   const fixtureJson = canonicalJson({ encounter: { state } });
   const decoded: unknown = JSON.parse(fixtureJson) as unknown;
   if (typeof decoded !== 'object' || decoded === null || Array.isArray(decoded)) {
