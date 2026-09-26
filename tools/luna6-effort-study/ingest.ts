@@ -7,7 +7,7 @@
  */
 import { canonicalJson } from '../../src/commands/canonical-json';
 import { reconcileLunaCallLog, type LunaCallRecord } from '../luna-call-log';
-import type { Luna6CallTiming, Luna6TokenUsage } from './latency';
+import { LUNA6_CALL_EXITS, type Luna6CallTiming, type Luna6TokenUsage } from './latency';
 import {
   luna6Arm,
   luna6ModeCap,
@@ -67,8 +67,25 @@ export interface Luna6CellSpeed extends Luna6GuardLedgerKey {
   readonly usage: readonly Luna6TokenUsage[];
 }
 
+export const LUNA6_GUARD_LEDGER_SCHEMA = 'luna6-guard-ledger-v1' as const;
+export const LUNA6_INGEST_REPORT_SCHEMA = 'luna6-ingest-report-v1' as const;
+
+/** `normalized/guard-ledger.json`: the SA-1 cells, read back by the analysis (§3.3, §3.7). */
+export interface Luna6GuardLedgerDocument {
+  readonly schema: typeof LUNA6_GUARD_LEDGER_SCHEMA;
+  readonly registration: Luna6EffortStudyRegistration['id'];
+  readonly entries: readonly Luna6GuardLedgerEntry[];
+}
+
+export function luna6GuardLedgerDocument(
+  registration: Pick<Luna6EffortStudyRegistration, 'id'>,
+  ledger: readonly Luna6GuardLedgerEntry[],
+): Luna6GuardLedgerDocument {
+  return { schema: LUNA6_GUARD_LEDGER_SCHEMA, registration: registration.id, entries: ledger };
+}
+
 export interface Luna6IngestReport {
-  readonly schema: 'luna6-ingest-report-v1';
+  readonly schema: typeof LUNA6_INGEST_REPORT_SCHEMA;
   readonly registration: Luna6EffortStudyRegistration['id'];
   readonly cells: number;
   readonly pairs: number;
@@ -414,7 +431,7 @@ export function ingestLuna6Study(input: {
     normalized,
     ledger,
     report: {
-      schema: 'luna6-ingest-report-v1',
+      schema: LUNA6_INGEST_REPORT_SCHEMA,
       registration: registration.id,
       cells: schedule.entries.length,
       pairs: finals.length - excluded.length,
@@ -425,4 +442,266 @@ export function ingestLuna6Study(input: {
       speed,
     },
   };
+}
+
+type InputRegistration = Pick<
+  Luna6EffortStudyRegistration,
+  'id' | 'arms' | 'modes' | 'strata' | 'cells' | 'pairs' | 'maxExcludedPairs'
+>;
+
+/** The ingest report as the analysis reads it back: every field it uses, each checked. */
+export type Luna6CheckedIngestReport = Omit<Luna6IngestReport, 'attempts'>;
+
+/** Stage 7's two inputs from stage 3, returned only after every check of `luna6AnalysisInputs` passed. */
+export interface Luna6AnalysisInputs {
+  readonly ledger: readonly Luna6GuardLedgerEntry[];
+  readonly report: Luna6CheckedIngestReport;
+}
+
+function isRecord(value: unknown): value is JsonRecord {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isOrdinal(value: unknown): value is number {
+  return isCount(value) && value >= 1;
+}
+
+function isDuration(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+/** The registered cell a document entry names: its mode, stratum, the stratum's basis and seed, its rep and arm. */
+function registeredCell(
+  registration: InputRegistration,
+  value: JsonRecord,
+  where: string,
+  violations: string[],
+): (Luna6GuardLedgerKey & { readonly stratum: Luna6StratumId }) | null {
+  const { mode: modeValue, stratum: stratumValue, basis, seed, rep, arm: armValue } = value;
+  const mode = registration.modes.find((candidate) => candidate === modeValue);
+  const arm = registration.arms.find((candidate) => candidate.id === armValue);
+  const stratum = registration.strata.find((candidate) => candidate.id === stratumValue);
+  const before = violations.length;
+  if (mode === undefined) violations.push(`${where}: mode ${show(modeValue)} is not registered`);
+  if (arm === undefined) violations.push(`${where}: arm ${show(armValue)} is not registered`);
+  if (stratum === undefined) {
+    violations.push(`${where}: stratum ${show(stratumValue)} is not registered`);
+    return null;
+  }
+  if (basis !== stratum.basis) violations.push(`${where}: basis ${show(basis)} is not the ${stratum.id} basis ${stratum.basis}`);
+  if (typeof seed !== 'number' || !stratum.seeds.includes(seed)) {
+    violations.push(`${where}: seed ${show(seed)} is not a registered ${stratum.id} seed`);
+  }
+  if (!isOrdinal(rep) || rep > stratum.reps) violations.push(`${where}: rep ${show(rep)} is not in 1..${String(stratum.reps)}`);
+  if (violations.length > before || mode === undefined || arm === undefined) return null;
+  return { mode, basis: stratum.basis, seed: seed as number, rep: rep as number, arm: arm.id, stratum: stratum.id };
+}
+
+function ledgerFirings(value: unknown, where: string, violations: string[]): Luna6GuardLedgerEntry['calls'] | null {
+  const firings = Array.isArray(value) ? value.flatMap((call: unknown) => {
+    if (!isRecord(call)) return [];
+    const { ordinal, callPhase, elapsedMs } = call;
+    return isOrdinal(ordinal) && typeof callPhase === 'string' && isDuration(elapsedMs)
+      ? [{ ordinal, callPhase, elapsedMs }]
+      : [];
+  }) : [];
+  if (!Array.isArray(value) || firings.length === 0 || firings.length !== value.length) {
+    violations.push(`${where}: calls is not a non-empty list of firings with ordinal, callPhase and elapsedMs`);
+    return null;
+  }
+  return firings;
+}
+
+function parseLedger(
+  registration: InputRegistration,
+  document: unknown,
+  violations: string[],
+): readonly Luna6GuardLedgerEntry[] | null {
+  const where = 'guard ledger';
+  if (!isRecord(document)) {
+    violations.push(`${where}: is not a JSON object`);
+    return null;
+  }
+  if (document['schema'] !== LUNA6_GUARD_LEDGER_SCHEMA) {
+    violations.push(`${where}: schema ${show(document['schema'])} is not ${LUNA6_GUARD_LEDGER_SCHEMA}`);
+  }
+  if (document['registration'] !== registration.id) {
+    violations.push(`${where}: registration ${show(document['registration'])} is not ${registration.id}`);
+  }
+  const entries = document['entries'];
+  if (!Array.isArray(entries)) {
+    violations.push(`${where}: has no entries list`);
+    return null;
+  }
+  const ledger: Luna6GuardLedgerEntry[] = [];
+  const named = new Set<string>();
+  entries.forEach((entry: unknown, index) => {
+    const at = `${where}: entry ${String(index + 1)}`;
+    if (!isRecord(entry)) {
+      violations.push(`${at} is not an object`);
+      return;
+    }
+    const cell = registeredCell(registration, entry, at, violations);
+    const { ordinal } = entry;
+    if (!isOrdinal(ordinal)) violations.push(`${at}: ordinal ${show(ordinal)} is not a positive integer`);
+    const calls = ledgerFirings(entry['calls'], at, violations);
+    if (cell === null || calls === null || !isOrdinal(ordinal)) return;
+    const name = luna6CellName(cell);
+    if (named.has(name)) violations.push(`${where}: names ${name} twice`);
+    named.add(name);
+    ledger.push({ ...cell, ordinal, calls });
+  });
+  return ledger;
+}
+
+function speedCalls(value: unknown, where: string, violations: string[]): readonly Luna6TimedCall[] | null {
+  const exits: readonly unknown[] = LUNA6_CALL_EXITS;
+  const calls = Array.isArray(value) ? value.flatMap((call: unknown) => {
+    if (!isRecord(call)) return [];
+    const { elapsedMs, exit, hangGuardFired, callPhase } = call;
+    return isDuration(elapsedMs) && exits.includes(exit) && typeof hangGuardFired === 'boolean' && typeof callPhase === 'string'
+      ? [{ elapsedMs, exit: exit as Luna6TimedCall['exit'], hangGuardFired, callPhase }]
+      : [];
+  }) : [];
+  if (!Array.isArray(value) || calls.length !== value.length) {
+    violations.push(`${where}: calls is not a list of calls with elapsedMs, a call-log exit, hangGuardFired and callPhase`);
+    return null;
+  }
+  return calls;
+}
+
+function speedUsage(value: unknown, where: string, violations: string[]): readonly Luna6TokenUsage[] | null {
+  const usage = Array.isArray(value) ? value.flatMap((entry: unknown) => {
+    if (!isRecord(entry)) return [];
+    const { reasoning, output } = entry;
+    return isCount(reasoning) && isCount(output) ? [{ reasoning, output }] : [];
+  }) : [];
+  if (!Array.isArray(value) || usage.length !== value.length) {
+    violations.push(`${where}: usage is not a list of reasoning and output token counts`);
+    return null;
+  }
+  return usage;
+}
+
+function parseSpeed(
+  registration: InputRegistration,
+  value: unknown,
+  where: string,
+  violations: string[],
+): readonly Luna6CellSpeed[] | null {
+  if (!Array.isArray(value)) {
+    violations.push(`${where}: has no speed list`);
+    return null;
+  }
+  const before = violations.length;
+  const cells: Luna6CellSpeed[] = [];
+  value.forEach((entry: unknown, index) => {
+    const at = `${where}: speed entry ${String(index + 1)}`;
+    if (!isRecord(entry)) {
+      violations.push(`${at} is not an object`);
+      return;
+    }
+    const cell = registeredCell(registration, entry, at, violations);
+    const { ordinal, pair } = entry;
+    if (!isOrdinal(ordinal)) violations.push(`${at}: ordinal ${show(ordinal)} is not a positive integer`);
+    if (!isOrdinal(pair)) violations.push(`${at}: pair ${show(pair)} is not a positive integer`);
+    const calls = speedCalls(entry['calls'], at, violations);
+    const usage = speedUsage(entry['usage'], at, violations);
+    if (cell === null || calls === null || usage === null || !isOrdinal(ordinal) || !isOrdinal(pair)) return;
+    cells.push({ ...cell, ordinal, pair, calls, usage });
+  });
+  return violations.length > before ? null : cells;
+}
+
+function parseExcludedPairs(
+  value: unknown,
+  where: string,
+  violations: string[],
+): Luna6IngestReport['excludedPairs'] | null {
+  const excluded = Array.isArray(value) ? value.flatMap((entry: unknown) => {
+    if (!isRecord(entry)) return [];
+    const { pair, name, reason } = entry;
+    return isOrdinal(pair) && typeof name === 'string' && typeof reason === 'string' ? [{ pair, name, reason }] : [];
+  }) : [];
+  if (!Array.isArray(value) || excluded.length !== value.length) {
+    violations.push(`${where}: excludedPairs is not a list of pairs with name and reason`);
+    return null;
+  }
+  return excluded;
+}
+
+function parseReport(
+  registration: InputRegistration,
+  document: unknown,
+  violations: string[],
+): Luna6CheckedIngestReport | null {
+  const where = 'ingest report';
+  if (!isRecord(document)) {
+    violations.push(`${where}: is not a JSON object`);
+    return null;
+  }
+  const { schema, registration: registered, cells, pairs, sa1, calls } = document;
+  if (schema !== LUNA6_INGEST_REPORT_SCHEMA) violations.push(`${where}: schema ${show(schema)} is not ${LUNA6_INGEST_REPORT_SCHEMA}`);
+  if (registered !== registration.id) violations.push(`${where}: registration ${show(registered)} is not ${registration.id}`);
+  if (cells !== registration.cells) violations.push(`${where}: cells ${show(cells)} is not the registered ${String(registration.cells)}`);
+  const excludedPairs = parseExcludedPairs(document['excludedPairs'], where, violations);
+  if (excludedPairs !== null) {
+    if (excludedPairs.length > registration.maxExcludedPairs) {
+      violations.push(`${where}: ${String(excludedPairs.length)} pairs end excluded, more than the registered ` +
+        `${String(registration.maxExcludedPairs)}`);
+    }
+    if (pairs !== registration.pairs - excludedPairs.length) {
+      violations.push(`${where}: pairs ${show(pairs)} is not the registered ${String(registration.pairs)} less ` +
+        `${String(excludedPairs.length)} excluded`);
+    }
+  }
+  if (!isCount(sa1)) violations.push(`${where}: sa1 ${show(sa1)} is not a count`);
+  const speed = parseSpeed(registration, document['speed'], where, violations);
+  if (speed !== null) {
+    violations.push(...luna6GridViolations(speed, registration).map((violation) => `${where}: speed: ${violation}`));
+    const total = speed.reduce((sum, cell) => sum + cell.calls.length, 0);
+    if (calls !== total) violations.push(`${where}: calls ${show(calls)} is not the ${String(total)} calls of its speed cells`);
+  }
+  if (excludedPairs === null || speed === null || !isCount(sa1) || !isCount(pairs) || !isCount(calls) || !isCount(cells)) {
+    return null;
+  }
+  return {
+    schema: LUNA6_INGEST_REPORT_SCHEMA, registration: registration.id, cells, pairs, excludedPairs, sa1, calls, speed,
+  };
+}
+
+/**
+ * Stage 7 reads stage 3's guard ledger and ingest report back (§3.7). Both must be this registration's, the report's
+ * grid and counts must be the registered ones, and the ledger must name exactly the cells whose calls fired the hang
+ * guard (SA-1): a ledger entry lost between the stages would otherwise remove an override without a trace. Throws
+ * `Luna6StudyRefusal` naming every mismatch.
+ */
+export function luna6AnalysisInputs(
+  registration: InputRegistration,
+  ledgerDocument: unknown,
+  reportDocument: unknown,
+): Luna6AnalysisInputs {
+  const violations: string[] = [];
+  const ledger = parseLedger(registration, ledgerDocument, violations);
+  const report = parseReport(registration, reportDocument, violations);
+  if (ledger !== null && report !== null) {
+    if (ledger.length !== report.sa1) {
+      violations.push(`guard ledger: holds ${String(ledger.length)} entries; the ingest report counts sa1 ${String(report.sa1)}`);
+    }
+    const fired = new Set(report.speed.filter((cell) => cell.calls.some((call) => call.hangGuardFired)).map(luna6CellName));
+    const named = new Set(ledger.map(luna6CellName));
+    for (const name of [...fired].sort()) {
+      if (!named.has(name)) violations.push(`guard ledger: lacks ${name}, whose call log fired the hang guard`);
+    }
+    for (const name of [...named].sort()) {
+      if (!fired.has(name)) violations.push(`guard ledger: names ${name}, whose call log never fired the hang guard`);
+    }
+  }
+  if (violations.length > 0) throw new Luna6StudyRefusal(violations);
+  if (ledger === null || report === null) throw new Luna6StudyRefusal(['inputs: the guard ledger or the ingest report is unreadable']);
+  return { ledger, report };
 }

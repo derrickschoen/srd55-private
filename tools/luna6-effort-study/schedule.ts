@@ -5,6 +5,7 @@
  */
 import { d569Mulberry32 } from '../d569-blind-experiment';
 import {
+  LUNA6_BASES,
   luna6Arm,
   luna6ModeCap,
   type Luna6ArmId,
@@ -68,8 +69,6 @@ type ScheduleRegistration = Pick<
   'id' | 'arms' | 'modes' | 'strata' | 'cells' | 'pairs' | 'caps' | 'codexBin' | 'kb' | 'studyRoot' | 'cellEnv'
 >;
 
-const BASIS_ORDER: readonly Luna6Basis[] = ['hard', 'brutal'];
-
 export function luna6CellName(cell: Luna6CellIdentity): string {
   return `${cell.mode} ${cell.stratum} ${String(cell.seed)} rep ${String(cell.rep)} ${cell.arm}`;
 }
@@ -92,7 +91,7 @@ export function luna6StratumOfSeed(
 export function luna6CanonicalPairs(
   registration: Pick<Luna6EffortStudyRegistration, 'modes' | 'strata'>,
 ): readonly Luna6PairIdentity[] {
-  return BASIS_ORDER.flatMap((basis) => {
+  return LUNA6_BASES.flatMap((basis) => {
     const seeds = registration.strata
       .filter((stratum) => stratum.basis === basis)
       .flatMap((stratum) => stratum.seeds.map((seed) => ({ seed, stratum })))

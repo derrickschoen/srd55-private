@@ -28,15 +28,18 @@ import {
   type Luna6TokenSummary,
 } from './latency';
 import {
+  luna6AnalysisInputs,
   Luna6StudyRefusal,
   type JsonRecord,
   type Luna6CellSpeed,
   type Luna6GuardLedgerKey,
 } from './ingest';
 import {
+  LUNA6_BASES,
   luna6Arm,
   luna6Tags,
   type Luna6ArmId,
+  type Luna6Basis,
   type Luna6EffortStudyRegistration,
   type Luna6Mode,
   type Luna6Seat,
@@ -76,6 +79,7 @@ type AnalysisRegistration = Pick<
   Luna6EffortStudyRegistration,
   'id' | 'arms' | 'modes' | 'strata' | 'seats' | 'margin' | 'qStar' | 'resamples' | 'bootstrapSeed'
 >;
+type StageRegistration = AnalysisRegistration & Pick<Luna6EffortStudyRegistration, 'cells' | 'pairs' | 'maxExcludedPairs'>;
 
 const COMPONENT_MAXIMA: Readonly<Record<D569PanelComponent, number>> = {
   targetPriority: 3, actionEconomy: 3, coherence: 2, positioning: 2,
@@ -194,12 +198,13 @@ function luna6Clusters(pairs: readonly Luna6PairDifference[]): readonly Luna6Clu
     .sort((left, right) => left.seed - right.seed || (left.key < right.key ? -1 : left.key > right.key ? 1 : 0));
 }
 
-interface ExactDraw {
+/** One bootstrap draw in exact integers: S, the sum of the drawn pairs' t, and m, the number of drawn pairs. */
+export interface Luna6ExactDraw {
   readonly sum: number;
   readonly count: number;
 }
 
-function exactDraws(clusters: readonly Luna6Cluster[], resamples: number, seed: number): ExactDraw[] {
+function exactDraws(clusters: readonly Luna6Cluster[], resamples: number, seed: number): Luna6ExactDraw[] {
   return d569ClusterBootstrapDraws(clusters, resamples, seed, (picked) => {
     let sum = 0;
     let count = 0;
@@ -212,15 +217,36 @@ function exactDraws(clusters: readonly Luna6Cluster[], resamples: number, seed: 
 }
 
 /** Ascending by the exact value sum/count: compare sum₁·count₂ with sum₂·count₁ (counts are positive). */
-function sortExact(draws: ExactDraw[]): ExactDraw[] {
+function sortExact(draws: Luna6ExactDraw[]): Luna6ExactDraw[] {
   return draws.sort((left, right) => left.sum * right.count - right.sum * left.count);
 }
 
-/** D569's percentile index `floor(q·n)` clamped to `[0, n − 1]`, over exactly sorted draws. */
-function exactQuantile(sorted: readonly ExactDraw[], quantile: number, divisor: number): number {
+/**
+ * D569's percentile rule over exactly sorted draws: index `floor(q·n)` clamped to `[0, n − 1]` (§3.4); the value is
+ * the draw's S/(divisor·m). NaN when there are no draws.
+ */
+export function luna6ExactPercentile(sorted: readonly Luna6ExactDraw[], quantile: number, divisor: number): number {
   const index = Math.min(sorted.length - 1, Math.max(0, Math.floor(quantile * sorted.length)));
   const draw = sorted[index];
   return draw === undefined ? Number.NaN : draw.sum / (divisor * draw.count);
+}
+
+/**
+ * D898 R6: a draw's mean S/(seats·m) exceeds δ = a/b iff b·S > seats·a·m, in exact integer arithmetic. A draw
+ * exactly at δ does not exceed it and counts against xhigh.
+ */
+export function luna6DrawExceedsMargin(draw: Luna6ExactDraw, rule: Pick<DecisionRule, 'margin' | 'seats'>): boolean {
+  return rule.margin.denominator * draw.sum > rule.seats.length * rule.margin.numerator * draw.count;
+}
+
+/** D898 R6: floor(q*·n) draws, 2,500 at the registered q* = 0.025 and n = 100,000. */
+export function luna6RejectLimit(rule: Pick<DecisionRule, 'qStar' | 'resamples'>): number {
+  return Math.floor(rule.qStar * rule.resamples);
+}
+
+/** D898 R6: reject H0 iff the draws that do not exceed δ number at most floor(q*·n). */
+export function luna6RejectsH0(drawsAtOrBelowMargin: number, rule: Pick<DecisionRule, 'qStar' | 'resamples'>): boolean {
+  return drawsAtOrBelowMargin <= luna6RejectLimit(rule);
 }
 
 export interface Luna6Decision {
@@ -237,26 +263,22 @@ export interface Luna6Decision {
 export function luna6Decision(pairs: readonly Luna6PairDifference[], rule: DecisionRule): Luna6Decision {
   if (pairs.length === 0) throw new TypeError('The decision needs at least one complete pair.');
   const divisor = rule.seats.length;
-  const exceedsMargin = (sum: number, count: number): boolean =>
-    rule.margin.denominator * sum > divisor * rule.margin.numerator * count;
   const clusters = luna6Clusters(pairs);
   const draws = exactDraws(clusters, rule.resamples, rule.bootstrapSeed);
-  const drawsAtOrBelowMargin = draws.filter((draw) => !exceedsMargin(draw.sum, draw.count)).length;
-  const rejectLimit = Math.floor(rule.qStar * rule.resamples);
+  const drawsAtOrBelowMargin = draws.filter((draw) => !luna6DrawExceedsMargin(draw, rule)).length;
   const totalT = pairs.reduce((sum, pair) => sum + pair.t, 0);
-  const rejectH0 = drawsAtOrBelowMargin <= rejectLimit;
   const sorted = sortExact(draws);
   return {
-    decision: rejectH0 ? 'xhigh' : 'high',
+    decision: luna6RejectsH0(drawsAtOrBelowMargin, rule) ? 'xhigh' : 'high',
     delta: {
       mean: totalT / (divisor * pairs.length),
-      lowerQstar: exactQuantile(sorted, rule.qStar, divisor),
-      upper975: exactQuantile(sorted, UPPER_QUANTILE, divisor),
+      lowerQstar: luna6ExactPercentile(sorted, rule.qStar, divisor),
+      upper975: luna6ExactPercentile(sorted, UPPER_QUANTILE, divisor),
     },
     pairs: pairs.length,
     clusters: clusters.length,
     drawsAtOrBelowMargin,
-    rejectLimit,
+    rejectLimit: luna6RejectLimit(rule),
   };
 }
 
@@ -282,8 +304,8 @@ function luna6Interval(
     pairs: pairs.length,
     clusters: clusters.length,
     mean: pairs.reduce((sum, pair) => sum + pair.t, 0) / (divisor * pairs.length),
-    lower: exactQuantile(sorted, LOWER_QUANTILE, divisor),
-    upper: exactQuantile(sorted, UPPER_QUANTILE, divisor),
+    lower: luna6ExactPercentile(sorted, LOWER_QUANTILE, divisor),
+    upper: luna6ExactPercentile(sorted, UPPER_QUANTILE, divisor),
   };
 }
 
@@ -613,6 +635,9 @@ export function luna6Speed(
   return { byArmMode, byArm, pairedTimeRatio: luna6PairedTimeRatio(timings), tokensByArmMode };
 }
 
+export const LUNA6_SUPPLEMENTARY_STATUS =
+  'supplementary, not preregistered: S-PREREG §3.4 reports the difference per mode and per basis' as const;
+
 export interface Luna6StudyAnalysis {
   readonly decision: Luna6Decision['decision'];
   readonly delta: Luna6Decision['delta'];
@@ -628,16 +653,23 @@ export interface Luna6StudyAnalysis {
     readonly drawsAtOrBelowMargin: number;
     readonly rejectLimit: number;
   };
+  /** S-PREREG §3.4's secondaries, reported and never deciding. */
   readonly secondary: {
-    readonly perMode: Readonly<Record<string, Luna6Interval>>;
-    readonly perStratum: Readonly<Record<string, Luna6Interval>>;
+    readonly perMode: Readonly<Record<Luna6Mode, Luna6Interval>>;
+    /** A basis pools its two strata (D898 R2): hard is 5117xxx and 5118xxx, brutal 6203xxx and 6207xxx. */
+    readonly perBasis: Readonly<Record<Luna6Basis, Luna6Interval>>;
     readonly executedOnly: Luna6Interval;
     readonly perComponent: Readonly<Record<string, Luna6Interval>>;
     readonly perSeat: Readonly<Record<string, Luna6Interval>>;
     readonly failureRisk: Luna6Interval;
     readonly withoutSa1: Luna6Interval;
-    /** Secondary k draws with bootstrap seed + k (k in 1..: modes, strata, executed-only, components, seats, risk). */
+    /** Secondary k draws with bootstrap seed + k, in the order this text lists. */
     readonly seedOffsets: string;
+  };
+  /** Reported beside the secondaries and not preregistered: the four strata, each a basis and a family. */
+  readonly supplementary: {
+    readonly status: typeof LUNA6_SUPPLEMENTARY_STATUS;
+    readonly perStratum: Readonly<Record<Luna6StratumId, Luna6Interval>>;
   };
   readonly speed: Luna6Speed;
   readonly diagnostics: { readonly floatDelta: Luna6FloatDiagnostic };
@@ -668,16 +700,21 @@ export function analyzeLuna6Study(input: {
     return luna6Interval(pairs, pairDivisor, registration.resamples, registration.bootstrapSeed + offset);
   };
   const all = (): boolean => true;
+  const basisOf = new Map(registration.strata.map((stratum) => [stratum.id, stratum.basis]));
   const perMode = Object.fromEntries(registration.modes.map((mode) =>
-    [mode, interval(luna6CellNumerator, (pair) => pair.mode === mode, divisor)]));
-  const perStratum = Object.fromEntries(registration.strata.map((stratum) =>
-    [stratum.id, interval(luna6CellNumerator, (pair) => pair.stratum === stratum.id, divisor)]));
+    [mode, interval(luna6CellNumerator, (pair) => pair.mode === mode, divisor)])) as Record<Luna6Mode, Luna6Interval>;
+  const perBasis = Object.fromEntries(LUNA6_BASES.map((basis) =>
+    [basis, interval(luna6CellNumerator, (pair) => basisOf.get(pair.stratum) === basis, divisor)])) as
+    Record<Luna6Basis, Luna6Interval>;
   const executed = interval(executedOnly, all, divisor);
   const perComponent = Object.fromEntries(D569_PANEL_COMPONENTS.map((name) =>
     [name, interval(componentNumerator(name), all, divisor)]));
   const perSeat = Object.fromEntries(registration.seats.map((seat) => [seat, interval(seatNumerator(seat), all, 1)]));
   const failureRisk = interval(failureIndicator, all, 1);
   const withoutSa1 = interval(luna6CellNumerator, all, divisor, []);
+  const perStratum = Object.fromEntries(registration.strata.map((stratum) =>
+    [stratum.id, interval(luna6CellNumerator, (pair) => pair.stratum === stratum.id, divisor)])) as
+    Record<Luna6StratumId, Luna6Interval>;
   return {
     decision: decision.decision,
     delta: decision.delta,
@@ -694,11 +731,34 @@ export function analyzeLuna6Study(input: {
       rejectLimit: decision.rejectLimit,
     },
     secondary: {
-      perMode, perStratum, executedOnly: executed, perComponent, perSeat, failureRisk, withoutSa1,
-      seedOffsets: 'bootstrap seed + k, k = 1.. in the order modes, strata, executed-only, components, seats, ' +
-        'failure risk, without SA-1',
+      perMode, perBasis, executedOnly: executed, perComponent, perSeat, failureRisk, withoutSa1,
+      seedOffsets: 'bootstrap seed + k, k = 1.. in the order modes, bases, executed-only, components, seats, ' +
+        'failure risk, without SA-1, then the supplementary strata',
     },
+    supplementary: { status: LUNA6_SUPPLEMENTARY_STATUS, perStratum },
     speed: luna6Speed(registration, input.speed ?? []),
     diagnostics: { floatDelta: floatDiagnostic(registration, cells, ledger) },
   };
+}
+
+/**
+ * Stage 7 as the operator runs it: the guard ledger and the ingest report are checked against the registration and
+ * each other (`luna6AnalysisInputs`) before the analysis, and the pairs the packets exclude must be the pairs the
+ * ingest report excluded. Throws `Luna6StudyRefusal` naming every mismatch.
+ */
+export function analyzeLuna6StudyStage(input: {
+  readonly registration: StageRegistration;
+  readonly documents: Readonly<Partial<Record<Luna6Tag, Luna6TagDocuments>>>;
+  readonly ledgerDocument: unknown;
+  readonly reportDocument: unknown;
+}): Luna6StudyAnalysis {
+  const { ledger, report } = luna6AnalysisInputs(input.registration, input.ledgerDocument, input.reportDocument);
+  const analysis = analyzeLuna6Study({ registration: input.registration, documents: input.documents, ledger, speed: report.speed });
+  if (analysis.excludedPairs !== report.excludedPairs.length) {
+    throw new Luna6StudyRefusal([
+      `ingest report: excludes ${String(report.excludedPairs.length)} of its pairs; the packets exclude ` +
+      `${String(analysis.excludedPairs)}`,
+    ]);
+  }
+  return analysis;
 }

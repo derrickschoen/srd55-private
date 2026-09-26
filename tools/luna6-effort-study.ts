@@ -19,15 +19,14 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { canonicalJson } from '../src/commands/canonical-json';
-import { analyzeLuna6Study, type Luna6TagDocuments } from './luna6-effort-study/analyze';
+import { analyzeLuna6StudyStage, type Luna6TagDocuments } from './luna6-effort-study/analyze';
 import {
   ingestLuna6Study,
+  luna6GuardLedgerDocument,
   luna6PairsNeedingRerun,
   Luna6StudyRefusal,
   type JsonRecord,
   type Luna6CellEvidence,
-  type Luna6CellSpeed,
-  type Luna6GuardLedgerKey,
 } from './luna6-effort-study/ingest';
 import { buildLuna6Packets } from './luna6-effort-study/packets';
 import {
@@ -217,7 +216,7 @@ function ingestCommand(args: ParsedArgs, registration: Luna6EffortStudyRegistrat
     })),
     {
       path: `${args.root}/normalized/guard-ledger.json`,
-      text: `${canonicalJson({ schema: 'luna6-guard-ledger-v1', registration: registration.id, entries: result.ledger })}\n`,
+      text: `${canonicalJson(luna6GuardLedgerDocument(registration, result.ledger))}\n`,
     },
     { path: `${args.root}/normalized/ingest-report.json`, text: `${canonicalJson(result.report)}\n` },
   ]);
@@ -301,12 +300,9 @@ function analyzeCommand(args: ParsedArgs, registration: Luna6EffortStudyRegistra
   const report = readJson(`${args.root}/normalized/ingest-report.json`, 'ingest report');
   inputs.ledger = sha256(ledger.text);
   inputs.ingestReport = sha256(report.text);
-  const ledgerEntries = (ledger.value as { readonly entries?: readonly Luna6GuardLedgerKey[] }).entries;
-  const speed = (report.value as { readonly speed?: readonly Luna6CellSpeed[] }).speed;
-  if (!Array.isArray(ledgerEntries) || !Array.isArray(speed)) {
-    throw new CliFailure(['inputs: the guard ledger or the ingest report has no entries']);
-  }
-  const analysis = analyzeLuna6Study({ registration, documents, ledger: ledgerEntries, speed });
+  const analysis = analyzeLuna6StudyStage({
+    registration, documents, ledgerDocument: ledger.value, reportDocument: report.value,
+  });
   const { delta, ...rest } = analysis;
   const result = {
     schema: LUNA6_RESULT_SCHEMA,

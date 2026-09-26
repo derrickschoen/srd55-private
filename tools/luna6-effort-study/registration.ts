@@ -12,8 +12,12 @@ export type Luna6Mode = (typeof LUNA6_MODES)[number];
 
 export const LUNA6_STRATUM_IDS = ['hard', 'brutal', 'hard2', 'brutal2'] as const;
 export type Luna6StratumId = (typeof LUNA6_STRATUM_IDS)[number];
-/** The arena's `--basis`. The second family runs on the same two bases from its own fixture directories. */
-export type Luna6Basis = 'hard' | 'brutal';
+/**
+ * The arena's `--basis`, in D898 R2's order (hard before brutal). The second family runs on the same two bases from
+ * its own fixture directories, so a basis pools two strata: hard is 5117xxx and 5118xxx, brutal 6203xxx and 6207xxx.
+ */
+export const LUNA6_BASES = ['hard', 'brutal'] as const;
+export type Luna6Basis = (typeof LUNA6_BASES)[number];
 /** One packet per mode and stratum: `blind-hard` … `advice-brutal2` (D898 R3). */
 export type Luna6Tag = `${Luna6Mode}-${Luna6StratumId}`;
 

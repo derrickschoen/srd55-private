@@ -9,6 +9,14 @@ import { LEGACY_ROUND_WALL_MS } from '../model-routes';
 export const LUNA6_CENSORED_QUANTILE = '>=1800000 (censored)' as const;
 export type Luna6Quantile = number | typeof LUNA6_CENSORED_QUANTILE | null;
 
+/** Every exit a call-log record can carry; the type below fails to compile if `LunaCallExit` gains one. */
+export const LUNA6_CALL_EXITS = [
+  'completed', 'cancelled', 'timed_out', 'infrastructure_failed', 'failed', 'thrown',
+] as const satisfies readonly LunaCallExit[];
+type MissingCallExit = Exclude<LunaCallExit, (typeof LUNA6_CALL_EXITS)[number]>;
+const everyCallExitListed: [MissingCallExit] extends [never] ? true : MissingCallExit = true;
+void everyCallExitListed;
+
 export interface Luna6CallTiming {
   readonly elapsedMs: number;
   readonly exit: LunaCallExit;

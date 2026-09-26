@@ -3,30 +3,47 @@ import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import { mkdtempSync, readFileSync, rmSync } from '../../helpers/test-filesystem';
+import {
+  BRUTAL_10_PROTOCOL,
+  buildRerunPacket,
+  R1_10_PROTOCOL,
+  type RerunProtocol,
+} from '../../../tools/ai-dm-rerun-packet';
 import { runLuna6EffortStudyCli } from '../../../tools/luna6-effort-study';
 import {
   analyzeLuna6Study,
+  analyzeLuna6StudyStage,
   luna6Decision,
+  luna6DrawExceedsMargin,
+  luna6ExactPercentile,
   luna6PairDifferences,
+  luna6RejectLimit,
+  luna6RejectsH0,
   type Luna6PairDifference,
   type Luna6ScoredCell,
   type Luna6TagDocuments,
 } from '../../../tools/luna6-effort-study/analyze';
 import {
   ingestLuna6Study,
+  luna6GuardLedgerDocument,
   luna6RelabelViolations,
   Luna6StudyRefusal,
   type Luna6CellEvidence,
   type Luna6GuardLedgerKey,
 } from '../../../tools/luna6-effort-study/ingest';
 import { luna6PairedTimeRatio, luna6SpeedSummary, type Luna6CallTiming } from '../../../tools/luna6-effort-study/latency';
-import { luna6PacketLeakViolations } from '../../../tools/luna6-effort-study/packets';
+import {
+  buildLuna6Packets,
+  luna6PacketLeakViolations,
+  luna6PacketProtocol,
+} from '../../../tools/luna6-effort-study/packets';
 import {
   LUNA6_EFFORT_STUDY,
   type Luna6ArmId,
   type Luna6EffortStudyRegistration,
   type Luna6Mode,
   type Luna6StratumId,
+  type Luna6Tag,
 } from '../../../tools/luna6-effort-study/registration';
 import {
   buildLuna6Reruns,
@@ -39,7 +56,9 @@ import {
 
 // Every expectation below is typed from the preregistration S-PREREG (D898, 2026-09-26; R1-R11 supersede plan r5 §3
 // for option (b)) or derived by hand from plan r5 §4.5 as adapted to D898's counts (the arithmetic is in
-// .tmp/runs/luna6/b6/derivations.txt). None is read from the module under test.
+// .tmp/runs/luna6/b6/derivations.txt). The registered schedule sequence and the packets' blinding order come from an
+// independent python oracle written from D898 R2 and R3 (.tmp/runs/luna6/b6/fix1/oracle/oracle.py, no repo code).
+// None is read from the module under test.
 
 type Outcome<Value> = { readonly ok: Value } | { readonly error: readonly string[] | string };
 
@@ -110,9 +129,10 @@ const MINI: Luna6EffortStudyRegistration = {
 
 type Entry = Readonly<Record<string, unknown>>;
 
-function miniDocuments(): Record<'blind-hard' | 'advice-hard', { packet: Entry[]; answerKey: Entry[]; seats: Record<string, Entry[] | undefined> }> {
+function miniDocuments(
+  highScore: Entry = { targetPriority: 2, actionEconomy: 2, coherence: 1, positioning: 1, total: 6 },
+): Record<'blind-hard' | 'advice-hard', { packet: Entry[]; answerKey: Entry[]; seats: Record<string, Entry[] | undefined> }> {
   const xhighScore = { targetPriority: 3, actionEconomy: 3, coherence: 1, positioning: 1, total: 8 };
-  const highScore = { targetPriority: 2, actionEconomy: 2, coherence: 1, positioning: 1, total: 6 };
   const arms: Record<string, Luna6ArmId> = { 'blind-001': XHIGH, 'blind-002': HIGH, 'blind-003': HIGH, 'blind-004': XHIGH };
   const cases: Record<string, string> = {
     'blind-001': 'case-01-1', 'blind-002': 'case-02-1', 'blind-003': 'case-01-1', 'blind-004': 'case-02-1',
@@ -190,6 +210,67 @@ function normalise(value: unknown): unknown {
     .replace(/pair \d+ \(/gu, 'pair <p> (')
     .replace(/cell \d+ (exit|infrastructure_failed|no row)/gu, 'cell <n> $1')
     .replace(/"ordinal":\d+,"calls"/gu, '"ordinal":"<n>","calls"')) as unknown;
+}
+
+/** D898 R1's hard stratum alone: 10 seeds × 2 modes × 3 reps = 60 pairs, with the registered STOP threshold of 24. */
+const HARD60: Luna6EffortStudyRegistration = {
+  ...LUNA6_EFFORT_STUDY,
+  strata: [LUNA6_EFFORT_STUDY.strata[0]!],
+  cells: 120,
+  pairs: 60,
+  clusters: 10,
+};
+
+/**
+ * One tag's normalized rows (relabelled, as ingest writes them) for every registered seed and rep, in the minimal
+ * post-shift row shape the FROZEN packet builder accepts (its own test's `registeredRows`, with the study's arms).
+ */
+function packetRows(): Record<Luna6Tag, Entry[]> {
+  const rows: Partial<Record<Luna6Tag, Entry[]>> = {};
+  for (const mode of MODES) {
+    for (const stratum of STRATA) {
+      rows[`${mode}-${stratum.id}`] = stratum.seeds.flatMap((seed, index) => [1, 2, 3].flatMap((round) => ARMS.map((arm) => {
+        const effort = arm === XHIGH ? 'xhigh' : 'high';
+        return {
+          seed, room: index + 1, round, arm, instructionSource: 'kb', skillName: null, skillHash: null,
+          model: 'gpt-6-luna', effort, cli: 'codex', startingRoomDigest: `frozen-room-${String(seed)}`,
+          combatModel: 'initiative_segments_v1', initiativeOrder: ['monster', 'fighter'], outcome: 'authorized',
+          plannedBy: { model: 'gpt-6-luna', effort }, decisionTransport: 'mcp_minimal', firstDecisionAccepted: true,
+          decisionAttempts: 1, decisionRejectionCodes: [], normalizationCodes: [], rationale: null,
+          roundNarrative: null, authorizedPlan: null, roundWallBudgetMs: null,
+        };
+      })));
+    }
+  }
+  return rows as Record<Luna6Tag, Entry[]>;
+}
+
+/** Every registered tag's packet, answer key and three identical seat files; `score` gives each cell's components. */
+function gridDocuments(
+  score: (cell: Luna6CellIdentity) => ReturnType<typeof components>,
+): Partial<Record<Luna6Tag, Luna6TagDocuments>> {
+  return Object.fromEntries(MODES.flatMap((mode) => STRATA.map((stratum) => {
+    const cells = stratum.seeds.flatMap((seed, index) => [1, 2, 3].flatMap((rep) => ARMS.map((arm) => ({
+      cell: { mode, stratum: stratum.id, seed, rep, arm },
+      caseId: `case-${String(index + 1).padStart(2, '0')}-${String(rep)}`,
+    }))));
+    const blindId = (index: number) => `blind-${String(index + 1).padStart(3, '0')}`;
+    const seat = cells.map(({ cell }, index) => {
+      const scores = score(cell);
+      const total = scores.targetPriority + scores.actionEconomy + scores.coherence + scores.positioning;
+      return { blindId: blindId(index), ...scores, total };
+    });
+    return [`${mode}-${stratum.id}`, {
+      packet: cells.map(({ caseId }, index) => ({ blindId: blindId(index), caseId, outcome: 'authorized' })),
+      answerKey: cells.map(({ cell }, index) => ({ blindId: blindId(index), arm: cell.arm })),
+      seats: { fable: seat, astra: seat, sol: seat },
+    }];
+  })));
+}
+
+/** A schedule entry as the oracle prints it: ordinal, pair, mode, stratum, seed, rep, arm. */
+function scheduleRow(entry: Luna6ScheduleEntry): readonly unknown[] {
+  return [entry.ordinal, entry.pair, entry.mode, entry.stratum, entry.seed, entry.rep, entry.arm];
 }
 
 describe('LUNA6 effort study', () => {
@@ -546,8 +627,13 @@ describe('LUNA6 effort study', () => {
     const entries = first.entries;
     const couples = Array.from({ length: entries.length / 2 }, (_unused, index) => [entries[2 * index]!, entries[2 * index + 1]!] as const);
     const expectedCells = new Set(registeredGrid().map(cellKey));
-    const canonicalPairs = STRATA.filter((stratum) => stratum.id === 'hard' || stratum.id === 'hard2')
-      .concat(STRATA.filter((stratum) => stratum.id === 'brutal' || stratum.id === 'brutal2'));
+    // D898 R2's canonical order: basis (hard = 5117xxx then 5118xxx, before brutal = 6203xxx then 6207xxx), then
+    // mode (blind before advice), then seed ascending, then rep ascending.
+    const canonicalPairs = [['hard', 'hard2'], ['brutal', 'brutal2']].flatMap((basis) => MODES.flatMap((mode) =>
+      STRATA.filter((stratum) => basis.includes(stratum.id))
+        .flatMap((stratum) => stratum.seeds.map((seed) => ({ seed, stratum: stratum.id })))
+        .sort((left, right) => left.seed - right.seed)
+        .flatMap(({ seed, stratum }) => [1, 2, 3].map((rep) => pairKey({ mode, stratum, seed, rep })))));
     expect({
       entries: entries.length,
       pairs: new Set(entries.map(pairKey)).size,
@@ -559,9 +645,7 @@ describe('LUNA6 effort study', () => {
       deterministic: canonicalJson(first) === canonicalJson(again),
       ordinalsInOrder: entries.every((entry, index) => entry.ordinal === index + 1),
       seedMatters: canonicalJson(buildLuna6Schedule(LUNA6_EFFORT_STUDY, 2).entries) !== canonicalJson(entries),
-      pairOrderShuffled: couples.map(([one]) => pairKey(one)).join() !== canonicalPairs.flatMap((stratum) =>
-        MODES.flatMap((mode) => stratum.seeds.flatMap((seed) => [1, 2, 3].map((rep) =>
-          pairKey({ mode, stratum: stratum.id, seed, rep }))))).join(),
+      pairOrderShuffled: canonicalPairs.length === 240 && couples.map(([one]) => pairKey(one)).join() !== canonicalPairs.join(),
     }).toEqual({
       entries: 480, pairs: 240, pairsAdjacent: true, bothOrders: true, eachCellOnce: true, deterministic: true,
       ordinalsInOrder: true, seedMatters: true, pairOrderShuffled: true,
@@ -640,5 +724,343 @@ describe('LUNA6 effort study', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it('decides at the exact margin and at the exact rejection limit', () => {
+    // D898 R6. A draw exceeds δ = 1/5 iff 5·S > 3·m: S = 3, m = 5 is exactly 1/5 and does not exceed it. H0 is rejected
+    // iff at most floor(q*·n) draws do not exceed δ: 2,500 of 100,000 rejects, 2,501 does not.
+    // atMargin: every cluster keeps five pairs (advice rep 3 is excluded) with t = 1, 1, 1, 0, 0, so every draw has
+    //   S = 120, m = 200 and 5·120 = 3·200: all 2,000 draws count against xhigh -> high.
+    // atLimit: n = 39 gives floor(0.025·39) = 0; every pair t = +2 exceeds, so 0 draws are at or below; 0 ≤ 0 -> xhigh.
+    // onePastLimit: n = 1 and the single draw sits at the margin: 1 draw at or below against a limit of 0 -> high.
+    const atMarginPairs = registeredPairs((_seed, pair) => pair < 3 ? 1 : 0)
+      .filter((pair) => !(pair.mode === 'advice' && pair.rep === 3));
+    const decide = (pairs: readonly Luna6PairDifference[], resamples: number) => {
+      const result = luna6Decision(pairs, { ...LUNA6_EFFORT_STUDY, resamples });
+      return {
+        decision: result.decision, mean: result.delta.mean, lower: result.delta.lowerQstar, pairs: result.pairs,
+        drawsAtOrBelowMargin: result.drawsAtOrBelowMargin, rejectLimit: result.rejectLimit,
+      };
+    };
+    expect({
+      exceeds: {
+        below: luna6DrawExceedsMargin({ sum: 2, count: 5 }, LUNA6_EFFORT_STUDY),
+        at: luna6DrawExceedsMargin({ sum: 3, count: 5 }, LUNA6_EFFORT_STUDY),
+        above: luna6DrawExceedsMargin({ sum: 4, count: 5 }, LUNA6_EFFORT_STUDY),
+      },
+      limit: {
+        registered: luna6RejectLimit(LUNA6_EFFORT_STUDY),
+        atLimit: luna6RejectsH0(2_500, LUNA6_EFFORT_STUDY),
+        onePast: luna6RejectsH0(2_501, LUNA6_EFFORT_STUDY),
+      },
+      atMargin: decide(atMarginPairs, 2_000),
+      atLimit: decide(registeredPairs(() => 2), 39),
+      onePastLimit: decide(atMarginPairs, 1),
+    }).toEqual({
+      exceeds: { below: false, at: false, above: true },
+      limit: { registered: 2500, atLimit: true, onePast: false },
+      atMargin: { decision: 'high', mean: 0.2, lower: 0.2, pairs: 200, drawsAtOrBelowMargin: 2000, rejectLimit: 50 },
+      atLimit: { decision: 'xhigh', mean: 2 / 3, lower: 2 / 3, pairs: 240, drawsAtOrBelowMargin: 0, rejectLimit: 0 },
+      onePastLimit: { decision: 'high', mean: 0.2, lower: 0.2, pairs: 200, drawsAtOrBelowMargin: 1, rejectLimit: 0 },
+    });
+  });
+
+  it("builds every tag's packet with the frozen builder at its registered shuffle seed and protocol", () => {
+    // D898 R3, typed from the registration text: each tag's shuffle seed, and the protocols hard R1_10_PROTOCOL,
+    // brutal { ...BRUTAL_10_PROTOCOL, reps: 3 }, hard2 and brutal2 by their seed lists with reps 3. The heads (first six
+    // entries as caseId and arm) come from the independent oracle's re-implementation of the frozen builder's order.
+    const seeds: Readonly<Record<Luna6Tag, number>> = {
+      'blind-hard': 2353643760, 'blind-brutal': 3013067085, 'advice-hard': 3827398149, 'advice-brutal': 1901141339,
+      'blind-hard2': 932728174, 'blind-brutal2': 3206187783, 'advice-hard2': 1066981191, 'advice-brutal2': 3194685170,
+    };
+    const protocols: Readonly<Record<Luna6StratumId, RerunProtocol>> = {
+      hard: R1_10_PROTOCOL,
+      brutal: { ...BRUTAL_10_PROTOCOL, reps: 3 },
+      hard2: { seeds: seedRun(5_118_001), reps: 3 },
+      brutal2: { seeds: seedRun(6_207_001), reps: 3 },
+    };
+    const rows = packetRows();
+    const built = buildLuna6Packets(LUNA6_EFFORT_STUDY, rows, LUNA6_EFFORT_STUDY.packetShuffleSeeds);
+    const project = (tag: Luna6Tag) => {
+      const packet = built.packets[tag];
+      if (packet === undefined) return 'missing';
+      const armOf = new Map(packet.answerKey.entries.map((entry) => [entry.blindId, entry.arm]));
+      const direct = buildRerunPacket(rows[tag], seeds[tag], protocols[tag.slice(tag.indexOf('-') + 1) as Luna6StratumId]);
+      return {
+        entries: packet.packet.entries.length,
+        arms: ARMS.map((arm) => packet.answerKey.entries.filter((entry) => entry.arm === arm).length),
+        head: packet.packet.entries.slice(0, 6).map((entry) => [entry.caseId, armOf.get(entry.blindId)]),
+        frozenBuilder: canonicalJson(packet) === canonicalJson(direct),
+      };
+    };
+    const packetOf = (head: readonly (readonly [string, Luna6ArmId])[]) =>
+      ({ entries: 60, arms: [30, 30], head, frozenBuilder: true });
+    const H = HIGH;
+    const X = XHIGH;
+    expect({
+      protocols: Object.fromEntries(LUNA6_EFFORT_STUDY.strata.map((stratum) =>
+        [stratum.id, outcome(() => luna6PacketProtocol(stratum))])),
+      violations: built.violations,
+      tags: Object.fromEntries((Object.keys(seeds) as Luna6Tag[]).map((name) => [name, project(name)])),
+    }).toEqual({
+      protocols: {
+        hard: { ok: { name: 'r1-10', seeds: seedRun(5_117_001), reps: 3 } },
+        brutal: { ok: { name: 'brutal-10', seeds: seedRun(6_203_001), reps: 3 } },
+        hard2: { ok: { seeds: seedRun(5_118_001), reps: 3 } },
+        brutal2: { ok: { seeds: seedRun(6_207_001), reps: 3 } },
+      },
+      violations: [],
+      tags: {
+        'blind-hard': packetOf([['case-06-1', H], ['case-08-1', H], ['case-06-1', X], ['case-06-2', H], ['case-10-2', H], ['case-02-2', H]]),
+        'blind-brutal': packetOf([['case-09-1', H], ['case-06-3', X], ['case-02-2', H], ['case-10-2', H], ['case-01-1', X], ['case-09-1', X]]),
+        'advice-hard': packetOf([['case-09-2', X], ['case-06-3', H], ['case-03-2', H], ['case-04-2', X], ['case-09-2', H], ['case-10-2', X]]),
+        'advice-brutal': packetOf([['case-08-3', X], ['case-10-2', X], ['case-05-3', X], ['case-06-2', H], ['case-02-2', H], ['case-08-1', X]]),
+        'blind-hard2': packetOf([['case-04-3', X], ['case-09-2', H], ['case-01-2', X], ['case-09-3', X], ['case-05-2', X], ['case-04-3', H]]),
+        'blind-brutal2': packetOf([['case-05-3', X], ['case-06-1', H], ['case-06-3', X], ['case-09-3', H], ['case-10-3', H], ['case-05-1', H]]),
+        'advice-hard2': packetOf([['case-05-2', H], ['case-08-2', X], ['case-04-3', X], ['case-07-1', H], ['case-09-3', X], ['case-04-2', H]]),
+        'advice-brutal2': packetOf([['case-01-1', X], ['case-03-2', H], ['case-05-3', X], ['case-02-1', X], ['case-07-1', H], ['case-08-3', X]]),
+      },
+    });
+  });
+
+  it('follows the registered schedule sequence and numbers reruns from 481 in their original arm order', () => {
+    // The first 12 ordinals at the registered seed P, and the rerun section for pairs 6 and 1 (asked for out of order),
+    // from the independent oracle (.tmp/runs/luna6/b6/fix1/oracle/oracle.out). Pair 6 runs xhigh first. Rerun rows add
+    // the replaced ordinal and the cell's --out path.
+    const schedule = buildLuna6Schedule(LUNA6_EFFORT_STUDY, LUNA6_EFFORT_STUDY.scheduleSeed);
+    const reruns = buildLuna6Reruns(LUNA6_EFFORT_STUDY, schedule, 'f'.repeat(64), [6, 1]);
+    const cells = '/home/vagrant/dnd-slim-runs/luna6-effort/cells';
+    expect({
+      head: schedule.entries.slice(0, 12).map(scheduleRow),
+      reruns: reruns.entries.map((entry) =>
+        [...scheduleRow(entry), entry.rerunOf, entry.argv[entry.argv.indexOf('--out') + 1]]),
+    }).toEqual({
+      head: [
+        [1, 1, 'blind', 'brutal', 6203010, 2, HIGH],
+        [2, 1, 'blind', 'brutal', 6203010, 2, XHIGH],
+        [3, 2, 'advice', 'hard', 5117008, 2, HIGH],
+        [4, 2, 'advice', 'hard', 5117008, 2, XHIGH],
+        [5, 3, 'blind', 'hard', 5117010, 3, HIGH],
+        [6, 3, 'blind', 'hard', 5117010, 3, XHIGH],
+        [7, 4, 'blind', 'hard', 5117008, 1, HIGH],
+        [8, 4, 'blind', 'hard', 5117008, 1, XHIGH],
+        [9, 5, 'advice', 'brutal2', 6207010, 1, HIGH],
+        [10, 5, 'advice', 'brutal2', 6207010, 1, XHIGH],
+        [11, 6, 'advice', 'hard2', 5118010, 1, XHIGH],
+        [12, 6, 'advice', 'hard2', 5118010, 1, HIGH],
+      ],
+      reruns: [
+        [481, 1, 'blind', 'brutal', 6203010, 2, HIGH, 1, `${cells}/481.jsonl`],
+        [482, 1, 'blind', 'brutal', 6203010, 2, XHIGH, 2, `${cells}/482.jsonl`],
+        [483, 6, 'advice', 'hard2', 5118010, 1, XHIGH, 11, `${cells}/483.jsonl`],
+        [484, 6, 'advice', 'hard2', 5118010, 1, HIGH, 12, `${cells}/484.jsonl`],
+      ],
+    });
+  });
+
+  it('stops only when more than 24 pairs end excluded and never reruns a hang-guard cell', () => {
+    // D898 R2: STOP when MORE than 24 pairs end excluded. On D898's hard stratum alone (60 pairs), pairs 1-24 failing
+    // on infrastructure in both attempts pass with 36 pairs; pairs 1-25 are a STOP. SA-1: a cell whose call log fired
+    // the hang guard is never infrastructure, even when the runner recorded infrastructure_failed, so its pair is
+    // neither rerun nor excluded.
+    const sha = 'f'.repeat(64);
+    const infrastructure = { row: { outcome: 'infrastructure_failed', callsPerRound: 0 }, calls: [] };
+    const excluded = (count: number) => normalise(outcome(() => {
+      const schedule = buildLuna6Schedule(HARD60, HARD60.scheduleSeed);
+      const failing = Array.from({ length: count }, (_unused, index) => index + 1);
+      const fails = (entry: Luna6ScheduleEntry) => failing.includes(entry.pair) && entry.arm === HIGH;
+      const cells = new Map(schedule.entries.map((entry) =>
+        [entry.ordinal, cellEvidence(entry, fails(entry) ? infrastructure : {})]));
+      const reruns = buildLuna6Reruns(HARD60, schedule, sha, failing);
+      for (const entry of reruns.entries) cells.set(entry.ordinal, cellEvidence(entry, fails(entry) ? infrastructure : {}));
+      const result = ingestLuna6Study({ registration: HARD60, schedule, scheduleSha256: sha, reruns, cells });
+      return { pairs: result.report.pairs, excludedPairs: result.report.excludedPairs.length };
+    }));
+    const guardedInfrastructure = normalise(outcome(() => {
+      const schedule = buildLuna6Schedule(MINI, MINI.scheduleSeed);
+      const cells = miniEvidence(schedule, {
+        [`${XHIGH}|blind|hard|5117001|1`]: {
+          row: { outcome: 'infrastructure_failed' },
+          calls: [{ complete: { exit: 'timed_out', hangGuardFired: true, elapsedMs: 1_800_000 } }],
+        },
+      });
+      const result = ingestLuna6Study({ registration: MINI, schedule, scheduleSha256: sha, reruns: null, cells });
+      return {
+        pairs: result.report.pairs, excludedPairs: result.report.excludedPairs.length, sa1: result.report.sa1,
+        fired: result.report.attempts.filter((attempt) => attempt.firings > 0).map((attempt) => [attempt.status, attempt.detail]),
+      };
+    }));
+    expect({ twentyFour: excluded(24), twentyFive: excluded(25), guardedInfrastructure }).toEqual({
+      twentyFour: { ok: { pairs: 36, excludedPairs: 24 } },
+      twentyFive: { error: ['infrastructure: STOP: 25 pairs end excluded, more than the registered 24; go to the owner'] },
+      guardedInfrastructure: { ok: { pairs: 4, excludedPairs: 0, sa1: 1, fired: [['row', 'infrastructure_failed']] } },
+    });
+  });
+
+  it('counts an SA-1 override as a failure and never excludes it, whatever outcome the runner recorded', () => {
+    // Mini registration; the ledger names blind 5117001 rep 1 xhigh (blind-001). Failure indicators (§3.4): that cell 1,
+    // every other cell 0, so the pair differences are 1, 0, 0, 0 with divisor 1: mean 1/4. Clusters {1, 0} and {0, 0}:
+    // a draw is 1/2, 1/4 or 0 with probability 1/4, 1/2, 1/4, so the 95 % interval is {0, 1/2}. The same holds when
+    // the packet records that cell as infrastructure_failed. Without the ledger, that infrastructure cell excludes its
+    // pair, and the three remaining pairs are all +2 -> xhigh.
+    const ledger: readonly Luna6GuardLedgerKey[] = [{ mode: 'blind', basis: 'hard', seed: 5_117_001, rep: 1, arm: XHIGH }];
+    const infrastructure = () => {
+      const documents = miniDocuments();
+      documents['blind-hard'].packet = documents['blind-hard'].packet.map((entry) =>
+        entry['blindId'] === 'blind-001' ? { ...entry, outcome: 'infrastructure_failed' } : entry);
+      return documents;
+    };
+    const run = (documents: ReturnType<typeof miniDocuments>, withLedger: boolean) => {
+      const result = analyzeLuna6Study({ registration: MINI, documents: asDocuments(documents), ledger: withLedger ? ledger : [] });
+      return {
+        decision: result.decision, pairs: result.pairs, excludedPairs: result.excludedPairs,
+        sa1Overrides: result.sa1Overrides, failureRisk: result.secondary.failureRisk,
+      };
+    };
+    const risk = { pairs: 4, clusters: 2, mean: 0.25, lower: 0, upper: 0.5 };
+    expect({
+      executedOverride: run(miniDocuments(), true),
+      infrastructureOverride: run(infrastructure(), true),
+      infrastructureAlone: run(infrastructure(), false),
+    }).toEqual({
+      executedOverride: { decision: 'high', pairs: 4, excludedPairs: 0, sa1Overrides: 1, failureRisk: risk },
+      infrastructureOverride: { decision: 'high', pairs: 4, excludedPairs: 0, sa1Overrides: 1, failureRisk: risk },
+      infrastructureAlone: {
+        decision: 'xhigh', pairs: 3, excludedPairs: 1, sa1Overrides: 0,
+        failureRisk: { pairs: 3, clusters: 2, mean: 0, lower: 0, upper: 0 },
+      },
+    });
+  });
+
+  it('keeps the inclusive bounds: the percentile index, the old wall at exactly 180000 ms and a zero component score', () => {
+    // Percentile (D898 R6, D569's rule): index floor(q·n) over 50 ascending draws 0..49 gives floor(1.25) = 1 and
+    // floor(48.75) = 48 (ceil would give 2 and 49); q = 1 clamps to n − 1 = 49. The old wall accepts a completion only
+    // while at least 1 ms remains (agent-session-lifecycle.ts:81), so 179,999 ms is under it and 180,000 and 180,001 ms
+    // are over it. Component ranges include 0: high entries {2, 2, 1, 0} (total 5, N = 15) against xhigh {3, 3, 1, 1}
+    // (N = 24) make every pair t = 9, value 3 -> xhigh with mean, lower and upper 3.
+    const draws = Array.from({ length: 50 }, (_unused, sum) => ({ sum, count: 1 }));
+    const done = (elapsedMs: number): Luna6CallTiming => ({ elapsedMs, exit: 'completed', hangGuardFired: false });
+    expect({
+      percentile: {
+        lower: luna6ExactPercentile(draws, 0.025, 1),
+        upper: luna6ExactPercentile(draws, 0.975, 1),
+        top: luna6ExactPercentile(draws, 1, 1),
+      },
+      callsOver180s: luna6SpeedSummary([done(179_999), done(180_000), done(180_001)]).callsOver180s,
+      zeroComponent: outcome(() => projectDecision([], miniDocuments(
+        { targetPriority: 2, actionEconomy: 2, coherence: 1, positioning: 0, total: 5 }))),
+    }).toEqual({
+      percentile: { lower: 1, upper: 48, top: 49 },
+      callsOver180s: 2,
+      zeroComponent: {
+        ok: { decision: 'xhigh', delta: { mean: 3, lower: 3, upper: 3 }, pairs: 4, clusters: 2, sa1Overrides: 0 },
+      },
+    });
+  });
+
+  it('reports the difference per mode and per basis with intervals, and per stratum only as a supplement', () => {
+    // S-PREREG §3.4: "Δ per mode and per basis with intervals"; D898 R2: basis hard pools 5117xxx and 5118xxx, basis
+    // brutal pools 6203xxx and 6207xxx. High cells score {2,2,1,1} (N = 18) everywhere.
+    // byBasis: xhigh {3,2,1,1} (N = 21, t = +3, value +1) on basis hard, else N = 18 (t = 0). Basis hard is 20 clusters
+    //   of six +1 pairs, so every draw is 1: {120 pairs, 20 clusters, 1, 1, 1}; brutal {120, 20, 0, 0, 0}. Each mode
+    //   holds 20 clusters of three +1 pairs and 20 of three 0 pairs: 120 pairs, 40 clusters, mean 1/2 (its interval
+    //   depends on the draws and is not asserted).
+    // byMode: t = +3 on blind cells only. Blind {120, 40, 1, 1, 1}, advice {120, 40, 0, 0, 0}; every basis cluster holds
+    //   three +1 and three 0 pairs, so every draw is 1/2: {120, 20, 1/2, 1/2, 1/2} for both bases.
+    const rule: Luna6EffortStudyRegistration = { ...LUNA6_EFFORT_STUDY, resamples: 200 };
+    const run = (gains: (cell: Luna6CellIdentity) => boolean) => analyzeLuna6Study({
+      registration: rule,
+      ledger: [],
+      documents: gridDocuments((cell) =>
+        cell.arm === XHIGH && gains(cell) ? components(3, 2, 1, 1) : components(2, 2, 1, 1)),
+    });
+    const byBasis = run((cell) => cell.stratum === 'hard' || cell.stratum === 'hard2');
+    const byMode = run((cell) => cell.mode === 'blind');
+    const flat = (pairs: number, clusters: number, value: number) =>
+      ({ pairs, clusters, mean: value, lower: value, upper: value });
+    expect({
+      byBasis: {
+        perBasis: byBasis.secondary.perBasis,
+        perMode: Object.fromEntries(Object.entries(byBasis.secondary.perMode).map(([mode, interval]) =>
+          [mode, { pairs: interval.pairs, clusters: interval.clusters, mean: interval.mean }])),
+      },
+      byMode: { perMode: byMode.secondary.perMode, perBasis: byMode.secondary.perBasis },
+      supplementary: { strata: Object.keys(byMode.supplementary.perStratum), status: byMode.supplementary.status },
+    }).toEqual({
+      byBasis: {
+        perBasis: { hard: flat(120, 20, 1), brutal: flat(120, 20, 0) },
+        perMode: { blind: { pairs: 120, clusters: 40, mean: 0.5 }, advice: { pairs: 120, clusters: 40, mean: 0.5 } },
+      },
+      byMode: {
+        perMode: { blind: flat(120, 40, 1), advice: flat(120, 40, 0) },
+        perBasis: { hard: flat(120, 20, 0.5), brutal: flat(120, 20, 0.5) },
+      },
+      supplementary: {
+        strata: ['hard', 'brutal', 'hard2', 'brutal2'],
+        status: 'supplementary, not preregistered: S-PREREG §3.4 reports the difference per mode and per basis',
+      },
+    });
+  });
+
+  it('refuses a guard ledger or ingest report that does not match the registration or each other', () => {
+    // The valid documents are what ingest writes for the mini registration with the hang guard fired on blind 5117001
+    // rep 1 xhigh; the analysis is then item 7's case B (high, 4 pairs, 1 SA-1 override). Each variant changes one
+    // thing, and the analysis stage refuses it by name.
+    const schedule = buildLuna6Schedule(MINI, MINI.scheduleSeed);
+    const ingest = ingestLuna6Study({
+      registration: MINI, schedule, scheduleSha256: 'f'.repeat(64), reruns: null,
+      cells: miniEvidence(schedule, {
+        [`${XHIGH}|blind|hard|5117001|1`]: {
+          calls: [{ complete: { exit: 'timed_out', hangGuardFired: true, elapsedMs: 1_800_000 } }],
+        },
+      }),
+    });
+    type Json = Record<string, unknown>;
+    const ledger = (): Json => JSON.parse(canonicalJson(luna6GuardLedgerDocument(MINI, ingest.ledger))) as Json;
+    const report = (): Json => JSON.parse(canonicalJson(ingest.report)) as Json;
+    const stage = (ledgerDocument: Json, reportDocument: Json) => outcome(() => {
+      const result = analyzeLuna6StudyStage({
+        registration: MINI, documents: asDocuments(miniDocuments()), ledgerDocument, reportDocument,
+      });
+      return {
+        decision: result.decision, pairs: result.pairs, excludedPairs: result.excludedPairs,
+        sa1Overrides: result.sa1Overrides,
+      };
+    });
+    const moved = ledger();
+    moved['entries'] = (moved['entries'] as Json[]).map((entry) => ({ ...entry, mode: 'advice', seed: 5_117_002 }));
+    const lessSpeed = report();
+    lessSpeed['speed'] = (lessSpeed['speed'] as Json[]).filter((cell) =>
+      !(cell['mode'] === 'advice' && cell['seed'] === 5_117_002 && cell['arm'] === HIGH));
+    const fired = 'blind hard 5117001 rep 1 gpt-6-luna-xhigh';
+    expect([
+      stage(ledger(), report()),
+      stage({ ...ledger(), registration: 'luna6-effort-study-v0' }, report()),
+      stage({ ...ledger(), entries: [] }, report()),
+      stage(moved, report()),
+      stage(ledger(), lessSpeed),
+      stage(ledger(), { ...report(), registration: 'luna6-effort-study-v0' }),
+      stage(ledger(), {
+        ...report(), pairs: 3,
+        excludedPairs: [{ pair: 2, name: 'advice hard 5117002 rep 1', reason: 'cell 3 infrastructure_failed' }],
+      }),
+    ]).toEqual([
+      { ok: { decision: 'high', pairs: 4, excludedPairs: 0, sa1Overrides: 1 } },
+      { error: ['guard ledger: registration "luna6-effort-study-v0" is not luna6-effort-study-v1'] },
+      { error: [
+        'guard ledger: holds 0 entries; the ingest report counts sa1 1',
+        `guard ledger: lacks ${fired}, whose call log fired the hang guard`,
+      ] },
+      { error: [
+        `guard ledger: lacks ${fired}, whose call log fired the hang guard`,
+        'guard ledger: names advice hard 5117002 rep 1 gpt-6-luna-xhigh, whose call log never fired the hang guard',
+      ] },
+      { error: [
+        'ingest report: speed: the grid lacks cell advice hard 5117002 rep 1 gpt-6-luna-high',
+        'ingest report: calls 8 is not the 7 calls of its speed cells',
+      ] },
+      { error: ['ingest report: registration "luna6-effort-study-v0" is not luna6-effort-study-v1'] },
+      { error: ['ingest report: excludes 1 of its pairs; the packets exclude 0'] },
+    ]);
   });
 });
