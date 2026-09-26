@@ -2471,3 +2471,16 @@ All operators are subcommands of `node node_modules/vite-node/vite-node.mjs tool
 **Result document** (canonical JSON): `{ schema: 'luna6-effort-study-result-v1', registration: <id and sha>, decision: 'high'|'xhigh', delta: { mean, lower_qstar, upper_97_5 }, pairs, excludedPairs, clusters, sa1Overrides, secondary: {…}, speed: {…}, inputs: { schedule sha, packet shas, key shas, seat shas, ledger sha } }`.
 
 Next free id: D899.
+
+## D899 — 2026-09-26 13:46 — owner: B1's whole gate runs in the same idle window as the #3/#6 timed comparisons
+
+OWNER, verbatim: "Do it “recommendation is to run B1's full gate in the same idle window as the #3/#6 comparison”".
+- The recommendation it accepts (my status report of 2026-09-26): B1 is approved and verified (D897) and waits only for one whole gate on an idle machine. The gate runs in the idle window booked for the #3/#6 timed pairs, after them, so it does not delay #3/#6 (your "Land #3 and #6 first" stands). About 5 extra minutes.
+- B1 gate checkout, built by me: /home/vagrant/PhpstormProjects/dnd-gate-exp-b1-71940c8f = main 71940c8f + B1's 6 commits by cherry-pick from claude/luna6-b1-onmain (e214d746). The pick applied cleanly and the new head is a9a1de27. The worktree is clean, with local main at HEAD and node_modules symlinked. check-command-outcomes exit 0.
+- Order in the window: the void-rule quiet checks; main vs #3; #3 vs #3+#6; B1 whole gate (node tools/gate-vitest.mjs plus check-command-outcomes). Land what passes; record.
+
+Also in flight at this time (details in the next records entry): fix rounds for board3 r2, cover6 r2, pcac r8 (workflow wf_e9a9577d-766) and LUNA6 B4, B2 and B6 fix1 (wf_e3993b8d-f47). Findings:
+- My own mutants of B6's decision (analyze.ts:241 `>`→`>=`, :247 `<=`→`<`) both survive T8.
+- On the rebased pair, cover6's sparse tests exceed board3's MAX_GRID_CELLS (.tmp/runs/perf-02/landing/verify-claude-rebase/findings.md).
+
+Next free id: D900.
