@@ -21,11 +21,13 @@ import {
   cornerLineCrossesCell,
   coverBetweenCombatants,
   coverTierBetweenObjects,
+  outerCorners,
   rasterizeCornerLine,
   terrainLineVerdict,
   traceCombatantLine,
   traceCombatantLineToCells,
   traceTerrainLine,
+  visitCornerRayCells,
   walkCornerLine,
   type CornerPoint,
 } from '../../../src/combat/cover';
@@ -291,6 +293,97 @@ describe('PERF-02 cover6 exact lattice walk', () => {
     expect(trace.lines.map((line) => line.sourceIds)).toEqual([
       [], [`creature:${ogre.id}`], ['object:object:slit'], [],
     ]);
+  });
+
+  it('COVER-RAY-CELLS visits the cells crossed by all sixteen corner rays, not only the first source corner\'s', () => {
+    // S = (0,0), T = (2,1). Source corners (0,0) (1,0) (0,1) (1,1); target corners (2,1) (3,1) (2,2) (3,2).
+    //   From (0,0): ->(2,1) y = x/2: (0,0) (1,0). ->(3,1) y = x/3: (0,0) (1,0) (2,0). ->(2,2) y = x passes the
+    //     grid corner (1,1): (0,0) (1,1). ->(3,2) y = 2x/3: (0,0) (1,0) (1,1) (2,1).
+    //   From (1,0): ->(2,1) (1,0). ->(3,1) (1,0) (2,0). ->(2,2) y = 2(x-1): (1,0) (1,1). ->(3,2) y = x-1 passes
+    //     the grid corner (2,1): (1,0) (2,1).
+    //   From (0,1): ->(2,1) and ->(3,1) run along y = 1: none. ->(2,2) y = 1+x/2: (0,1) (1,1).
+    //     ->(3,2) y = 1+x/3: (0,1) (1,1) (2,1).
+    //   From (1,1): ->(2,1) and ->(3,1): none. ->(2,2) (1,1). ->(3,2) y = 1+(x-1)/2: (1,1) (2,1).
+    // (0,1) is crossed only by the bottom-left corner's rays: a walk of the first corner alone misses it.
+    const key = (column: number, row: number) => `${String(column)},${String(row)}`;
+    const visited = new Set<string>();
+    visitCornerRayCells([{ column: 0, row: 0 }], [{ column: 2, row: 1 }], (column, row) => visited.add(key(column, row)));
+    expect([...visited].sort()).toEqual(['0,0', '0,1', '1,0', '1,1', '2,0', '2,1']);
+
+    // The same set, for single cells and 2 x 2 spaces in a window, as the union over the sixteen outer-corner
+    // pairs of the cells whose open interior the ray crosses (the slab test, not the walk).
+    const window: GridCell[] = [];
+    for (let row = -1; row <= 6; row += 1) for (let index = -1; index <= 6; index += 1) window.push({ column: index, row });
+    const spaces: GridCell[][] = [];
+    for (let row = 0; row <= 3; row += 1) {
+      for (let index = 0; index <= 3; index += 1) {
+        spaces.push([{ column: index, row }]);
+        if (row <= 2 && index <= 2) {
+          spaces.push([
+            { column: index, row }, { column: index + 1, row }, { column: index, row: row + 1 }, { column: index + 1, row: row + 1 },
+          ]);
+        }
+      }
+    }
+    const problems: string[] = [];
+    for (const source of spaces) {
+      for (const target of spaces) {
+        const walkedCells = new Set<string>();
+        visitCornerRayCells(source, target, (column, row) => walkedCells.add(key(column, row)));
+        const expected = new Set<string>();
+        for (const from of outerCorners(source)) {
+          for (const to of outerCorners(target)) {
+            for (const cell of window) if (cornerLineCrossesCell(from, to, cell)) expected.add(key(cell.column, cell.row));
+          }
+        }
+        if (JSON.stringify([...walkedCells].sort()) !== JSON.stringify([...expected].sort())) {
+          problems.push(`${JSON.stringify(source)}->${JSON.stringify(target)}`);
+        }
+      }
+    }
+    expect(spaces).toHaveLength(25);
+    expect(problems).toEqual([]);
+  });
+
+  it('COVER-RAY-CELLS-SOUND a wall off every corner ray changes no line, and one crossed only by another corner\'s rays can', () => {
+    // Board 4 x 3. S = (0,0), T = (2,1); walls W1 = (1,0), W2 = (1,1). Rays as in COVER-RAY-CELLS.
+    //   Corner (0,0): ->(2,1) W1, ->(3,1) W1, ->(2,2) W2, ->(3,2) W1 W2: four sight-blocked lines, Total.
+    //   Corner (1,0): every line starts in W1: Total.
+    //   Corner (0,1): ->(2,1), ->(3,1) none; ->(2,2) and ->(3,2) cross W2: two lines, Half.
+    //   Corner (1,1): the same two lines through W2: Half. The tie goes to (0,1): Half, named W2.
+    // A third wall at (0,1) lies on (0,1)'s two obstructed lines only: still Half from (0,1), which wins the
+    // tie, now naming both walls. The los_cover_v1 generator re-traces a line only when a changed cell lies
+    // on visitCornerRayCells, so every cell whose wall changes the line must be on it.
+    const actor = playerProfile('ray-cells-bystander');
+    const base = createEncounter({
+      bounds: { columns: 4, rows: 3 }, combatants: [actor], tokens: [placedToken(actor, 3, 2)],
+      blockedCells: [{ column: 1, row: 0 }, { column: 1, row: 1 }],
+    });
+    const source = { column: 0, row: 0 };
+    const target = { column: 2, row: 1 };
+    const key = (cell: GridCell) => `${String(cell.column)},${String(cell.row)}`;
+    expect(terrainLineVerdict(base, source, target)).toEqual({
+      sourceCell: source, targetCell: target, tier: 'half', blocksSight: false, sourceIds: ['blocked:1,1'],
+    });
+    const rayCells = new Set<string>();
+    visitCornerRayCells([source], [target], (column, row) => rayCells.add(key({ column, row })));
+    const baseTrace = JSON.stringify(traceTerrainLine(base, source, target));
+    const changing: string[] = [];
+    for (let row = 0; row < 3; row += 1) {
+      for (let index = 0; index < 4; index += 1) {
+        const cell = { column: index, row };
+        if ([source, target, ...base.blockedCells].some((taken) => key(taken) === key(cell))) continue;
+        const walled = { ...base, blockedCells: [...base.blockedCells, cell] };
+        if (JSON.stringify(traceTerrainLine(walled, source, target)) !== baseTrace) changing.push(key(cell));
+      }
+    }
+    expect(changing).toContain('0,1');
+    expect(changing.filter((cell) => !rayCells.has(cell))).toEqual([]);
+    expect(terrainLineVerdict({ ...base, blockedCells: [...base.blockedCells, { column: 0, row: 1 }] }, source, target))
+      .toEqual({
+        sourceCell: source, targetCell: target, tier: 'half', blocksSight: false,
+        sourceIds: ['blocked:0,1', 'blocked:1,1'],
+      });
   });
 });
 
