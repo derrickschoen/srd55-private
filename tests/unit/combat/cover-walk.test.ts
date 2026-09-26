@@ -15,6 +15,7 @@
  * tools/experiments/cover-walk/exhaustive-differential.ts.
  */
 import { describe, expect, it } from 'vitest';
+import { canonicalJson } from '../../../src/commands/canonical-json';
 import {
   combatantLineVerdict,
   combatantLineVerdictToCells,
@@ -37,7 +38,9 @@ import { terrainBlocking } from '../../../src/combat/terrain';
 import { armorClass, worldObjectId, type CombatantId } from '../../../src/combat/values';
 import type { WorldObject } from '../../../src/combat/world-objects';
 import { loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
+import { generateRoom } from '../../../src/vtt/room-generator';
 import * as reference from '../../helpers/reference-cover';
+import { applyLosCoverTerrainProfile as referenceLosCoverPlacement } from '../../helpers/reference-los-cover-placement';
 import { monsterProfile, placedToken, playerProfile } from './fixtures';
 
 function walked(from: CornerPoint, to: CornerPoint): GridCell[] {
@@ -565,5 +568,24 @@ describe('PERF-02 cover6 bounded differential against the frozen pre-walk cover 
     const results = states.map(([label, state]) => differential(label, state));
     expect(results.flatMap((result) => result.mismatches)).toEqual([]);
     expect(results.map((result) => result.compared > 1_000)).toEqual([true, true, true]);
+  });
+});
+
+describe('PERF-02 cover6 los_cover_v1 placement against the frozen plain search', () => {
+  it('COVER-PLACEMENT-DIFFERENTIAL places cover and wall like the search that re-traces every line', () => {
+    // tests/helpers/reference-los-cover-placement.ts is the pre-walk placement, which traces every opposing
+    // line and every creature-to-cell line of every candidate with the frozen pre-walk cover code. On
+    // standard seeds 19, 23 and 39 the first acceptable wall is found only through a line crossing a wall
+    // cell other than the footprint's first; the nine versioned fixture pins have no such seed. Hard 34's
+    // room changes if a cover candidate re-traces only the lines through its first footprint cell, brutal
+    // 0's if a line's ray cells come from its first source corner only.
+    const cases = [
+      ['standard', 19], ['standard', 23], ['standard', 39], ['hard', 34], ['brutal', 0],
+    ] as const;
+    for (const [difficulty, seed] of cases) {
+      const incremental = generateRoom(seed, { difficulty, terrainProfile: 'los_cover_v1' });
+      const plain = referenceLosCoverPlacement(generateRoom(seed, { difficulty }));
+      expect(canonicalJson(incremental), `${difficulty} ${String(seed)}`).toBe(canonicalJson(plain));
+    }
   });
 });
