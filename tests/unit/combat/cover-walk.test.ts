@@ -782,9 +782,11 @@ describe('PERF-02 cover6 los_cover_v1 placement against the frozen plain search'
       ['standard', 19], ['standard', 23], ['standard', 39], ['hard', 34], ['brutal', 0],
     ] as const;
     for (const [difficulty, seed] of cases) {
-      const incremental = generateRoom(seed, { difficulty, terrainProfile: 'los_cover_v1' });
-      const plain = referenceLosCoverPlacement(generateRoom(seed, { difficulty }));
-      expect(canonicalJson(incremental), `${difficulty} ${String(seed)}`).toBe(canonicalJson(plain));
+      // The frozen search must answer: an error from it escapes and fails the test as a broken oracle.
+      const plain = canonicalJson(referenceLosCoverPlacement(generateRoom(seed, { difficulty })));
+      // The candidate's "could not place" RangeError is a wrong answer, compared like any other.
+      const incremental = outcome(() => canonicalJson(generateRoom(seed, { difficulty, terrainProfile: 'los_cover_v1' })));
+      expect(incremental, `${difficulty} ${String(seed)}`).toBe(JSON.stringify(plain));
     }
   });
 });
