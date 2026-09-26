@@ -2586,3 +2586,29 @@ Next free id: D904.
 - One D898 PRE-RUN amendment carries every changed study fixture sha and the manifest changes. It is written before any study cell.
 
 Next free id: D905.
+
+## D905 — 2026-09-26 18:53 — owner house rule: movement costs STACK by kind (FOOTPRINT Q2); new unit MOVE-COST
+
+QUESTION FOOTPRINT Q2 (squeeze cost model). My recommendation was SRD 5.2.1: squeezing is Difficult Terrain, "not cumulative".
+OWNER, verbatim: "It should stack in all cases. Go through and fix them all".
+
+CLARIFYING QUESTION ("how far?"; recommendation: each kind). OWNER, verbatim choice: "Each KIND stacks (Recommended)".
+
+THE RULE (a deliberate HOUSE RULE; it overrides srd-5.2.1.txt:11657-11676 "Difficult Terrain isn't cumulative"):
+- Each kind of movement extra adds +1 ft per ft of movement, and the kinds stack:
+  - difficult terrain, counted ONCE however many sources (rubble, snow, a non-ally non-Tiny creature's space, Spike Growth, Web and so on);
+  - squeezing (a narrow opening sized for a smaller creature; placed or moving squeezed);
+  - crawling while Prone;
+  - climbing or swimming without the matching speed.
+- Example: one 5-ft square of rubble inside a Web, entered squeezing and crawling, costs 5 + 5 + 5 + 5 = 20 ft.
+- Squeezing through a narrow opening is NOT also counted as difficult terrain. Squeezing is its own kind, so a squeeze through a rubble-filled gap costs 15 ft per 5-ft square, the owner's earlier example.
+- The rule applies in ALL cases: every movement-cost site, the planners and projections, the movement board, path(), reachable(), projected movement and forced movement where it spends movement. "Go through and fix them all."
+
+UNITS:
+- FOOTPRINT (D900/D904) stays PLACEMENT only: the whole body is on the map, repaired fixtures, the D898 pre-run amendment.
+- The squeeze cost moves out of FOOTPRINT into a new unit, MOVE-COST: a census of every movement-cost site and every kind the engine models or fails to model today; one typed cost-composition function with the kinds as a closed union; tests; mutants; pins re-derived independently and attributed.
+  - The frozen references (tests/helpers/reference-movement*.ts) stay frozen. The differentials take an explicit, hand-derived cost delta per kind.
+  - SRD 5.1's other squeezing effects (Disadvantage on attacks and Dex saves; Advantage against) are still NOT in scope (FOOTPRINT Q4, pending).
+- Order: FOOTPRINT and MOVE-COST both build on #3/#6 and land after them, before any LUNA6 study cell. Arena and blind pins are expected to move under MOVE-COST, and the study rooms' behaviour changes, so both precede the study.
+
+Next free id: D906.
