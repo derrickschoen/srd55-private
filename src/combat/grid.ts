@@ -28,9 +28,10 @@ function isWholeNumber(value: number): boolean {
  * A cell inside the grid it was decoded against: whole-number coordinates with
  * 0 <= column < columns and 0 <= row < rows. Only this module mints one (`boardCell`,
  * and `adjacentCells` for the neighbours of one), so a negative, fractional or off-grid
- * position cannot be asked a movement question: that program does not compile. Every
- * BoardCell is a fresh frozen {column, row}; no caller holds a reference through which
- * it could change.
+ * position cannot be asked a movement question: that program does not compile. boardCell
+ * and adjacentCells return fresh frozen cells, so no caller holds a reference through which
+ * a minted cell could change. A copy keeps the brand and the on-grid value but not the freeze
+ * (a spread, or a structured clone of a whole state, as the session stores make).
  *
  * The brand does not name its grid. One encounter has one immutable bounds: createEncounter
  * and every decoder fix it (grid-size.ts), no reducer changes it, and the encounter's token
