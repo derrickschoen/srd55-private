@@ -2097,3 +2097,71 @@ OWNER (Q-POWER, via AskUserQuestion), verbatim answer: "(b) 40 encounters, 480 c
 The second family was registered in v5 and never launched; this study uses it up. Recorded in the S-PREREG entry, which is written before any study cell runs.
 
 Next free id: D897.
+
+
+## D897 — 2026-09-26 10:08 — resumed after the owner's pause; B1 APPROVED (r3) and verified on main; W7 needs no fix; convsplit broke the npm gate script (finding against my landing); #3, #6 and pcac r6 finished, reviewed REVISE; S-PREREG draft in review
+
+PAUSE AND RESUME. The owner paused all work on 2026-09-25 11:36 for a reboot. Handoff: .tmp/runs/perf-02/STATE-2026-09-25-reboot.md. The machine did not actually reboot: uptime ran continuously.
+- When paused, the cover6 clone held an unrestored mutant in src/combat/cover.ts (visitCornerRayCells over outerCorners(sourceCells).slice(0,1)). I saved its diff and restored the file with git checkout.
+- Resumed 2026-09-26 07:37 as workflow wf_214a44da-c79. Each agent finished its unit from the existing commits and re-ran all evidence itself.
+
+LUNA6 B1:
+- Review r3 (gpt-5.6-sol high) of c2c203c4: APPROVE, 0/0/0. The round-2 P2 (W3's escalation seam) is closed.
+- VERIFIED by me, M92 by hand:
+  - One exact edit to tools/ai-dm-conversation.ts; tsc -b --force exit 0.
+  - W3 alone fails by assertion ('"inProcessToolSession": false'), with no timeout.
+  - Restored to sha c72f8ce2; W3 passes again.
+- VERIFIED by me, B1 cherry-picked onto main 99c5738a as claude/luna6-b1-onmain e214d746:
+  - clean pick; tsc 0;
+  - ai-dm-arena, ai-dm-screenshot-probe and model-routes pass 104/104;
+  - the 7 D880 pins are byte-identical (manifest differs only in its commit).
+- W7 needs no fix. Agent report: W7 takes 1135/1130/1139 ms solo at e214d746. Fix2's 4.4–4.9 s came from a base without x3, where its engine child booted under vite-node; a no-bundle control reproduces 4,604 ms. M46 and M47 are still killed by assertions.
+  - VERIFIED by me: W7 took 1,167 ms in my own three-file run.
+  - Recorded: W7's model wall comes from the real bundled child, not the plan's in-process delay (§4.4 deviation, approved in r3).
+  - New timeout watch: screenshot-probe 'is versioned, uses generic classic-board conventions…' took 4,380 ms in the three-file run.
+- B1 lands after a whole gate on a quiet box.
+
+FINDING AGAINST MY OWN WORK (the convsplit landing, D894).
+- On main 99c5738a, `node scripts/check-command-outcomes.mjs` and `scripts/check-command-outcomes.sh` both exit 1. Verified by me.
+- The cause: tests/unit/tools/ai-dm-conversation-fixtures.ts, created by convsplit a1313bb9, exports launcherOfferEnvironment, BOUND_OFFER_ENVIRONMENT and DIVERGENCE_OFFER_ENVIRONMENT. check-offer-environment-architecture.mjs forbids that; its runtime export allowlist is buildOfferEnvironment only (D617).
+- So `npm run test:gate` and `npm run typecheck` have failed on main since convsplit landed.
+- I verified convsplit with `node tools/gate-vitest.mjs` directly and never ran the npm gate script, which runs this check first. The cover6 agent found it.
+- From now on, landing verification runs `npm run test:gate`'s architecture check (node scripts/check-command-outcomes.mjs) as well as the vitest gate.
+- Fix dispatched (ccofix, wf_655d2527-a31): restructure the fixtures module; no allowlist widening and no checker change.
+
+ROADMAP #3 (board3) and #6 (cover6), agent reports (UNVERIFIED unless marked):
+- board3, 64a5e378, 7 commits, no test file deleted. Exhaustive differential: 944 states, 83,325,591 comparisons, 0 mismatches. 20 mutants killed; 7 pins identical. Solo medians: renderer-profile 87.15 → 56.70 s, blind-turn-context 17.80 → 11.12 s, survival-policy 63.47 → 51.35 s. Retained heap per world: 900.6 → 9.5 KiB. One intended behaviour change: reference movement on the grid edge lists in-grid steps instead of throwing, pinned by a hand-derived test.
+- cover6, 90cf1d8f, 6 commits. Exhaustive differential: 17,460,725 comparisons, 0 mismatches outside the coverself-by-design lines, and those equal the coverself oracle. 201 rooms byte-identical; 18 mutants killed; pins identical. room-generator-los-cover 86.3 → 11.9 s. cover.ts allocations 144.3 → 0.7 MB.
+- VERIFIED by me:
+  - both clones clean, tsc 0;
+  - the only `as BoardCell` is the decode in grid.ts;
+  - both frozen references equal ff70ec48 apart from the header and import paths.
+- VERIFIED by me, hand mutants I chose:
+  - board3 squareFits `<=` → `<` (columns): 4 movement-board tests fail by assertion; restored; 33/33 pass.
+  - cover6 walkCornerLine corner tie `<=` → `<`: 8 tests fail by assertion, among them COVER-WALK-SEQUENCES, COVER-RAY-CELLS, COVER-PLACEMENT-DIFFERENTIAL and COVERSELF-THREE-QUARTERS; restored; 22/22 pass.
+- Rebased onto main 99c5738a (no file overlap between the units): board3 adbb080b; board3+cover6 4412fbf5. Timed arms built and tsc 0: dnd-gate-exp-pair-main-99c5, -b3, -b3c6.
+
+REVIEWS (gpt-6-sol xhigh, fresh, read-only) and SUPERVISOR DISPOSITIONS:
+- board3 r1, REVISE 1/2/0.
+  - P1, accepted: loaded token anchors skip the decode bounds check (the codec checks bounds only for challenge mode), so an off-grid anchor loads and then silently gets no moves. It gets a typed decode error; real data is never rewritten.
+  - P2, accepted: boardCell returns the caller's mutable object. It will return a frozen copy. The cross-grid brand is rejected unless a guard is cheap: one encounter has one immutable bounds.
+  - P2, accepted: the dense board has no size bound. One engine grid-size contract, a named constant enforced at createEncounter and decode, at least 100× the largest real grid.
+- cover6 r1, REVISE 0/1/1.
+  - P2, accepted: a dense bounding-box source array; huge sparse bounds throw RangeError. It becomes robust on its own, and board3's contract also bounds it.
+  - P3, accepted: the harness must print changed lines and counts.
+  - The reviewer confirmed the check-command-outcomes failure predates the unit and is unrelated to it.
+- pcac r3, REVISE 1/2/1. The round-2 findings are closed.
+  - P1, accepted: True Strike's weapon attack has no range and no close-combat source.
+  - P2, accepted: Q1, resolve when all sight outcomes agree.
+  - P2, accepted: Q5, typed-unknown projected visibility.
+  - P3: Q3 recorded as a separate unit.
+- Dispatched as wf_94da2cda-f88. The timed pairs wait for these fixes.
+
+LUNA6 S-PREREG draft (.tmp/runs/luna6/prereg/s-prereg-draft.md):
+- 40 encounters. Fixtures 40/40 equal both manifests.
+- Seeds drawn 2026-09-26 07:43:51: P = 1077733051 plus eight packet shuffle seeds, in seeds.txt (sha 8f65e846…, mode 444).
+- judge-study.sh created from judge-staged.sh with only the permitted edits; the advisory gate is copied byte-identical, with its sidecar.
+- Exact integer decision rule; R9 replaces T8, V15, V18 and M85 for option (b).
+- Codex review (gpt-5.6-sol high): r1 REVISE 2/2/2, r2 REVISE 0/1/2, all fixed; r3 running. On APPROVE, the draft becomes the S-PREREG D-entry.
+
+Next free id: D898.
