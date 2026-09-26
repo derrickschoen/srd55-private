@@ -1410,6 +1410,7 @@ describe('external party-pack boundary', () => {
       return reduceEncounter(state, command, () => 0.5).events.flatMap((event) =>
         event.type === 'attack_resolved' ? [`${event.attack.roll.mode}:${String(event.attack.roll.faces.length)}`] : []);
     };
+    expect(() => rolls(false), 'the pack Longbow reaches a target 30 feet away').not.toThrow();
     expect(rolls(true)).toEqual(['disadvantage:2']);
     expect(rolls(false)).toEqual(['normal:1']);
   });

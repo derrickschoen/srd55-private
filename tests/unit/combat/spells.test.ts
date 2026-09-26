@@ -1627,6 +1627,7 @@ describe('CC-TRUE-STRIKE: True Strike attacks with the weapon used in its castin
     // Longbow at a target 30 feet away (normal range): the enemy at (0,2) is
     // within 5 feet of the caster and sees it. An ally there, or nobody: a
     // straight roll. At an adjacent target, the target itself is that enemy.
+    expect(() => trueStrike(LONGBOW, 6, 'none'), 'a Longbow reaches a target 30 feet away').not.toThrow();
     expect(trueStrike(LONGBOW, 6, 'enemy')).toEqual(['disadvantage:2']);
     expect(trueStrike(LONGBOW, 6, 'ally')).toEqual(['normal:1']);
     expect(trueStrike(LONGBOW, 6, 'none')).toEqual(['normal:1']);
@@ -1643,6 +1644,7 @@ describe('CC-TRUE-STRIKE: True Strike attacks with the weapon used in its castin
   it('CC-TRUE-STRIKE-WEAPON-RANGE: the legal targets and the long range band are the weapon\'s', () => {
     // Dart 20/60: 20 feet is normal range, 25 feet long range (Disadvantage),
     // 65 feet beyond its long range (no attack).
+    expect(() => trueStrike(DART, 5, 'none'), 'a Dart reaches a target 25 feet away').not.toThrow();
     expect(trueStrike(DART, 4, 'none')).toEqual(['normal:1']);
     expect(trueStrike(DART, 5, 'none')).toEqual(['disadvantage:2']);
     expect(() => trueStrike(DART, 13, 'none')).toThrow('The target is out of True Strike weapon range.');

@@ -522,6 +522,7 @@ describe('content-pack v1', () => {
     };
     const longsword = { kind: 'melee', reachFeet: feet(5) } as const;
     const longbow = { kind: 'ranged', normalRangeFeet: feet(150), longRangeFeet: feet(600) } as const;
+    expect(() => strike('weapon-strike', 4, longbow), 'a Longbow reaches a target 20 feet away').not.toThrow();
     expect(() => strike('older-strike', 2, longsword)).toThrow('The target is out of Older Strike weapon range.');
     expect(strike('older-strike', 1, longsword)).toEqual(['normal:1']);
     expect(strike('weapon-strike', 4, longbow)).toEqual(['disadvantage:2']);
