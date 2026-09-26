@@ -62,9 +62,9 @@ async function storedBatch(targetDirectory: string, format: string, model: strin
 }
 
 /**
- * The refusals over a stored manifest, typed by hand from the rule (B2 review r1 P3 and review r2 P2): a v1 batch is
- * never resumed and never replaced; without --resume, any other stored manifest is replaced only with --overwrite; one
- * that does not parse is never replaced.
+ * The refusals over a stored manifest, typed by hand from the rule (B2 review r1 P3, review r2 P2 and review r3 P2): a
+ * v1 batch is never resumed and never replaced; without --resume, any other stored manifest is replaced only with
+ * --overwrite; --resume continues only a v2 manifest; one that does not parse is never resumed and never replaced.
  */
 const V1_RESUME_REFUSAL = 'HistoricalLunaBatchResumeError: LUNA6: <manifest> is an arena-rl-batch-v1 gpt-5.6-luna ' +
   'low batch; this generator writes arena-rl-batch-v2 gpt-6-luna low batches (D887 b) and never resumes a v1 batch ' +
@@ -73,12 +73,16 @@ const V1_OVERWRITE_REFUSAL = 'HistoricalLunaBatchOverwriteError: LUNA6: <manifes
   'gpt-5.6-luna low batch; a fresh arena-rl-batch-v2 gpt-6-luna low run never overwrites it, which would lose its ' +
   'provenance. Start a new --target-dir.';
 const UNREADABLE_MANIFEST_REFUSAL = 'UnreadableBatchManifestError: LUNA6: <manifest> holds a batch manifest that ' +
-  'does not parse, so it cannot be shown not to be an arena-rl-batch-v1 batch; a run without --resume never ' +
-  'replaces it, --overwrite included. Start a new --target-dir.';
+  'does not parse, so it cannot be shown not to be an arena-rl-batch-v1 batch and holds nothing to continue; no run ' +
+  'resumes or replaces it, --overwrite included. Start a new --target-dir.';
 function storedManifestRefusal(format: string): string {
   return `ExistingBatchManifestError: LUNA6: <manifest> already holds a batch manifest of format ${format}; a run ` +
     'without --resume replaces a stored batch manifest only with --overwrite. Pass --resume to continue it, ' +
     '--overwrite to replace it, or start a new --target-dir.';
+}
+function unresumableManifestRefusal(format: string): string {
+  return `UnresumableBatchManifestError: LUNA6: <manifest> holds a batch manifest of format ${format}; --resume ` +
+    'continues only an arena-rl-batch-v2 batch manifest. Pass --overwrite to replace it, or start a new --target-dir.';
 }
 
 /** A refused run as data: '<name>: <message>', with the manifest path it names replaced by '<manifest>'. */
@@ -288,6 +292,25 @@ describe('RL arena batch generator', () => {
         calls: [3_943_002],
         storedBytesKept: false,
       },
+    ]);
+  });
+
+  it('refuses to resume an unparseable, unknown-format or non-object batch manifest and keeps its bytes', async () => {
+    // LUNA6 (B2 review r3 P2): --resume continues only a stored v2 manifest. Over a manifest that does not parse (a write
+    // cut short), one of a format this generator does not know, or JSON that is no manifest object (null: no format to
+    // name), it refuses before the first arena call and leaves the stored bytes as they were.
+    expect([
+      await generateOverStoredBatch({
+        format: 'arena-rl-batch-v2', model: 'gpt-6-luna', resume: true, bytes: (manifest) => manifest.slice(0, 100),
+      }),
+      await generateOverStoredBatch({ format: 'arena-rl-batch-v3', model: 'gpt-6-luna', resume: true }),
+      await generateOverStoredBatch({
+        format: 'arena-rl-batch-v2', model: 'gpt-6-luna', resume: true, bytes: () => 'null\n',
+      }),
+    ]).toEqual([
+      { outcome: { error: UNREADABLE_MANIFEST_REFUSAL }, calls: [], storedBytesKept: true },
+      { outcome: { error: unresumableManifestRefusal('arena-rl-batch-v3') }, calls: [], storedBytesKept: true },
+      { outcome: { error: unresumableManifestRefusal('<none>') }, calls: [], storedBytesKept: true },
     ]);
   });
 

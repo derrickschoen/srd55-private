@@ -34,10 +34,10 @@ export interface SeedRange {
 }
 
 /**
- * What a run does with a batch manifest already stored at a batch's path (LUNA6, B2 review r2): by default it refuses
- * to start; --resume continues the stored v2 manifest of this exact batch configuration; --overwrite replaces it and
- * starts the batch over. No policy resumes or replaces a v1 batch or a manifest that does not parse. One run has one
- * policy, so --resume and --overwrite together cannot be expressed.
+ * What a run does with a batch manifest already stored at a batch's path (LUNA6, B2 reviews r2 and r3): by default it
+ * refuses to start; --resume continues the stored v2 manifest of this exact batch configuration and refuses anything
+ * else; --overwrite replaces it and starts the batch over. No policy resumes or replaces a v1 batch or a manifest that
+ * does not parse. One run has one policy, so --resume and --overwrite together cannot be expressed.
  */
 export type StoredManifestPolicy = 'refuse' | 'resume' | 'overwrite';
 
@@ -144,8 +144,9 @@ export class ExistingBatchManifestError extends Error {
 }
 
 /**
- * LUNA6 (B2 review r2): a stored manifest that does not parse (a write cut short, or not a manifest at all) cannot be
- * shown not to be a v1 batch, so a run without --resume never replaces it, --overwrite included.
+ * LUNA6 (B2 reviews r2 and r3): a stored manifest that does not parse (a write cut short, or not a manifest at all)
+ * cannot be shown not to be a v1 batch and holds no seeds to continue, so no run resumes or replaces it, --overwrite
+ * included.
  */
 export class UnreadableBatchManifestError extends Error {
   override readonly name = 'UnreadableBatchManifestError' as const;
@@ -153,9 +154,24 @@ export class UnreadableBatchManifestError extends Error {
   constructor(readonly manifestPath: string, cause: SyntaxError) {
     super(
       `LUNA6: ${manifestPath} holds a batch manifest that does not parse, so it cannot be shown not to be an ` +
-      `${HISTORICAL_MANIFEST_FORMAT} batch; a run without --resume never replaces it, --overwrite included. Start a ` +
-      'new --target-dir.',
+      `${HISTORICAL_MANIFEST_FORMAT} batch and holds nothing to continue; no run resumes or replaces it, --overwrite ` +
+      'included. Start a new --target-dir.',
       { cause },
+    );
+  }
+}
+
+/**
+ * LUNA6 (B2 review r3): --resume continues only a stored v2 manifest. A manifest of a format this generator does not
+ * know, or JSON that is no manifest object, it refuses and leaves as it is; --overwrite may replace either.
+ */
+export class UnresumableBatchManifestError extends Error {
+  override readonly name = 'UnresumableBatchManifestError' as const;
+
+  constructor(readonly manifestPath: string, format: string) {
+    super(
+      `LUNA6: ${manifestPath} holds a batch manifest of format ${format}; --resume continues only an ` +
+      `${GENERATE_DATA_MANIFEST_FORMAT} batch manifest. Pass --overwrite to replace it, or start a new --target-dir.`,
     );
   }
 }
@@ -308,9 +324,9 @@ async function readStoredManifest(path: string): Promise<StoredManifest> {
 
 /**
  * The manifest a batch starts from (null: an empty one), decided from what its path holds and the run's policy. A v1
- * batch is never resumed into v2 and never replaced (LUNA6). A manifest that does not parse stops the run. Without
+ * batch is never resumed into v2 and never replaced (LUNA6). A manifest that does not parse stops every run. Without
  * --resume, any other stored manifest stops the run unless --overwrite replaces it. With --resume, only the stored v2
- * manifest of this exact batch configuration continues.
+ * manifest of this exact batch configuration continues; any other stops the run.
  */
 async function startingManifest(
   path: string,
@@ -324,8 +340,6 @@ async function startingManifest(
     case 'absent':
       return null;
     case 'unparseable':
-      // --resume stops on the parse error itself, as it always has.
-      if (policy === 'resume') throw stored.error;
       throw new UnreadableBatchManifestError(path, stored.error);
     case 'historical':
       if (policy === 'resume') throw new HistoricalLunaBatchResumeError(path, stored.manifest);
@@ -334,7 +348,8 @@ async function startingManifest(
     case 'unknown_format':
       if (policy === 'overwrite') return null;
       if (policy === 'refuse') throw new ExistingBatchManifestError(path, stored.format);
-      if (stored.kind === 'unknown_format' || !resumesThisBatch(stored.manifest, config, range, provenance)) {
+      if (stored.kind === 'unknown_format') throw new UnresumableBatchManifestError(path, stored.format);
+      if (!resumesThisBatch(stored.manifest, config, range, provenance)) {
         throw new Error(`Resume manifest ${path} does not match this batch configuration.`);
       }
       return { ...stored.manifest, toolArgv: [...config.toolArgv] };
