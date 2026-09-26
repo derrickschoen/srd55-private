@@ -345,6 +345,9 @@ function sourceAt(grid: SourceGrid, column: number, row: number): SourceCell | u
     }
     case 'sparse': return grid.rows.get(row)?.get(column);
   }
+  // The return type admits `undefined` (no source in this cell), so without this check a new
+  // SourceGrid kind would compile and find no source anywhere. Every kind returns above.
+  grid satisfies never;
 }
 
 function terrainSources(state: EncounterState): PlacedSource[] {
