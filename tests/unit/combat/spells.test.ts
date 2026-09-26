@@ -1753,6 +1753,8 @@ describe('CC-TRUE-STRIKE: True Strike attacks with the weapon used in its castin
     // after the spell's targets are selected and before its operation runs.
     // At RNG 0.1 the d20 is 3 (Math.floor(0.1 * 20) + 1): with a clear line the
     // spell fails there and no attack is made.
+    expect(() => coveredStrike('open', { slowed: true, rng: 0.1 }), 'a clear line is a legal True Strike target')
+      .not.toThrow();
     const clear = coveredStrike('open', { slowed: true, rng: 0.1 });
     expect(clear).toContainEqual(expect.objectContaining({
       type: 'slow_spellcasting_checked', roll: 3, failureMaximum: 5, outcome: 'spell_failed',
