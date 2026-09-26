@@ -211,6 +211,38 @@ describe('RL arena batch generator', () => {
     ]);
   });
 
+  it('refuses the removed --timeout-ms in every value and spelling and never ignores it', () => {
+    // LUNA6 (plan r5 §1.2): the generator's own --timeout-ms is removed and refused with the lift message, whatever its
+    // value, the hang guard's own 1800000 included. The parser matches whole option tokens and normalises nothing but
+    // a leading '--', so an '=' spelling or a shortened name is an unknown option, never an ignored one. The first
+    // case is the control: the same batch without a timeout parses.
+    const batch = ['--seed-range', '3943001-3943003', '--reps', '2', '--target-dir', join(tmpdir(), 'luna6-parse')];
+    const parse = (timeout: readonly string[]) => {
+      try {
+        return { ok: parseGenerateDataArgs([...batch, ...timeout]).toolArgv.slice(batch.length).join(' ') };
+      } catch (error) {
+        return { error: error instanceof Error ? `${error.name}: ${error.message}` : String(error) };
+      }
+    };
+    const lift = 'TypeError: LUNA6: gpt-6-luna low runs uncensored (owner 2026-09-24); ';
+
+    expect([
+      parse([]),
+      parse(['--timeout-ms', '120000']),
+      parse(['--timeout-ms', '1800000']),
+      parse(['--timeout-ms=120000']),
+      parse(['--timeout-ms']),
+      parse(['--timeout', '120000']),
+    ]).toEqual([
+      { ok: '' },
+      { error: `${lift}--timeout-ms 120000 is refused (hang guard 1800000)` },
+      { error: `${lift}--timeout-ms 1800000 is refused (hang guard 1800000)` },
+      { error: 'TypeError: Unknown generate-data option --timeout-ms=120000.' },
+      { error: `${lift}--timeout-ms <missing> is refused (hang guard 1800000)` },
+      { error: 'TypeError: Unknown generate-data option --timeout.' },
+    ]);
+  });
+
   it('records combat model propagation and hard-errors on a resume mismatch', async () => {
     const targetDirectory = mkdtempSync(join(tmpdir(), 'd416-combat-model-manifest-'));
     const common = [
