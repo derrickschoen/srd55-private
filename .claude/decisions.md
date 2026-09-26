@@ -2560,3 +2560,29 @@ OWNER, verbatim choice: "A: monsters know only the plausible (Recommended)".
 - This clears S-4 as a blocker for the paid teacher pilot and the judge-prompt freeze. The pilot still waits for S-RESULT (LUNA6) and the three named human audit roles (plan-r5 :24).
 
 Next free id: D904.
+
+## D904 — 2026-09-26 18:11 — FOOTPRINT plan written; a finding against my D900 reading (SRD 5.2.1 does charge squeezing); owner Q1: repair the overhang AND the 18 starting overlaps
+
+**FOOTPRINT plan.**
+- Planner: workflow wf_4875f106-9aa, read-only in clone dnd-probe-footprint-541094 @ 564bd504.
+- Plan: .tmp-plans/2026-09-26-footprint-whole-body-on-map.md (604 lines). Data: .tmp/runs/footprint/plan/.
+- Codex plan review r1 (gpt-6-sol xhigh, read-only) is running.
+- Agent-reported (not verified by me):
+  - exactly 1 overhanging token in the repo (seed-6203009 Skyspear Hunter, Huge, anchor (17,3) on 19 columns); 0 in 16,220 generated rooms;
+  - 18 overlapping starting pairs in 8 fixtures (7 are D898 study rooms, plus arena-basis 3943006). createEncounter refuses both kinds; the legacy_basis/session decoders do not;
+  - of the pins, only blind-rows and d569-cells move. arena-verdicts does not read seed-6203009;
+  - seed-6203009 cannot be regenerated: its Archelon is D466 B3's hand edit (fd551213), so it is repaired by a stated rule;
+  - production movement evaluation (engine-query-port.ts:1436/:1529/:1686) builds hypothetical states with Large+ bodies past the edge; the whole-body type forces a fix;
+  - squeezing THROUGH a gap from open ground is not modelled: a creature is squeezed only if it was placed squeezed.
+
+**FINDING AGAINST MY OWN WORK (D900 reading).**
+- I wrote that SRD 5.2.1 "has no squeezing section" and took the half-speed cost from SRD 5.1.
+- The heading search was literally right but wrong in substance. The 5.2.1 Rules Glossary, Difficult Terrain (docs/srd/full/srd-5.2.1.txt:11657-11676, read by me), lists "A narrow opening sized for a creature one size smaller than you". It says "every foot of movement in that space costs 1 extra foot", and "Difficult Terrain isn't cumulative".
+- So 5.2.1 gives the owner's half speed, but NOT stacking. 5.1's rule stacks (the crawling example, srd-5.1-ogl.txt:5282-5286).
+- I searched for the word and not for the rule. The cost model is now owner question FOOTPRINT Q2.
+
+**OWNER, FOOTPRINT Q1, verbatim choice: "Fix overhang and overlaps (Recommended)".**
+- One repair rule (D514 growth: the nearest free anchor that fits the whole body) is applied to all 19 problems: the overhang and the 18 overlapping starts.
+- One D898 PRE-RUN amendment carries every changed study fixture sha and the manifest changes. It is written before any study cell.
+
+Next free id: D905.
