@@ -985,7 +985,12 @@ export function labelD569PairNoninferiority(
   return offensePasses && refusalPasses ? 'noninferior' : 'not_noninferior';
 }
 
-function mulberry32(seed: number): () => number {
+/**
+ * D569's seeded generator (mulberry32). Exported for the LUNA6 effort study, which registers this generator for its
+ * schedule and its bootstrap (plan r5 §3.2, §3.4). `value` is not reduced modulo 2^32, so the stream stays exact for
+ * about 4.9 million calls (2^53 / 0x6D2B79F5); the study's 100,000 × 40 bootstrap picks are 4 million.
+ */
+export function d569Mulberry32(seed: number): () => number {
   let value = seed >>> 0;
   return () => {
     value += 0x6D2B79F5;
@@ -1000,10 +1005,36 @@ function mean(values: readonly number[]): number {
   return values.length === 0 ? Number.NaN : values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
-function percentile(sorted: readonly number[], quantile: number): number {
+/** D569's percentile rule over ascending values: index `floor(q·n)` clamped to `[0, n − 1]`; NaN when empty. */
+export function d569Percentile(sorted: readonly number[], quantile: number): number {
   if (sorted.length === 0) return Number.NaN;
   const index = Math.min(sorted.length - 1, Math.max(0, Math.floor(quantile * sorted.length)));
   return sorted[index] ?? Number.NaN;
+}
+
+/**
+ * D569's cluster bootstrap loop. One mulberry32(seed) stream; each of `resamples` draws picks `clusters.length`
+ * clusters with replacement, `clusters[floor(random() · clusters.length)]`, in that order, and hands the picked
+ * clusters to `summarize`. Returns the draws unsorted, in draw order. D569 summarizes a draw as the mean of every
+ * picked cluster's values; the LUNA6 study summarizes it as exact integer sums (S-PREREG R6).
+ */
+export function d569ClusterBootstrapDraws<Cluster, Draw>(
+  clusters: readonly Cluster[],
+  resamples: number,
+  seed: number,
+  summarize: (picked: readonly Cluster[]) => Draw,
+): Draw[] {
+  const random = d569Mulberry32(seed);
+  const draws = new Array<Draw>(resamples);
+  for (let draw = 0; draw < resamples; draw += 1) {
+    const picked: Cluster[] = [];
+    for (let cluster = 0; cluster < clusters.length; cluster += 1) {
+      const selected = clusters[Math.floor(random() * clusters.length)];
+      if (selected !== undefined) picked.push(selected);
+    }
+    draws[draw] = summarize(picked);
+  }
+  return draws;
 }
 
 function clusterInterval(
@@ -1013,21 +1044,16 @@ function clusterInterval(
 ): D569Interval {
   const clusterRows = [...clusters.values()];
   if (clusterRows.length === 0) return { lower: Number.NaN, upper: Number.NaN };
-  const random = mulberry32(seed);
-  const draws = new Array<number>(resamples);
-  for (let draw = 0; draw < resamples; draw += 1) {
-    const sampled: number[] = [];
-    for (let cluster = 0; cluster < clusterRows.length; cluster += 1) {
-      const selected = clusterRows[Math.floor(random() * clusterRows.length)];
-      if (selected !== undefined) sampled.push(...selected);
-    }
-    draws[draw] = mean(sampled);
-  }
+  const draws = d569ClusterBootstrapDraws(clusterRows, resamples, seed, (picked) => mean(picked.flat()));
   draws.sort((left, right) => left - right);
-  return { lower: percentile(draws, 0.025), upper: percentile(draws, 0.975) };
+  return { lower: d569Percentile(draws, 0.025), upper: d569Percentile(draws, 0.975) };
 }
 
-function panelValues(row: D569AnalysisRow): Readonly<Record<'total' | D569PanelComponent, number>> | null {
+/**
+ * D569's cell value: the mean across seats per component and their sum for an executed row; zeros for a refused,
+ * execution-failed or service-failed row; null (excluded pairwise) for an infrastructure failure.
+ */
+export function d569PanelValues(row: D569AnalysisRow): Readonly<Record<'total' | D569PanelComponent, number>> | null {
   if (row.outcome === 'infrastructure_failed') return null;
   if (row.outcome !== 'executed') {
     return { total: 0, targetPriority: 0, actionEconomy: 0, coherence: 0, positioning: 0 };
@@ -1091,7 +1117,7 @@ function armReport(
   seed: number,
 ): D569ArmReport {
   const scored = rows.flatMap((row) => {
-    const values = panelValues(row);
+    const values = d569PanelValues(row);
     return values === null ? [] : [{ row, values }];
   });
   const metrics = ['total', ...D569_PANEL_COMPONENTS] as const;
@@ -1146,8 +1172,8 @@ function analyzeD569PairMetrics(
   const paired = [...left.entries()].flatMap(([key, leftRow]) => {
     const rightRow = right.get(key);
     if (rightRow === undefined) throw new Error('Validated pair disappeared.');
-    const leftValues = panelValues(leftRow);
-    const rightValues = panelValues(rightRow);
+    const leftValues = d569PanelValues(leftRow);
+    const rightValues = d569PanelValues(rightRow);
     return leftValues === null || rightValues === null ? [] : [{ leftRow, rightRow, leftValues, rightValues }];
   });
   const metrics = ['total', ...D569_PANEL_COMPONENTS] as const;
