@@ -32,6 +32,8 @@ import {
   Luna6StudyRefusal,
   type JsonRecord,
   type Luna6CellSpeed,
+  type Luna6CheckedIngestReport,
+  type Luna6ExcludedPairRecord,
   type Luna6GuardLedgerKey,
 } from './ingest';
 import {
@@ -46,7 +48,7 @@ import {
   type Luna6StratumId,
   type Luna6Tag,
 } from './registration';
-import { luna6PairName, type Luna6PairIdentity } from './schedule';
+import { buildLuna6Schedule, luna6CellName, luna6PairName, type Luna6PairIdentity } from './schedule';
 
 export type Luna6CellOutcome = D569AnalysisRow['outcome'];
 
@@ -79,7 +81,10 @@ type AnalysisRegistration = Pick<
   Luna6EffortStudyRegistration,
   'id' | 'arms' | 'modes' | 'strata' | 'seats' | 'margin' | 'qStar' | 'resamples' | 'bootstrapSeed'
 >;
-type StageRegistration = AnalysisRegistration & Pick<Luna6EffortStudyRegistration, 'cells' | 'pairs' | 'maxExcludedPairs'>;
+type StageRegistration = AnalysisRegistration & Pick<
+  Luna6EffortStudyRegistration,
+  'cells' | 'pairs' | 'maxExcludedPairs' | 'scheduleSeed' | 'caps' | 'codexBin' | 'kb' | 'studyRoot' | 'cellEnv'
+>;
 
 const COMPONENT_MAXIMA: Readonly<Record<D569PanelComponent, number>> = {
   targetPriority: 3, actionEconomy: 3, coherence: 2, positioning: 2,
@@ -123,9 +128,15 @@ function zeroInclusive(cell: Luna6ScoredCell, sa1Override: boolean, executed: ()
   }
 }
 
+/** A pair excluded pairwise, with the names of its cells that have no value (infrastructure failures, §3.2). */
+export interface Luna6ExcludedPair extends Luna6PairIdentity {
+  readonly cells: readonly string[];
+}
+
 export interface Luna6Pairing {
   readonly pairs: readonly Luna6PairDifference[];
   readonly excludedPairs: number;
+  readonly excluded: readonly Luna6ExcludedPair[];
   readonly sa1Overrides: number;
   readonly unmatchedLedger: readonly string[];
 }
@@ -141,7 +152,12 @@ export function luna6PairDifferences(
   const matched = new Set<string>();
   const high = luna6Arm(registration, 'high').id;
   const xhigh = luna6Arm(registration, 'xhigh').id;
-  const byPair = new Map<string, { identity: Luna6PairIdentity; high?: number | null; xhigh?: number | null }>();
+  const byPair = new Map<string, {
+    identity: Luna6PairIdentity;
+    high?: number | null;
+    xhigh?: number | null;
+    failed: string[];
+  }>();
   let sa1Overrides = 0;
   for (const cell of cells) {
     const key = luna6LedgerKey(cell);
@@ -152,20 +168,21 @@ export function luna6PairDifferences(
     }
     const identity: Luna6PairIdentity = { mode: cell.mode, stratum: cell.stratum, seed: cell.seed, rep: cell.rep };
     const pairKey = luna6PairName(identity);
-    const pair = byPair.get(pairKey) ?? { identity };
+    const pair = byPair.get(pairKey) ?? { identity, failed: [] };
     const value = numerator(cell, overridden);
+    if (value === null) pair.failed.push(luna6CellName(cell));
     if (cell.arm === high) pair.high = value;
     else if (cell.arm === xhigh) pair.xhigh = value;
     byPair.set(pairKey, pair);
   }
   const pairs: Luna6PairDifference[] = [];
-  let excludedPairs = 0;
-  for (const { identity, high: highValue, xhigh: xhighValue } of byPair.values()) {
+  const excluded: Luna6ExcludedPair[] = [];
+  for (const { identity, high: highValue, xhigh: xhighValue, failed } of byPair.values()) {
     if (highValue === undefined || xhighValue === undefined) {
       throw new TypeError(`Pair ${luna6PairName(identity)} lacks an arm.`);
     }
     if (highValue === null || xhighValue === null) {
-      excludedPairs += 1;
+      excluded.push({ ...identity, cells: [...failed].sort() });
       continue;
     }
     const t = xhighValue - highValue;
@@ -173,7 +190,7 @@ export function luna6PairDifferences(
   }
   const unmatchedLedger = ledger.filter((entry) => !matched.has(luna6LedgerKey(entry)))
     .map((entry) => `guard ledger entry ${luna6LedgerKey(entry)} matches no scored cell`);
-  return { pairs, excludedPairs, sa1Overrides, unmatchedLedger };
+  return { pairs, excludedPairs: excluded.length, excluded, sa1Overrides, unmatchedLedger };
 }
 
 interface Luna6Cluster {
@@ -643,6 +660,8 @@ export interface Luna6StudyAnalysis {
   readonly delta: Luna6Decision['delta'];
   readonly pairs: number;
   readonly excludedPairs: number;
+  /** The excluded pairs themselves, each with the cells it is excluded for (compared with the ingest report). */
+  readonly excluded: readonly Luna6ExcludedPair[];
   readonly clusters: number;
   readonly sa1Overrides: number;
   readonly rule: {
@@ -720,6 +739,7 @@ export function analyzeLuna6Study(input: {
     delta: decision.delta,
     pairs: decision.pairs,
     excludedPairs: pairing.excludedPairs,
+    excluded: pairing.excluded,
     clusters: decision.clusters,
     sa1Overrides: pairing.sa1Overrides,
     rule: {
@@ -741,10 +761,78 @@ export function analyzeLuna6Study(input: {
   };
 }
 
+const RERUN_REASON = /^cell (\d+) (infrastructure_failed|no row|exit -?\d+)$/u;
+
+/**
+ * An excluded pair's reason names its rerun's problem (§3.2: a pair is excluded when its rerun also fails), so its
+ * cell is a rerun cell, numbered after the registered cells. When the packets hold the rerun's rows, the reason is
+ * exactly the first of them that failed on infrastructure; when they hold the scheduled rows (the rerun left a cell
+ * without a row), no packet carries the rerun's problem, and only its form and ordinal can be checked.
+ */
+function excludedReasonViolation(
+  registration: Pick<Luna6EffortStudyRegistration, 'cells' | 'arms'>,
+  entry: Luna6ExcludedPairRecord,
+  speedOrdinal: ReadonlyMap<string, number>,
+): string | null {
+  const where = `ingest report: pair ${String(entry.pair)} (${entry.name}): reason ${JSON.stringify(entry.reason)}`;
+  const finals = registration.arms.map((arm) => speedOrdinal.get(`${entry.name} ${arm.id}`) ?? 0);
+  if (finals.some((ordinal) => ordinal > registration.cells)) {
+    const first = Math.min(...entry.cells.map((cell) => speedOrdinal.get(cell) ?? Number.NaN));
+    const expected = `cell ${String(first)} infrastructure_failed`;
+    return entry.reason === expected
+      ? null
+      : `${where} is not "${expected}", the first infrastructure cell of the rerun whose rows the packets hold`;
+  }
+  const match = RERUN_REASON.exec(entry.reason);
+  return match !== null && Number(match[1]) > registration.cells
+    ? null
+    : `${where} is not a rerun cell's problem (cell <ordinal above ${String(registration.cells)}> infrastructure_failed, ` +
+      'no row or exit <code>)';
+}
+
+/**
+ * The ingest report's excluded pairs must be exactly the pairs the packets exclude: the same schedule pair number
+ * and name, and the same cells (those failed on infrastructure), each with its rerun's reason.
+ */
+function excludedPairViolations(
+  registration: StageRegistration,
+  report: Luna6CheckedIngestReport,
+  excluded: readonly Luna6ExcludedPair[],
+): readonly string[] {
+  const numbers = new Map(buildLuna6Schedule(registration, registration.scheduleSeed).entries
+    .map((entry) => [luna6PairName(entry), entry.pair]));
+  const identity = (entry: Pick<Luna6ExcludedPairRecord, 'pair' | 'name' | 'cells'>): string =>
+    JSON.stringify([entry.pair, entry.name, entry.cells]);
+  const expected = excluded.map((pair) => ({
+    pair: numbers.get(luna6PairName(pair)) ?? 0, name: luna6PairName(pair), cells: pair.cells,
+  }));
+  const reportedKeys = new Set(report.excludedPairs.map(identity));
+  const expectedKeys = new Set(expected.map(identity));
+  const violations: string[] = [];
+  for (const entry of report.excludedPairs) {
+    if (!expectedKeys.has(identity(entry))) {
+      violations.push(`ingest report: excludes pair ${String(entry.pair)} (${entry.name}) for ${entry.cells.join(', ')}; ` +
+        'the packets do not');
+    }
+  }
+  for (const entry of expected) {
+    if (!reportedKeys.has(identity(entry))) {
+      violations.push(`ingest report: lacks pair ${String(entry.pair)} (${entry.name}), which the packets exclude for ` +
+        `${entry.cells.join(', ')}`);
+    }
+  }
+  const speedOrdinal = new Map(report.speed.map((cell) => [luna6CellName(cell), cell.ordinal]));
+  for (const entry of report.excludedPairs) {
+    const violation = excludedReasonViolation(registration, entry, speedOrdinal);
+    if (violation !== null) violations.push(violation);
+  }
+  return violations;
+}
+
 /**
  * Stage 7 as the operator runs it: the guard ledger and the ingest report are checked against the registration and
  * each other (`luna6AnalysisInputs`) before the analysis, and the pairs the packets exclude must be the pairs the
- * ingest report excluded. Throws `Luna6StudyRefusal` naming every mismatch.
+ * ingest report excluded, by count and by identity. Throws `Luna6StudyRefusal` naming every mismatch.
  */
 export function analyzeLuna6StudyStage(input: {
   readonly registration: StageRegistration;
@@ -754,11 +842,14 @@ export function analyzeLuna6StudyStage(input: {
 }): Luna6StudyAnalysis {
   const { ledger, report } = luna6AnalysisInputs(input.registration, input.ledgerDocument, input.reportDocument);
   const analysis = analyzeLuna6Study({ registration: input.registration, documents: input.documents, ledger, speed: report.speed });
+  const violations: string[] = [];
   if (analysis.excludedPairs !== report.excludedPairs.length) {
-    throw new Luna6StudyRefusal([
+    violations.push(
       `ingest report: excludes ${String(report.excludedPairs.length)} of its pairs; the packets exclude ` +
       `${String(analysis.excludedPairs)}`,
-    ]);
+    );
   }
+  violations.push(...excludedPairViolations(input.registration, report, analysis.excluded));
+  if (violations.length > 0) throw new Luna6StudyRefusal(violations);
   return analysis;
 }

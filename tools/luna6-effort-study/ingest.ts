@@ -84,12 +84,23 @@ export function luna6GuardLedgerDocument(
   return { schema: LUNA6_GUARD_LEDGER_SCHEMA, registration: registration.id, entries: ledger };
 }
 
+/**
+ * A pair the §3.2 infrastructure rule excluded: its schedule pair number and name, the cells of its packet rows that
+ * failed on infrastructure (the cells the analysis excludes it for), and its rerun's problem (`cell <o> <problem>`).
+ */
+export interface Luna6ExcludedPairRecord {
+  readonly pair: number;
+  readonly name: string;
+  readonly cells: readonly string[];
+  readonly reason: string;
+}
+
 export interface Luna6IngestReport {
   readonly schema: typeof LUNA6_INGEST_REPORT_SCHEMA;
   readonly registration: Luna6EffortStudyRegistration['id'];
   readonly cells: number;
   readonly pairs: number;
-  readonly excludedPairs: readonly { readonly pair: number; readonly name: string; readonly reason: string }[];
+  readonly excludedPairs: readonly Luna6ExcludedPairRecord[];
   readonly sa1: number;
   readonly calls: number;
   readonly attempts: readonly {
@@ -381,8 +392,11 @@ export function ingestLuna6Study(input: {
       finals.push({ pair, cells: rerun as readonly Extract<CellAttempt, { kind: 'row' }>[] });
       continue;
     }
-    excluded.push({ pair, name, reason: rerunProblem });
+    // The packets get the rows of the attempt that has both (the rerun first); their infrastructure cells are the
+    // cells the analysis excludes the pair for.
     const withRows = [rerun, first].find((attempt) => attempt.every((cell) => cell.kind === 'row'));
+    const failed = (withRows ?? []).flatMap((cell) => cell.kind === 'row' && cell.infrastructure ? [luna6CellName(cell.entry)] : []);
+    excluded.push({ pair, name, cells: failed.sort(), reason: rerunProblem });
     if (withRows === undefined) {
       violations.push(`pair ${String(pair)} (${name}): STOP: a cell has no row in either attempt; the packet builder needs both rows`);
       continue;
@@ -624,11 +638,16 @@ function parseExcludedPairs(
 ): Luna6IngestReport['excludedPairs'] | null {
   const excluded = Array.isArray(value) ? value.flatMap((entry: unknown) => {
     if (!isRecord(entry)) return [];
-    const { pair, name, reason } = entry;
-    return isOrdinal(pair) && typeof name === 'string' && typeof reason === 'string' ? [{ pair, name, reason }] : [];
+    const { pair, name, cells, reason } = entry;
+    const cellNames = Array.isArray(cells) && cells.length > 0 && cells.every((cell: unknown) => typeof cell === 'string')
+      ? cells as string[]
+      : null;
+    return isOrdinal(pair) && typeof name === 'string' && cellNames !== null && typeof reason === 'string'
+      ? [{ pair, name, cells: cellNames, reason }]
+      : [];
   }) : [];
   if (!Array.isArray(value) || excluded.length !== value.length) {
-    violations.push(`${where}: excludedPairs is not a list of pairs with name and reason`);
+    violations.push(`${where}: excludedPairs is not a list of pairs with name, cells and reason`);
     return null;
   }
   return excluded;

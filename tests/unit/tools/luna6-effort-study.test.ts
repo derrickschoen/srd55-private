@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
@@ -50,15 +51,17 @@ import {
   buildLuna6Schedule,
   luna6GridViolations,
   type Luna6CellIdentity,
+  type Luna6RerunEntry,
   type Luna6Schedule,
   type Luna6ScheduleEntry,
 } from '../../../tools/luna6-effort-study/schedule';
 
 // Every expectation below is typed from the preregistration S-PREREG (D898, 2026-09-26; R1-R11 supersede plan r5 §3
 // for option (b)) or derived by hand from plan r5 §4.5 as adapted to D898's counts (the arithmetic is in
-// .tmp/runs/luna6/b6/derivations.txt). The registered schedule sequence and the packets' blinding order come from an
-// independent python oracle written from D898 R2 and R3 (.tmp/runs/luna6/b6/fix1/oracle/oracle.py, no repo code).
-// None is read from the module under test.
+// .tmp/runs/luna6/b6/derivations.txt). The registered schedule sequence, the whole schedule document's and a rerun
+// section's sha256, the mini registration's schedule and the packets' blinding order come from an independent python
+// oracle written from D898 R1-R5 and plan r5 §3.1-§3.2 (.tmp/runs/luna6/b6/fix2/oracle/oracle.py, which extends
+// fix1/oracle/oracle.py; no repo code). None is read from the module under test.
 
 type Outcome<Value> = { readonly ok: Value } | { readonly error: readonly string[] | string };
 
@@ -271,6 +274,72 @@ function gridDocuments(
 /** A schedule entry as the oracle prints it: ordinal, pair, mode, stratum, seed, rep, arm. */
 function scheduleRow(entry: Luna6ScheduleEntry): readonly unknown[] {
   return [entry.ordinal, entry.pair, entry.mode, entry.stratum, entry.seed, entry.rep, entry.arm];
+}
+
+/** A file's sha256, as the operator prints and records it (schedule.json is `<canonical JSON>\n`). */
+function sha256(text: string): string {
+  return createHash('sha256').update(text).digest('hex');
+}
+
+type Json = Record<string, unknown>;
+
+/** A stage-3 document as the analysis reads it back from disk: plain JSON. */
+function asJson(value: unknown): Json {
+  return JSON.parse(canonicalJson(value)) as Json;
+}
+
+/**
+ * The mini registration where blind hard 5117001 rep 1 ends excluded. The oracle's mini schedule
+ * (fix2/oracle/oracle.out) makes it pair 2, cells 3 (xhigh) and 4 (high), rerun as 9 (xhigh) and 10 (high).
+ * - 'rerun': the high cell exits 1 without a row, and in the rerun it fails on infrastructure while xhigh completes, so
+ *   the packets hold the rerun's rows and ingest excludes the pair for `cell 10 infrastructure_failed`;
+ * - 'scheduled': the high cell fails on infrastructure, and in the rerun it exits 1 without a row, so the packets hold
+ *   the scheduled rows and ingest excludes the pair for `cell 10 exit 1`;
+ * - 'rerun-both': as 'rerun', but both rerun cells fail on infrastructure, so ingest excludes the pair for the first of
+ *   them, `cell 9 infrastructure_failed`, and for both its cells.
+ */
+function excludedIngest(packetRows: 'rerun' | 'scheduled' | 'rerun-both') {
+  const schedule = buildLuna6Schedule(MINI, MINI.scheduleSeed);
+  const high1 = `${HIGH}|blind|hard|5117001|1`;
+  const infrastructure = { row: { outcome: 'infrastructure_failed', callsPerRound: 0 }, calls: [] };
+  const exited = { exitCode: 1 };
+  const cells = miniEvidence(schedule, { [high1]: packetRows === 'scheduled' ? infrastructure : exited });
+  const reruns = buildLuna6Reruns(MINI, schedule, 'f'.repeat(64), [2]);
+  for (const entry of reruns.entries) {
+    const failing = entry.arm === HIGH || packetRows === 'rerun-both';
+    cells.set(entry.ordinal, cellEvidence(entry, !failing ? {} : packetRows === 'scheduled' ? exited : infrastructure));
+  }
+  return ingestLuna6Study({ registration: MINI, schedule, scheduleSha256: 'f'.repeat(64), reruns, cells });
+}
+
+/**
+ * The packets of the mini registration with blind-003 (blind hard 5117001 rep 1, high) failed on infrastructure, and
+ * for 'both' also blind-001 (the same pair's xhigh cell).
+ */
+function excludedDocuments(failed: 'high' | 'both' = 'high'): ReturnType<typeof miniDocuments> {
+  const documents = miniDocuments();
+  const ids = failed === 'both' ? ['blind-001', 'blind-003'] : ['blind-003'];
+  documents['blind-hard'].packet = documents['blind-hard'].packet.map((entry) =>
+    ids.includes(String(entry['blindId'])) ? { ...entry, outcome: 'infrastructure_failed' } : entry);
+  return documents;
+}
+
+/** Stage 7 as the operator runs it, recorded as outcome data. */
+function stageOutcome(
+  ledgerDocument: unknown,
+  reportDocument: unknown,
+  options: { readonly documents?: ReturnType<typeof miniDocuments>; readonly registration?: Luna6EffortStudyRegistration } = {},
+) {
+  return outcome(() => {
+    const result = analyzeLuna6StudyStage({
+      registration: options.registration ?? MINI, documents: asDocuments(options.documents ?? miniDocuments()),
+      ledgerDocument, reportDocument,
+    });
+    return {
+      decision: result.decision, pairs: result.pairs, excludedPairs: result.excludedPairs,
+      sa1Overrides: result.sa1Overrides, excluded: result.excluded,
+    };
+  });
 }
 
 describe('LUNA6 effort study', () => {
@@ -827,14 +896,46 @@ describe('LUNA6 effort study', () => {
     // The first 12 ordinals at the registered seed P, and the rerun section for pairs 6 and 1 (asked for out of order),
     // from the independent oracle (.tmp/runs/luna6/b6/fix1/oracle/oracle.out). Pair 6 runs xhigh first. Rerun rows add
     // the replaced ordinal and the cell's --out path.
+    // The whole sequence (review r2): the oracle's section 3 (fix2/oracle/oracle.out) builds schedule.json byte for
+    // byte (all 480 entries, argv included) and the rerun section for pairs [120, 240, 7, 181, 2, 60], asked for out of
+    // order, whose scheduleSha256 is the schedule's own. Both are pinned by their sha256 and their first and last rows.
     const schedule = buildLuna6Schedule(LUNA6_EFFORT_STUDY, LUNA6_EFFORT_STUDY.scheduleSeed);
     const reruns = buildLuna6Reruns(LUNA6_EFFORT_STUDY, schedule, 'f'.repeat(64), [6, 1]);
     const cells = '/home/vagrant/dnd-slim-runs/luna6-effort/cells';
+    const scheduleSha256 = sha256(`${canonicalJson(schedule)}\n`);
+    const section = outcome(() => buildLuna6Reruns(LUNA6_EFFORT_STUDY, schedule, scheduleSha256, [120, 240, 7, 181, 2, 60]));
+    const rerunRow = (entry: Luna6RerunEntry) => [...scheduleRow(entry), entry.rerunOf];
     expect({
       head: schedule.entries.slice(0, 12).map(scheduleRow),
       reruns: reruns.entries.map((entry) =>
         [...scheduleRow(entry), entry.rerunOf, entry.argv[entry.argv.indexOf('--out') + 1]]),
+      whole: {
+        entries: schedule.entries.length,
+        first: scheduleRow(schedule.entries[0]!),
+        last: scheduleRow(schedule.entries[schedule.entries.length - 1]!),
+        sha256: scheduleSha256,
+      },
+      rerunSection: 'ok' in section
+        ? {
+            entries: section.ok.entries.length,
+            first: rerunRow(section.ok.entries[0]!),
+            last: rerunRow(section.ok.entries[section.ok.entries.length - 1]!),
+            sha256: sha256(`${canonicalJson(section.ok)}\n`),
+          }
+        : section,
     }).toEqual({
+      whole: {
+        entries: 480,
+        first: [1, 1, 'blind', 'brutal', 6203010, 2, HIGH],
+        last: [480, 240, 'advice', 'hard', 5117008, 3, HIGH],
+        sha256: '41e9f68938f83a9a9b4ad13f50da7b5baead355021baf74284894437ec1a84cf',
+      },
+      rerunSection: {
+        entries: 12,
+        first: [481, 2, 'advice', 'hard', 5117008, 2, HIGH, 3],
+        last: [492, 240, 'advice', 'hard', 5117008, 3, HIGH, 480],
+        sha256: '65d08f55626eb6aa9f6cb72284676fff673714676839e507fdd8aae43e88cfff',
+      },
       head: [
         [1, 1, 'blind', 'brutal', 6203010, 2, HIGH],
         [2, 1, 'blind', 'brutal', 6203010, 2, XHIGH],
@@ -1042,7 +1143,10 @@ describe('LUNA6 effort study', () => {
       stage(ledger(), { ...report(), registration: 'luna6-effort-study-v0' }),
       stage(ledger(), {
         ...report(), pairs: 3,
-        excludedPairs: [{ pair: 2, name: 'advice hard 5117002 rep 1', reason: 'cell 3 infrastructure_failed' }],
+        excludedPairs: [{
+          pair: 2, name: 'advice hard 5117002 rep 1', cells: ['advice hard 5117002 rep 1 gpt-6-luna-high'],
+          reason: 'cell 3 infrastructure_failed',
+        }],
       }),
     ]).toEqual([
       { ok: { decision: 'high', pairs: 4, excludedPairs: 0, sa1Overrides: 1 } },
@@ -1060,7 +1164,197 @@ describe('LUNA6 effort study', () => {
         'ingest report: calls 8 is not the 7 calls of its speed cells',
       ] },
       { error: ['ingest report: registration "luna6-effort-study-v0" is not luna6-effort-study-v1'] },
-      { error: ['ingest report: excludes 1 of its pairs; the packets exclude 0'] },
+      { error: [
+        'ingest report: excludes 1 of its pairs; the packets exclude 0',
+        'ingest report: excludes pair 2 (advice hard 5117002 rep 1) for advice hard 5117002 rep 1 gpt-6-luna-high; ' +
+          'the packets do not',
+        'ingest report: pair 2 (advice hard 5117002 rep 1): reason "cell 3 infrastructure_failed" is not a rerun ' +
+          "cell's problem (cell <ordinal above 8> infrastructure_failed, no row or exit <code>)",
+      ] },
+    ]);
+  });
+
+  it('compares the excluded pairs of the ingest report and the packets by pair number, cells and reason', () => {
+    // The oracle's mini schedule (fix2/oracle/oracle.out): blind hard 5117001 rep 1 is pair 2 (cells 3 xhigh, 4 high;
+    // reruns 9 xhigh, 10 high) and advice hard 5117002 rep 1 is pair 3. In both valid runs the packets hold blind-003
+    // (that pair's high cell) as infrastructure_failed, so the analysis excludes pair 2 for its high cell and decides
+    // on the three +2 pairs (T8 item 7's scores) -> xhigh.
+    // With both rerun cells failed, the reason is the first of them in the rerun's order (cell 9, xhigh).
+    const rerun = excludedIngest('rerun');
+    const scheduled = excludedIngest('scheduled');
+    const both = excludedIngest('rerun-both');
+    const ledger = asJson(luna6GuardLedgerDocument(MINI, rerun.ledger));
+    const high = 'blind hard 5117001 rep 1 gpt-6-luna-high';
+    const xhigh = 'blind hard 5117001 rep 1 gpt-6-luna-xhigh';
+    const run = (ingest: typeof rerun, excludedPairs?: readonly Json[]) =>
+      stageOutcome(ledger, excludedPairs === undefined ? asJson(ingest.report) : { ...asJson(ingest.report), excludedPairs },
+        { documents: excludedDocuments(ingest === both ? 'both' : 'high') });
+    const entry = (pair: number, name: string, cells: readonly string[], reason: string): Json => ({ pair, name, cells, reason });
+    const excluded = [{ mode: 'blind', stratum: 'hard', seed: 5_117_001, rep: 1, cells: [high] }];
+    const valid = { ok: { decision: 'xhigh', pairs: 3, excludedPairs: 1, sa1Overrides: 0, excluded } };
+    expect({
+      written: [rerun.report.excludedPairs, scheduled.report.excludedPairs, both.report.excludedPairs],
+      outcomes: [
+        run(rerun),
+        run(scheduled),
+        run(both),
+        // Equal count, a different pair (internally consistent: its own pair number, cell and a rerun-shaped reason).
+        run(rerun, [entry(3, 'advice hard 5117002 rep 1', ['advice hard 5117002 rep 1 gpt-6-luna-high'], 'cell 10 infrastructure_failed')]),
+        run(rerun, [entry(3, 'blind hard 5117001 rep 1', [high], 'cell 10 infrastructure_failed')]),
+        run(rerun, [entry(2, 'blind hard 5117001 rep 1', [xhigh], 'cell 9 infrastructure_failed')]),
+        run(rerun, [entry(2, 'blind hard 5117001 rep 1', [high], 'cell 9 infrastructure_failed')]),
+        run(rerun, [entry(2, 'blind hard 5117001 rep 1', [high], 'cell 10 exit 1')]),
+        run(scheduled, [entry(2, 'blind hard 5117001 rep 1', [high], 'cell 4 infrastructure_failed')]),
+        run(scheduled, [entry(2, 'blind hard 5117001 rep 1', [high], 'the rerun failed')]),
+      ],
+    }).toEqual({
+      written: [
+        [{ pair: 2, name: 'blind hard 5117001 rep 1', cells: [high], reason: 'cell 10 infrastructure_failed' }],
+        [{ pair: 2, name: 'blind hard 5117001 rep 1', cells: [high], reason: 'cell 10 exit 1' }],
+        [{ pair: 2, name: 'blind hard 5117001 rep 1', cells: [high, xhigh], reason: 'cell 9 infrastructure_failed' }],
+      ],
+      outcomes: [
+        valid,
+        valid,
+        { ok: { ...valid.ok, excluded: [{ ...excluded[0]!, cells: [high, xhigh] }] } },
+        { error: [
+          'ingest report: excludes pair 3 (advice hard 5117002 rep 1) for advice hard 5117002 rep 1 gpt-6-luna-high; ' +
+            'the packets do not',
+          `ingest report: lacks pair 2 (blind hard 5117001 rep 1), which the packets exclude for ${high}`,
+        ] },
+        { error: [
+          `ingest report: excludes pair 3 (blind hard 5117001 rep 1) for ${high}; the packets do not`,
+          `ingest report: lacks pair 2 (blind hard 5117001 rep 1), which the packets exclude for ${high}`,
+        ] },
+        { error: [
+          `ingest report: excludes pair 2 (blind hard 5117001 rep 1) for ${xhigh}; the packets do not`,
+          `ingest report: lacks pair 2 (blind hard 5117001 rep 1), which the packets exclude for ${high}`,
+        ] },
+        { error: [
+          'ingest report: pair 2 (blind hard 5117001 rep 1): reason "cell 9 infrastructure_failed" is not ' +
+            '"cell 10 infrastructure_failed", the first infrastructure cell of the rerun whose rows the packets hold',
+        ] },
+        { error: [
+          'ingest report: pair 2 (blind hard 5117001 rep 1): reason "cell 10 exit 1" is not ' +
+            '"cell 10 infrastructure_failed", the first infrastructure cell of the rerun whose rows the packets hold',
+        ] },
+        { error: [
+          'ingest report: pair 2 (blind hard 5117001 rep 1): reason "cell 4 infrastructure_failed" is not a rerun ' +
+            "cell's problem (cell <ordinal above 8> infrastructure_failed, no row or exit <code>)",
+        ] },
+        { error: [
+          'ingest report: pair 2 (blind hard 5117001 rep 1): reason "the rerun failed" is not a rerun ' +
+            "cell's problem (cell <ordinal above 8> infrastructure_failed, no row or exit <code>)",
+        ] },
+      ],
+    });
+  });
+
+  it('refuses each malformed or inconsistent field of the guard ledger and the ingest report by name', () => {
+    // The valid documents are T8's fired run (the hang guard fired on blind hard 5117001 rep 1 xhigh, cell 3 in the
+    // oracle's mini schedule): a one-entry ledger and a report of 8 cells, 4 pairs, sa1 1 and 8 calls. Each variant
+    // feeds one wrong value; the stage refuses it by name (the ledger's lost entry also fails the two cross-checks).
+    const schedule = buildLuna6Schedule(MINI, MINI.scheduleSeed);
+    const fired = ingestLuna6Study({
+      registration: MINI, schedule, scheduleSha256: 'f'.repeat(64), reruns: null,
+      cells: miniEvidence(schedule, {
+        [`${XHIGH}|blind|hard|5117001|1`]: {
+          calls: [{ complete: { exit: 'timed_out', hangGuardFired: true, elapsedMs: 1_800_000 } }],
+        },
+      }),
+    });
+    const ledger = (): Json => asJson(luna6GuardLedgerDocument(MINI, fired.ledger));
+    const report = (): Json => asJson(fired.report);
+    const withEntry = (change: Json): Json => {
+      const document = ledger();
+      document['entries'] = (document['entries'] as Json[]).map((entry) => ({ ...entry, ...change }));
+      return document;
+    };
+    const withSpeed = (change: Json): Json => {
+      const document = report();
+      document['speed'] = (document['speed'] as Json[]).map((entry, index) => (index === 0 ? { ...entry, ...change } : entry));
+      return document;
+    };
+    const firstCall = (report()['speed'] as Json[])[0]!['calls'] as Json[];
+    const lost = [
+      'guard ledger: holds 0 entries; the ingest report counts sa1 1',
+      'guard ledger: lacks blind hard 5117001 rep 1 gpt-6-luna-xhigh, whose call log fired the hang guard',
+    ];
+    const excludedRerun = excludedIngest('rerun');
+    const excludedStage = (maxExcludedPairs: number) => stageOutcome(
+      asJson(luna6GuardLedgerDocument(MINI, excludedRerun.ledger)), asJson(excludedRerun.report),
+      { documents: excludedDocuments(), registration: { ...MINI, maxExcludedPairs } },
+    );
+    const excludedEntry = { pair: 2, name: 'blind hard 5117001 rep 1', cells: ['blind hard 5117001 rep 1 gpt-6-luna-high'], reason: 'cell 10 infrastructure_failed' };
+    const refused = (...violations: string[]) => ({ error: violations });
+    expect([
+      stageOutcome(['not', 'an', 'object'], report()),
+      stageOutcome({ ...ledger(), schema: 'luna6-guard-ledger-v0' }, report()),
+      stageOutcome({ ...ledger(), entries: 'none' }, report()),
+      stageOutcome({ ...ledger(), entries: [7] }, report()),
+      stageOutcome(withEntry({ mode: 'both' }), report()),
+      stageOutcome(withEntry({ arm: 'gpt-5.6-luna-xhigh' }), report()),
+      stageOutcome(withEntry({ stratum: 'hard3' }), report()),
+      stageOutcome(withEntry({ basis: 'brutal' }), report()),
+      stageOutcome(withEntry({ seed: 5_117_011 }), report()),
+      stageOutcome(withEntry({ rep: 2 }), report()),
+      stageOutcome(withEntry({ ordinal: 0 }), report()),
+      stageOutcome(withEntry({ calls: [] }), report()),
+      stageOutcome({ ...ledger(), entries: [...(ledger()['entries'] as Json[]), ...(ledger()['entries'] as Json[])] }, report()),
+      stageOutcome(ledger(), 'not an object'),
+      stageOutcome(ledger(), { ...report(), schema: 'luna6-ingest-report-v0' }),
+      stageOutcome(ledger(), { ...report(), cells: 7 }),
+      stageOutcome(ledger(), { ...report(), pairs: 3, excludedPairs: [{ ...excludedEntry, pair: 0 }] }),
+      stageOutcome(ledger(), { ...report(), pairs: 3, excludedPairs: [{ ...excludedEntry, cells: [] }] }),
+      excludedStage(0),
+      excludedStage(1),
+      stageOutcome(ledger(), { ...report(), pairs: 3 }),
+      stageOutcome(ledger(), { ...report(), sa1: -1 }),
+      stageOutcome(ledger(), { ...report(), sa1: 2 }),
+      stageOutcome(ledger(), { ...report(), speed: 'none' }),
+      stageOutcome(ledger(), { ...report(), speed: [5, ...(report()['speed'] as Json[]).slice(1)] }),
+      stageOutcome(ledger(), withSpeed({ ordinal: 0 })),
+      stageOutcome(ledger(), withSpeed({ pair: 0 })),
+      stageOutcome(ledger(), withSpeed({ calls: firstCall.map((call) => ({ ...call, elapsedMs: -1 })) })),
+      stageOutcome(ledger(), withSpeed({ usage: [{ reasoning: -1, output: 0 }] })),
+      stageOutcome(ledger(), { ...report(), calls: 9 }),
+    ]).toEqual([
+      refused('guard ledger: is not a JSON object'),
+      refused('guard ledger: schema "luna6-guard-ledger-v0" is not luna6-guard-ledger-v1'),
+      refused('guard ledger: has no entries list'),
+      refused('guard ledger: entry 1 is not an object', ...lost),
+      refused('guard ledger: entry 1: mode "both" is not registered', ...lost),
+      refused('guard ledger: entry 1: arm "gpt-5.6-luna-xhigh" is not registered', ...lost),
+      refused('guard ledger: entry 1: stratum "hard3" is not registered', ...lost),
+      refused('guard ledger: entry 1: basis "brutal" is not the hard basis hard', ...lost),
+      refused('guard ledger: entry 1: seed 5117011 is not a registered hard seed', ...lost),
+      refused('guard ledger: entry 1: rep 2 is not in 1..1', ...lost),
+      refused('guard ledger: entry 1: ordinal 0 is not a positive integer', ...lost),
+      refused('guard ledger: entry 1: calls is not a non-empty list of firings with ordinal, callPhase and elapsedMs', ...lost),
+      refused(
+        'guard ledger: names blind hard 5117001 rep 1 gpt-6-luna-xhigh twice',
+        'guard ledger: holds 2 entries; the ingest report counts sa1 1',
+      ),
+      refused('ingest report: is not a JSON object'),
+      refused('ingest report: schema "luna6-ingest-report-v0" is not luna6-ingest-report-v1'),
+      refused('ingest report: cells 7 is not the registered 8'),
+      refused('ingest report: excludedPairs is not a list of pairs with name, cells and reason'),
+      refused('ingest report: excludedPairs is not a list of pairs with name, cells and reason'),
+      refused('ingest report: 1 pairs end excluded, more than the registered 0'),
+      { ok: {
+        decision: 'xhigh', pairs: 3, excludedPairs: 1, sa1Overrides: 0,
+        excluded: [{ mode: 'blind', stratum: 'hard', seed: 5_117_001, rep: 1, cells: ['blind hard 5117001 rep 1 gpt-6-luna-high'] }],
+      } },
+      refused('ingest report: pairs 3 is not the registered 4 less 0 excluded'),
+      refused('ingest report: sa1 -1 is not a count'),
+      refused('guard ledger: holds 1 entries; the ingest report counts sa1 2'),
+      refused('ingest report: has no speed list'),
+      refused('ingest report: speed entry 1 is not an object'),
+      refused('ingest report: speed entry 1: ordinal 0 is not a positive integer'),
+      refused('ingest report: speed entry 1: pair 0 is not a positive integer'),
+      refused('ingest report: speed entry 1: calls is not a list of calls with elapsedMs, a call-log exit, hangGuardFired and callPhase'),
+      refused('ingest report: speed entry 1: usage is not a list of reasoning and output token counts'),
+      refused('ingest report: calls 9 is not the 8 calls of its speed cells'),
     ]);
   });
 });
