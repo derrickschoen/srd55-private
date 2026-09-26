@@ -1691,13 +1691,18 @@ describe('PCAC turn: the approach move and the attack it enables are planned as 
    * - The fighter (fighterPack, one attack per action): the Longbow is legal
    *   now, at normal range with no enemy within 5 feet: 10/20 x 6.5 + 1/20 x
    *   11 = 3.8. At (1,0) the Battleaxe comes into reach: 12/20 x 8.5 + 1/20 x
-   *   13 = 5.75 (the Longbow there would have close-combat Disadvantage,
-   *   1.9775). The plan, 1 x 5.75, beats the Longbow's 1 x 3.8: the fighter
+   *   13 = 5.75. The plan, 1 x 5.75, beats the Longbow's 1 x 3.8: the fighter
    *   steps in and swings.
    * - The ranger (rangerPack): the Longbow now, 10/20 x 7.5 + 1/20 x 12 = 4.35.
-   *   At (1,0) the Shortsword comes into reach, 10/20 x 6.5 + 1/20 x 10 = 3.75
-   *   (the Longbow there, 2.28). The plan, 3.75, does not beat 4.35: the move
-   *   yields to the Longbow (bucket 2, after it), and the ranger shoots.
+   *   At (1,0) the Shortsword comes into reach, 10/20 x 6.5 + 1/20 x 10 = 3.75.
+   *   The plan, 3.75, does not beat 4.35: the move yields to the Longbow
+   *   (bucket 2, after it), and the ranger shoots.
+   * - The Longbow at (1,0) has no planned number for either PC: the goblin is
+   *   within 5 feet there, and its sight of the PC on a square the PC does not
+   *   stand on is unknown to the plan (CC-PC-DESTINATION-SIGHT), so the shot is
+   *   close_combat_unresolved and the square takes its melee form. Were that
+   *   unknown sight read as clear, the ranger's Longbow at (1,0) would be 4.35,
+   *   above the Shortsword's 3.75, and would become the move's follow-up.
    */
   it('PCAC-TURN-BETTER-WEAPON: the fighter steps in to swing his Battleaxe (5.75) rather than shoot his Longbow now (3.8); the ranger keeps shooting (4.35 over a 3.75 Shortsword)', () => {
     const decide = (members: ReturnType<typeof fighterPack>, key: string) => {
