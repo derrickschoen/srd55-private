@@ -4,17 +4,22 @@
  *
  * Bases: every encounter file in the arena fixture directories (the challenge rooms through
  * the challenge decoder, their provenance sidecars accounted for and skipped by name), the
- * room8 and arena-scenario encounters, the ten generated brutal-b blind rooms, and generated
- * rooms over seeds x difficulty x terrain profile. Anything else in those directories throws:
- * nothing is skipped silently.
+ * room8 and arena-scenario encounters, the encounters the TypeScript fixtures build (the
+ * reference encounter, the option-path encounter and both alternating-initiative rooms), the
+ * ten generated brutal-b blind rooms, and generated rooms over seeds x difficulty x terrain
+ * profile. Anything else in those directories throws: nothing is skipped silently.
  *
  * Each base is followed by its synthetic variants (tests/helpers/movement-board-variants.ts).
  */
 import { readdirSync, readFileSync } from 'node:fs';
+import { createEncounter } from '../../../src/combat/encounter';
 import { decodeArenaBasisEnvelopeV1 } from '../../../src/vtt/arena-fixture';
 import { decodeChallengeRoomProvenanceV1 } from '../../../src/vtt/challenge-room-fixture';
 import { loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
+import { referenceEncounterSetup } from '../../../src/vtt/reference-encounter';
 import { generateRoom } from '../../../src/vtt/room-generator';
+import { alternatingInitiativeRoom } from '../../../tests/fixtures/initiative-segments/alternating-room';
+import { createOptionPathFixtureEncounter } from '../../../tests/fixtures/vtt-option-path-encounter';
 import { movementBoardVariants, type NamedState } from '../../../tests/helpers/movement-board-variants';
 
 export type { NamedState };
@@ -80,6 +85,12 @@ export async function baseStates(account: CorpusAccount): Promise<NamedState[]> 
         });
       }
     }
+  }
+  // Last, so the synthetic variants of every base above keep their seeds.
+  out.push({ name: 'ts-fixture/reference-encounter', state: createEncounter(referenceEncounterSetup()) });
+  out.push({ name: 'ts-fixture/vtt-option-path-encounter', state: createOptionPathFixtureEncounter() });
+  for (const layout of ['adjacent', 'generated'] as const) {
+    out.push({ name: `ts-fixture/alternating-room-${layout}`, state: await alternatingInitiativeRoom({ layout }) });
   }
   return out;
 }
