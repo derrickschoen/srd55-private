@@ -2165,3 +2165,309 @@ LUNA6 S-PREREG draft (.tmp/runs/luna6/prereg/s-prereg-draft.md):
 - Codex review (gpt-5.6-sol high): r1 REVISE 2/2/2, r2 REVISE 0/1/2, all fixed; r3 running. On APPROVE, the draft becomes the S-PREREG D-entry.
 
 Next free id: D898.
+
+
+## D898 — 2026-09-26 10:39 — S-PREREG: luna6-effort-study-v1 registered (40 encounters, 480 cells, q* = 0.025, P = 1077733051)
+
+This is the LUNA6 study's preregistration (plan r5 §3.8). It is written before any study cell runs and before B6 exists. The text below is the approved draft, cc260d82c50411a9e93c6af56c2a122eb147f2bd6c0aee278510652d553b4ed9, with only two changes: every `<S-PREREG date>` placeholder became 2026-09-26, and the draft's title line was removed.
+- Review (gpt-5.6-sol high, fresh, read-only): r1 REVISE 2/2/2, r2 REVISE 0/1/2, r3 APPROVE 0/0/0. Logs are in .tmp/runs/luna6/prereg/review-r{1,2,3}.log.
+- The owner's Q-POWER answer is quoted in D896.
+- Nothing in this entry is edited later. A change after this point is a new, dated amendment D-entry, marked pre-run or post-run.
+
+
+Binding plan: `.claude/consensus/luna6/plan-r5.md`, sha256 16ddeb25674b7dc4186705350080539fe5bfbdb8b73695a6a086e27368cbd295, CLOSED in D892. §3.1–§3.7 follow **verbatim** below the registered values. **Precedence (review r1 P2):** R1–R9 supersede every conflicting operational literal in the verbatim text and in the plan's downstream criteria (counts, cluster numbers, ordinal ranges, tag lists, seed lists, file names, protocols, CLI arguments, STOP thresholds, T8, V15, V18). The verbatim text is kept as registered rationale. Its option-(a) figures (for example "20 clusters (registered)" in the §3.5 table, and the 120-pair refusal-veto simulation in §3.4) are historical rationale for option (a) and were not re-run at 240 pairs. The plan anticipated exactly this ("If the owner picks Q-POWER (b), the v5 second family is added (§3.5)").
+
+**R1. Q-POWER.** Owner, verbatim (D896): "(b) 40 encounters, 480 cells".
+- Cohorts, as encounter seeds; each fixture's sha256 matches its manifest (checked 2026-09-26, 40/40):
+  - hard 5117001–5117010: `tests/fixtures/arena-basis-hard/`, v5 manifest `d569-blind-experiment-manifest.json`, sha 8c0bcb3c0afa8358c26129efbef82d0d2882135389d8dd8040fe7e4b6451e13a, version d569-blind-experiment-v5;
+  - brutal 6203001–6203010: `arena-basis-brutal/`, same manifest;
+  - hard-2 5118001–5118010: `arena-basis-hard-2/`, `d569-second-family-manifest.json` sha 83daa7ea3ca89b270e5149368d09fa97074124dfe438cf95b346e996996026c8, version d569-second-family-manifest-v1;
+  - brutal-2 6207001–6207010: `arena-basis-brutal-2/`, same second-family manifest.
+- Cells: 2 arms × 2 modes × 40 seeds × 3 reps = **480 cells = 240 pairs**; k = **40 clusters** (one per encounter seed), 6 paired differences each.
+- Cell command for the second family: §3.1's command with `--basis hard --basis-dir tests/fixtures/arena-basis-hard-2 --seed 5118001`, or `--basis brutal --basis-dir tests/fixtures/arena-basis-brutal-2 --seed 6207001`. `--basis-dir` is accepted by `tools/ai-dm-arena.ts:344,430`.
+- **q\* = 0.025 at k = 40**, from V17 (`oc.json` sha 7b07e2047bf201d11fbe16a266ae60d31f72fdc2d105b1898bba0c6ee08cc776; `simulate.mjs` sha 16b729c15e059794017e846f97ee01a6778efc5bcc647d8e68dfc689e771101c; last line `LUNA6 OC PASS qstar20=0.020 qstar40=0.025 p05A20=0.2042`).
+- Calibration uncertainty at k = 40, q = 0.025, Δ = 0.20, no failures (review r1 P3): bound A rejects 0.0200 (200/10,000, Monte Carlo SE 0.0014); bound B rejects 0.0185 (SE 0.00135). At q = 0.020 the rates are 0.0167 (A, SE 0.00128) and 0.0143 (B, SE 0.00119).
+- Detectable effect with 80% power at k = 40, q\* = 0.025 (interpolated): **0.748 under bound A, 0.908 under bound B**. The grid brackets are 0.7–1.0 for both. S-RESULT states these beside the interval.
+
+**R2. Schedule (§3.2 at 240 pairs).**
+- Canonical pair order:
+  - basis hard before brutal. Hard means 5117xxx then 5118xxx; brutal means 6203xxx then 6207xxx.
+  - mode blind before advice;
+  - seed ascending;
+  - rep ascending.
+- Fisher–Yates runs over 240 pairs: for i from 239 down to 1, `j = floor(g()·(i+1))`.
+- Ordinals 1–480; reruns take 481 onward.
+- The infrastructure STOP fires when **more than 24 pairs (10%)** end excluded, or on any `D569IntegrityStop`.
+- **Schedule seed P = 1077733051**, drawn 2026-09-26 07:43:51 with `od -An -N4 -tu4 /dev/urandom`. Seeds file `.tmp/runs/luna6/prereg/seeds.txt`, sha 8f65e846b9adea600a650fc5c193dcd678148ccaa9cfd89e0a0d40bc6a82f8cc, mode 444.
+
+**R3. Packets (§3.7 stage 4, at 8 tags).**
+
+| Tag | Shuffle seed |
+|---|---|
+| blind-hard | 2353643760 |
+| blind-brutal | 3013067085 |
+| advice-hard | 3827398149 |
+| advice-brutal | 1901141339 |
+| blind-hard2 | 932728174 |
+| blind-brutal2 | 3206187783 |
+| advice-hard2 | 1066981191 |
+| advice-brutal2 | 3194685170 |
+
+- The seeds were drawn like P; `569575` is not reused.
+- Protocols:
+  - hard: `R1_10_PROTOCOL`;
+  - brutal: `{ ...BRUTAL_10_PROTOCOL, reps: 3 }`;
+  - hard2: `{ seeds: [5118001…5118010], reps: 3 }`;
+  - brutal2: `{ seeds: [6207001…6207010], reps: 3 }`.
+  Each goes through the exported `buildRerunPacket` unchanged.
+- Normalized files: `normalized/<mode>-<basis><family suffix ''|'2'>.jsonl`, 60 rows each.
+- B6 gains **M86**: a second-family seed list off by one, killed by T8's registration literal.
+
+**R4. Judging.**
+- Script: `~/dnd-slim-runs/luna6-effort/scripts/judge-study.sh`, sha e4ad5b05f8513f875abf6360da208de3b10a46874bc7656b88c872a1889f91b6. It is `d569-v5/scripts/judge-staged.sh` (sha 8004d85c53e406ea5318a0f8340c1ae67d2c9eef33afd277a370a15f1f66f962) with exactly the §3.7 edits: `run_root`, `family`, `judge_log`, the 8-tag `case` list and usage, and the `d569-` output prefix changed to `luna6-`.
+- The diff is `judge-study.diff`, sha f1c1fc41c1cb5549c43f490fd6d3f85b3e8d2a13a29815b1467226000ab7609f, reproduced in R11.
+- Pinned shas, unchanged, recorded in full:
+  - `~/dnd-slim-runs/judge-one.sh` 6ae7f6b8d4021ca50930e93a31d0d830b46e2c17e02702d1904042a23c5ed487;
+  - `~/dnd-slim-runs/judge-advisory.py` 671bfedfc02eb326ebc7a629bb32c13bae7f2b4f1f071e7b7ef82e3508e9bdd3;
+  - `advisory-gate.py` 5641653a3ff7b7320185d39179cddbd96606795488652970d691359b411a9f5e;
+  - seat normalizer `~/dnd-slim-runs/pool4-contrasts.py` 0c20f794404cf106ffee4ccdb7023e12444ea912e4102eb8bcbdfcf7f07e7592.
+- The advisory gate (review r1 P1). `judge-study.sh` resolves the gate from its own `run_root` as `luna6-effort/scripts/advisory-gate.py` and checks it with `sha256sum -c` against a sidecar.
+  - I installed a byte-identical copy there (sha 5641653a…, equal to the d569-v5 original).
+  - Its new sidecar `advisory-gate.py.sha256` names the new absolute path; the sidecar file's own sha is f295e11f24b972f0c51ae4bfd38f86a764dda1d8be7cf8e3e3c97e6b1e42e735.
+  - `advisory-gate.py`, `advisory-gate.py.sha256` and `judge-study.diff` are mode 444; `judge-study.sh` is mode 700.
+  - `judge-study.sh --verify-only` prints `ADVISORY GATE SELFTEST PASS n=7` and `JUDGE-STAGED VERIFY PASS` (2026-09-26).
+- KB: `tests/fixtures/ai-dm-kb/d569/ai-dm-core.md`, sha 19f66c81a0a1c8641a7cc4a3844e5cdd0b49ce72cd056ad72b8932d37085f260.
+
+**R5. Codex binary.** `--cli-bin /home/vagrant/.nvm/versions/node/v24.13.0/bin/codex`. It resolves to `…/lib/node_modules/@openai/codex/bin/codex.js`, codex-cli 0.157.0, as of 2026-09-26. The S-SCHEDULE entry re-records the version, and a changed version before the first cell is a STOP for the supervisor.
+
+**R6. Exact decision arithmetic (B0 finding, the float tie).**
+- **Integer numerators, built directly (review r1 P2).** A cell's integer numerator is the sum of the twelve integer component scores: 4 components × the 3 required seats (M77).
+  - It is 0 for a non-executed cell (refused, execution_failed, service_failed) and 0 for an SA-1-overridden cell. An infrastructure-excluded pair has none.
+  - The cell value is numerator/3.
+  - Per pair, `t = numerator(xhigh) − numerator(high)`, an integer.
+  - B6 must never derive t from the floating result of `panelValues` (`d569-blind-experiment.ts:1030-1041` divides and adds in floating point). That value is reported only.
+- A bootstrap draw's mean is `S/(3m)`: S is the sum of t over the drawn pairs, and m is the number of drawn pairs (the pooled pair mean, as in `clusterInterval`, `d569-blind-experiment.ts:1008-1027`).
+- The draw's mean exceeds δ = 0.20 iff `5·S > 3·m`, which is exact integer arithmetic.
+- **Reject H0 iff the number of draws with `5·S ≤ 3·m` is ≤ `floor(q*·n)`**, with n = 100,000 and q\* = 0.025, so the limit is 2,500 draws. This is the plan's "q\*-th percentile (index floor(q·n) of the ascending draws) > 0.20" in exact arithmetic. The float form is reported beside it as a diagnostic only.
+- The cluster rows enter the bootstrap in ascending encounter-seed order, which fixes the draws' order of consumption.
+- Bootstrap seed: **20260924**, 100,000 resamples.
+
+**R7. Seed conventions (B0 review, D894).**
+- V17's per-dataset streams are registered as used: each dataset has its own mulberry32 stream, seeded `1_000_000 × scenarioIndex + datasetIndex`, which continues into that dataset's bootstrap picks.
+- The study bootstrap seed 20260924 applies only to the study analysis.
+- Δ80 is reported interpolated, plus the bracketing grid points.
+
+**R8. Amendments.**
+- SA-1 and SA-2 as frozen in §3.3 and §3.1. `2026-09-26` becomes the date this entry is written.
+- **SA-2b (new, pre-run)**:
+
+  ```json
+  {"id":"luna6-sa2b-v5-second-family","timing":"pre-run","date":"2026-09-26","reason":"Owner answer 2026-09-25 (Q-POWER): '(b) 40 encounters, 480 cells'. luna6-effort-study-v1 also runs the D569 v5 second family registered in d569-second-family-manifest.json (sha256 83daa7ea3ca89b270e5149368d09fa97074124dfe438cf95b346e996996026c8): hard-2 5118001-5118010 and brutal-2 6207001-6207010, the same v5 caps (65536/8192/32768 bytes) and the §3.1 execution settings as the primary cohorts. v5 registered this family and never launched it (runbook-84326354.md:51-58); this study consumes it, so it is no longer an unused held-out family for any later D569 version."}
+  ```
+
+- **Plan V2 amendment (B1, D894).** V2's criterion is "tsc -b --force exit 0, program input counts reported", because the projects are noEmit.
+
+**R9. Downstream criteria under option (b) (review r1 P2); these replace the plan's literals.**
+- **T8 item 1**, the registration literal:
+  - four strata: hard 5117001–5117010, brutal 6203001–6203010, hard-2 5118001–5118010, brutal-2 6207001–6207010 (reps 3), each with its basis dir;
+  - q\* 0.025, k = 40;
+  - schedule seed P and the **eight** shuffle seeds of R3;
+  - the SA-1, SA-2 and SA-2b texts.
+- **T8 item 11**, schedule properties: `{ entries: 480, pairs: 240, pairsAdjacent: true, bothOrders: true, eachCellOnce: true, deterministic: true }`.
+- **M86**: a second-family seed list off by one, killed by the T8 item 1 literal.
+- **M85 (review r2 P2)**: the plan's "Registered q\* → 0.025" is a no-op now that q\* is 0.025. M85 becomes "registered q\* 0.025 → 0.020", with the same killer, the T8 item 1 registration literal.
+- **V15**:
+  - (ii) `LUNA6 INGEST PASS cells=480 pairs=<240 − excluded> excludedPairs=<n ≤ 24> …`;
+  - (iii) `LUNA6 PACKETS PASS packets=8 entries=480 leakScan=clean`;
+  - (iv) `judge-study.sh` for all eight tags;
+  - (v) `SCORING OUTPUT NORMALIZATION PASS tags=8 seats=fable,astra,sol`.
+- **V18**:
+  - (1) 40/40 fixture shas, checked against both manifests: v5 `primaryCohorts[].fixtures[]` and the second-family manifest's `cohorts[].fixtures[]`;
+  - (4) **eight** dry shuffle seeds, drawn separately at V18 and recorded;
+  - (2)–(4) and (6) print their PASS lines with 480 cells, 8 packets and 480 entries.
+
+**R10. What is still open before any cell runs, per the §3.8 freeze sequence:**
+1. B1 lands.
+2. B6 is built against this registration, reviewed and landed.
+3. S-SCHEDULE is recorded: the `schedule.json` and `run-schedule.sh` shas, and the codex version re-checked.
+4. V18 passes.
+
+R11. The judge-study.sh diff, verbatim, follows.
+
+```diff
+6,8c6,8
+< run_root=$root/d569-v5
+< family=d569-v5/d569
+< judge_log=$root/judge-d569-v5/d569.log
+---
+> run_root=$root/luna6-effort
+> family=luna6-effort/luna6
+> judge_log=$root/judge-luna6-effort/luna6.log
+21c21
+< tag=${1:?usage: judge-staged.sh luna-blind-vs-advice-hard|luna-blind-vs-advice-brutal}
+---
+> tag=${1:?usage: judge-study.sh blind-hard|blind-brutal|advice-hard|advice-brutal|blind-hard2|blind-brutal2|advice-hard2|advice-brutal2}
+23c23
+<   luna-blind-vs-advice-hard|luna-blind-vs-advice-brutal) ;;
+---
+>   blind-hard|blind-brutal|advice-hard|advice-brutal|blind-hard2|blind-brutal2|advice-hard2|advice-brutal2) ;;
+37,38c37,38
+<   "$run_root/d569-judge-opus48-${tag}.json" "$opus_exit" \
+<   "$run_root/d569-packet-${tag}.json" "$exposure" "$tag"
+---
+>   "$run_root/luna6-judge-opus48-${tag}.json" "$opus_exit" \
+>   "$run_root/luna6-packet-${tag}.json" "$exposure" "$tag"
+41c41
+< prompt=$run_root/d569-judge-prompt2-${tag}.txt
+---
+> prompt=$run_root/luna6-judge-prompt2-${tag}.txt
+44c44
+<   < "$prompt" > "$run_root/d569-judge-sol-${tag}.log" 2>&1 & p_sol=$!
+---
+>   < "$prompt" > "$run_root/luna6-judge-sol-${tag}.log" 2>&1 & p_sol=$!
+46,47c46,47
+<   < "$prompt" > "$run_root/d569-judge-fable-${tag}.json" \
+<   2> "$run_root/d569-judge-fable-${tag}.err" & p_fable=$!
+---
+>   < "$prompt" > "$run_root/luna6-judge-fable-${tag}.json" \
+>   2> "$run_root/luna6-judge-fable-${tag}.err" & p_fable=$!
+49c49
+<   < "$prompt" > "$run_root/d569-judge-astra-${tag}.log" 2>&1 & p_astra=$!
+---
+>   < "$prompt" > "$run_root/luna6-judge-astra-${tag}.log" 2>&1 & p_astra=$!
+```
+
+#### Plan r5 §3.1–§3.7, verbatim (lines 308–437)
+
+### 3.1 Design (copied verbatim into the S-PREREG D-entry before any study cell runs)
+
+- **Id** `luna6-effort-study-v1`. **Question:** does gpt-6-luna at xhigh beat gpt-6-luna at high on D569-scored decision quality by more than δ = 0.20, and at what cost in response time per call?
+- **Arms:** `gpt-6-luna-high` (`gpt-6-luna`, `high`) and `gpt-6-luna-xhigh` (`gpt-6-luna`, `xhigh`). Both lifted (§2): 1,800,000 ms per call, no round wall, no engine blind deadline.
+- **Same states (owner 19:01):** the D569 v5 primary cohorts from the v5 manifest [V]: `evaluation-hard` seeds 5117001–5117010 (`tests/fixtures/arena-basis-hard/seed-*.json`) and `evaluation-brutal` seeds 6203001–6203010 (`tests/fixtures/arena-basis-brutal/seed-*.json`), each fixture's sha256 checked against the v5 manifest's `primaryCohorts[].fixtures[].sha256` before the first cell (V18). 3 reps. Each cell is one fresh round on the fixture's starting state, identical for both arms. If the owner picks Q-POWER (b), the v5 second family is added (§3.5).
+- **Caps (owner 19:01):** v5's `caps`: blind base 65,536, semantic 8,192, advice base 32,768 bytes [V].
+- **Amendment SA-2 (study-only supersession), text frozen now:**
+
+  ```json
+  {"id":"luna6-sa2-v5-cohorts-and-caps","timing":"pre-run","date":"2026-09-26","reason":"Owner answer 2026-09-24 19:01 ('Study on v5, v7 waits for v6'): luna6-effort-study-v1 runs on the D569 v5 primary cohorts (evaluation-hard 5117001-5117010, evaluation-brutal 6203001-6203010) and v5 caps (65536/8192/32768 bytes). For this study only, this supersedes Part A :568 'Current cap/cohort amendments replace historical 65536-byte / hard 5117xxx / brutal 6203xxx settings' and :560 'active cohorts/caps obey COHORT v6'; COHORT v6 exists only on the shelved claude/cohort-01 branch (D847). Limitation: Part A :486 records that 'COHORT v6 supersedes active brutal selection' (brutal_productivity filtering, :515-520); the brutal 6203 cohort is the unfiltered v5 selection. The route E this study picks applies to other states by D890 (c), not by measurement."}
+  ```
+
+- **Modes:** blind and advice. Settings follow the v5 manifest's `execution` block [V]: `freshSessionPerCell true, escalation false, modelDefaultFallback false, transport mcp_minimal, boardImage png`; KB `tests/fixtures/ai-dm-kb/d569/ai-dm-core.md`.
+- **Exact cell command** (one arena invocation per cell; cwd = the study checkout at the landed B1+B6 commit; env `CODEX_HOME=/home/vagrant/.codex-aidm BOARD_SNAPSHOT_PREVIEW_PORT=4530`, as the v5 runbook exported [V]):
+
+  ```
+  node node_modules/vite-node/vite-node.mjs tools/ai-dm-arena.ts -- \
+    --rooms 10 --reps 3 --seed <5117001|6203001> --basis <hard|brutal> --cells <room>:<rep> \
+    --out /home/vagrant/dnd-slim-runs/luna6-effort/cells/<ordinal, 3 digits>.jsonl \
+    --dm-mode <blind|advice> \
+    [blind only: --blind-repair-arm code_only --blind-max-attempts 3 --blind-facts off] \
+    --cli codex --cli-bin <absolute codex path recorded in S-PREREG> \
+    --model gpt-6-luna --effort <high|xhigh> \
+    --instruction-source kb --kb tests/fixtures/ai-dm-kb/d569/ai-dm-core.md \
+    --transport mcp_minimal --board-image png --turn-context-max-bytes <65536 blind | 32768 advice> \
+    --combat-model initiative_segments_v1 --initiative-profile derived_v1 \
+    --party-policy symmetric_evaluator_v1 --override-policy typed_reason \
+    --reaction-ask-default decline --intel-mode full
+  ```
+
+  These are the v5 runbook's flags (`runbook-84326354.md:1015-1024`) [V] with the route, `--cells`, the mode and the cap changed; `--timeout-ms` is absent (lifted by route). Output files are named by ordinal only, so no file name carries an arm or an effort.
+- **Cells:** 2 arms × 2 modes × 2 bases × 10 seeds × 3 reps = **240 cells = 120 pairs**.
+
+### 3.2 Order: randomized, pair-adjacent, seed first (r4 P2-2)
+
+- **Seed first.** The supervisor draws the schedule seed `P` (`od -An -N4 -tu4 /dev/urandom`) and records it in S-PREREG. The schedule is generated only afterwards, by the landed B6 tool, and its sha256 is recorded in the S-SCHEDULE D-entry before the first cell.
+- **Algorithm** (`tools/luna6-effort-study/schedule.ts`, deterministic):
+  1. List the 120 pairs `(basis, mode, seed, rep)` in canonical order: basis hard before brutal, mode blind before advice, seed ascending, rep ascending.
+  2. Shuffle them with Fisher–Yates driven by `mulberry32(P)`: for i from 119 down to 1, `j = floor(g() × (i + 1))`, swap. This is the same generator as D569 (`d569-blind-experiment.ts:988-996`) and the same loop as the packet builder's `shuffled` (`ai-dm-rerun-packet.ts:1194-1209`) [V].
+  3. Walking the shuffled list, draw `xhighFirst = g() < 0.5` for each pair and emit its two cells back to back in that order. Ordinals run 1–240.
+- **Why this design.** Each pair's two arms run minutes apart under the same provider and box conditions; which arm goes first is random; and the order of pairs is random across strata, so drift in time cannot align with arm, mode or basis. The runner's `--interleave` mode would run both arms concurrently in one process, but no dm-mode run has used it (0 wrapper hits for `--interleave` with `--dm-mode` [V]), and concurrent PNG snapshot capture on one service is untested [I]; the v5 runbook runs sequentially "to prevent a 4530 collision" (`runbook-84326354.md:995-996`) [V].
+- **Runner script** `~/dnd-slim-runs/luna6-effort/run-schedule.sh` (supervisor, external; sha in S-SCHEDULE): for each schedule entry in ordinal order, wait while `~/dnd-slim-runs/luna6-effort/PAUSE` exists; skip an entry whose `cells/<ordinal>.exit` exists; run the entry's argv from `schedule.json`; write the exit code to `cells/<ordinal>.exit`. It never runs two cells at once. The supervisor creates `PAUSE` before a PERF-02 timed pair (D890: timed pairs run only while nothing else loads the box) and removes it afterwards; a pause falls between cells, so the order is kept. The script does not use `slot.sh`, whose 30-minute `timeout 1800` [V] is shorter than an advice cell's ceiling (§3.9).
+- **Infrastructure rule.** A cell whose row outcome is `infrastructure_failed`, or which produced no row, has its **whole pair** rerun once, both arms in the original order, appended after ordinal 240 (ordinals 241 onward, recorded in the schedule's rerun section). The rerun replaces the pair. If the rerun also fails on infrastructure, the pair is excluded pairwise, as D569 excludes `infrastructure_failed` (`d569-blind-experiment.ts:1030-1031`) [V]. **STOP** and go to the owner if more than 12 pairs (10 %) end excluded, or on any `D569IntegrityStop`. A hang-guard firing is not infrastructure (SA-1).
+
+### 3.3 Scoring: D569's panel, plus the preregistered amendment SA-1 (r4 P1-4)
+
+- **D569 scoring.** The judge panel scores each packet entry on targetPriority 0–3, actionEconomy 0–3, coherence 0–2, positioning 0–2 (total 0–10). The Opus 4.8 notes-only advisory stage runs first, then the three scoring seats `claude-fable-5-1`, `gpt-6-astra` and `gpt-5.6-sol`, each at high in a fresh context (`judge-staged.sh` seat commands) [V]. A cell's value is D569's `panelValues` (`d569-blind-experiment.ts:1030-1041`) [V]: the sum over components of the mean across seats for an executed cell; 0 for `refused`, `execution_failed` and `service_failed` (zero-inclusive); `null` (excluded pairwise) for `infrastructure_failed`. Packet outcomes map as in `analyze-primary-pair.ts:61-70` [V]: `authorized` → executed, `service_null` → service_failed.
+- **Amendment SA-1, text frozen now:**
+
+  ```json
+  {"id":"luna6-sa1-hang-guard-expiry-scores-zero","timing":"pre-run","date":"2026-09-26","reason":"Owner ruling D890 (a): gpt-6-luna calls have a 30 min per-call hang guard, logged whenever it fires. A study cell with at least one call-log record hangGuardFired=true is scored 0 in every component, is never excluded, and counts as a failure in the reported failure-risk secondary, whatever outcome the runner recorded. D569 scoring would exclude such a cell if the runner classified it infrastructure_failed. The runner already classifies a timed-out primary as refused/timeout (tools/ai-dm-conversation.ts:5711-5714) and a timed-out correction as refused/correction_timeout (src/vtt/turn-exhaustion-coordinator.ts:398-399), so SA-1 changes only cells the runner classified otherwise."}
+  ```
+
+- **Where SA-1 is applied.** At analysis, after the key join, from the guard ledger that ingest builds from the call logs (§3.7). Judges still score such an entry if it is executed. They are blind to the override, and the unoverridden value is reported as a sensitivity result.
+
+### 3.4 Decision rule and the named test
+
+- **Estimand.** Δ = the mean over all complete pairs (both modes, both bases) of (xhigh − high) cell values after SA-1.
+- **Named test: one-sided cluster-bootstrap percentile test of superiority by margin δ = 0.20, at the calibrated level q\*.** H0: Δ ≤ 0.20; H1: Δ > 0.20.
+  - Clusters are encounter seeds: 20 clusters (10 hard, 10 brutal), each holding up to 6 paired differences (2 modes × 3 reps).
+  - 100,000 resamples with the D569 generator and percentile rule (mulberry32; `index = floor(q·n)` clamped to `[0, n−1]`; `d569-blind-experiment.ts:988-1028`) [V], bootstrap seed **20260924**, through the extracted `d569ClusterBootstrapDraws` and `d569Percentile`.
+  - Reject H0 iff the q\*-th percentile of the bootstrap distribution of Δ is > 0.20.
+  - **q\*** is fixed by the V17 simulation before S-PREREG: the largest q in {0.025, 0.020, 0.015, 0.010, 0.005} whose simulated rejection rate at Δ = 0.20 (no failures) is ≤ 0.025 under both variance bounds. The calibration is needed because a percentile bootstrap over 20 clusters is anti-conservative: my 400-dataset check gave a rejection rate of 0.035 at q = 0.025, 0.030 at 0.020 and 0.020 at 0.015 [V: node; Monte Carlo SE ≈ 0.009].
+- **Decision:** E = **xhigh** iff H0 is rejected; otherwise E = **high**. The burden is on xhigh (D890 c).
+- **Why δ = 0.20.** It is the magnitude D569 registers as its noninferiority margin (`D569_NONINFERIORITY_MARGIN = -0.20`, `d569-blind-experiment.ts:30`) [V], the largest difference D569 treats as negligible.
+- **No refusal veto (change from r4; Appendix E1).** r4 required the refusal-risk difference's 97.5th percentile to be ≤ 0.00 (D569's success-label rule, `:976-986`). D890 names quality only, and zero-inclusive scoring already charges each refused, failed or guard-expired cell its full value (about 7 points on pool3's arm means of 6.76–6.92 [V]). With 120 pairs the 0.00 bound is crossed by one net extra failure in one cluster. Simulated with equal failure rates in both arms, it passes only 12 % of the time at 2 % and 7 % at 5 % [V: node, 400 datasets], so it would have picked high on noise. The failure-risk difference is reported as a secondary with its interval.
+- **One look.** A single analysis after all cells are judged. No interim look, and no cell is rerun to change the decision (the infrastructure rule of §3.2 is fixed in advance).
+- **Secondary, reported, not deciding:** Δ per mode and per basis with intervals; executed-only Δ; per-component Δ; per-seat diagnostics; failure-risk difference (refused, execution_failed, service_failed or SA-1, as 1); Δ without SA-1; the number of SA-1 overrides.
+
+### 3.5 Operating characteristics before any spend (r4 P2-1)
+
+**Variance bounds from local panel data [V: node].** `~/dnd-slim-runs/pool3-*` holds a judged brutal pool: 90 cases (30 seeds × 3 reps) × 3 arms (`engine-top`, `sol-high`, `luna-medium`), scored by three seats (astra, opus, sol) on the same 0–10 rubric (`pool3-packet-3rep.json`, `pool3-key-3rep.json`, `pool3-judge-{astra,opus,sol}-3rep.json`). Paired differences by case, clustered by seed:
+
+| Pair | SD of a paired difference | SD of a seed's mean of 3 | within-seed SD |
+|---|---:|---:|---:|
+| luna-medium − sol-high | 1.820 | 1.288 | 1.583 |
+| engine-top − sol-high | 1.275 | 0.840 | 1.178 |
+| luna-medium − engine-top | 1.391 | 1.090 | 1.072 |
+
+- **Bound A** uses the largest pair (two different models): σ_b² = 1.288² − 1.583²/3 = 0.8236 between seeds, σ_w² = 2.5059 within. A study cluster of 6 differences then has variance 0.8236 + 2.5059/6 = 1.241 [V: node]. Two efforts of one model are expected to differ less than two models [I], which is what makes A conservative.
+- **Bound B** inflates A by one-sided 95 % chi-square factors: 29/17.708 = 1.638 between (29 df), 60/43.188 = 1.389 within (60 df); cluster variance 1.929 [V: node].
+- **Normal approximation** [V: node], one-sided α = 0.025, margin 0.20:
+
+| Design | Bound | SE of Δ̂ | P(xhigh) at Δ = 0.3 / 0.5 / 0.7 / 1.0 | Δ with 80 % power |
+|---|---|---:|---|---:|
+| 20 clusters (registered) | A | 0.249 | 0.06 / 0.22 / 0.52 / 0.89 | 0.90 |
+| 20 clusters | B | 0.311 | 0.05 / 0.16 / 0.36 / 0.73 | 1.07 |
+| 40 clusters (+ v5 second family) | A | 0.176 | 0.08 / 0.40 / 0.81 / 1.00 | 0.69 |
+| 40 clusters | B | 0.220 | 0.07 / 0.28 / 0.62 / 0.95 | 0.82 |
+
+  My 400-dataset bootstrap check under bound A, 20 clusters, q = 0.025, agrees: P(xhigh) 0.285 at Δ = 0.5 and 0.905 at Δ = 1.0 [V: node].
+
+**V17: the preregistered simulation (B0, before S-PREREG).**
+- **Script** `.tmp/runs/luna6/power/simulate.mjs`: plain node, no repo imports, written by the implementer in batch B0, reviewed read-only by codex with S-PREREG, run by the supervisor. Its sha256 goes into S-PREREG.
+- **Model.** For cluster c and pair j: high value `h = clamp(6.9 + a_c + e_h, 0, 10)`, xhigh value `x = clamp(6.9 + a_c + Δ + b_c + e_x, 0, 10)`, with `a_c ~ N(0, 1)`, `b_c ~ N(0, σ_b²)` and `e_h, e_x ~ N(0, σ_w²/2)`. Independently, each cell fails with probability p for its arm, and a failed cell's value is 0. 6.9 is pool3's arm-mean level [V].
+- **Grid.** Bounds A and B; k ∈ {20, 40} clusters × 6 pairs; Δ ∈ {0.0, 0.2, 0.3, 0.5, 0.7, 1.0, 1.5}; failure rates (p_high, p_xhigh) ∈ {(0, 0), (0.02, 0.02), (0.05, 0.05), (0.02, 0.05)}; q ∈ {0.025, 0.020, 0.015, 0.010, 0.005}. 10,000 datasets per cell of the grid, 2,000 bootstrap resamples per dataset, the §3.4 procedure reimplemented with mulberry32 and `floor(q·n)`. Dataset seeds are `1_000_000 × scenario index + dataset index`.
+- **Self-checks printed first; each must hold or the script exits 1.**
+  - σ_b = σ_w = 0, a_c ≡ 0, p = 0, Δ = 1.0: P(xhigh) = 1.
+  - The same with Δ = 0.2: P(xhigh) = 0, because the lower bound equals 0.2 and is not > 0.2.
+  - The same with Δ = 0.0: P(xhigh) = 0.
+- **Output** `.tmp/runs/luna6/power/oc.json` (canonical JSON): every grid cell's P(xhigh) with its Monte Carlo SE; q\* per k; for each k, the Δ with 80 % power under A and B at q\*. The last stdout line is `LUNA6 OC PASS qstar20=<q> qstar40=<q> p05A20=<P>`.
+- **Dominance rule, fixed now.** "Inconclusive → high" is declared dominant if P(xhigh | Δ = 0.5, bound A, k = 20, p = 0, q\*) < 0.5. Δ = 0.5 is 2.5 times the margin and 5 % of the scale. The approximation above predicts about 0.2, so dominance is expected. **If dominance holds, the supervisor asks Q-POWER (§8.4) before S-PREREG, and nothing is spent until the owner answers.** If it does not hold, the registered 20-cluster design proceeds without the question.
+- **Option (b), if the owner picks it.** Add the v5 second family: hard-2 5118001–5118010 and brutal-2 6207001–6207010, fixtures pinned by `d569-second-family-manifest.json` (`83daa7ea…`) [V-r4]. They launch with `--basis hard --basis-dir tests/fixtures/arena-basis-hard-2 --seed 5118001`, and brutal likewise (`basisFixturesPath` honours `--basis-dir`, `ai-dm-arena.ts:725-728` [V]). Packets are built by passing protocol objects `{ seeds: [5118001…5118010], reps: 3 }` and `{ seeds: [6207001…6207010], reps: 3 }` to the exported `buildRerunPacket`, with no builder change [V]. That gives 480 cells, 8 packets, twice the wall, and one more B6 mutant (M86: a second-family seed list off by one, killed by T8's registration literal). v5 registered the second family but never launched it (`runbook-84326354.md:51-58`) [V], and the study would consume it.
+
+### 3.6 Speed measures, with the hang guard as right-censoring (r4 P2-3)
+
+From the reconciled call logs, per arm × mode (and pooled per arm):
+- `calls`; `completed` (exit `completed`); `censored` (`hangGuardFired`); `otherFailures` by exit (`cancelled`, `infrastructure_failed`, thrown); **completion rate** = completed / (completed + censored).
+- **Latency quantiles by nearest rank** (`rank = ceil(q·n)`) over completed plus censored calls, with a censored call ranked above every completed call. A quantile whose rank falls on a completed call is reported as its `elapsedMs`. A quantile whose rank falls on a censored call is reported as the string `">=1800000 (censored)"`, **never as a number**. Because censoring happens only at the fixed 1,800,000 ms, this equals the Kaplan–Meier quantile [I: standard result for type I censoring]. Reported for p50, p90, p95 and max.
+- `callsOver180s`: calls that the old wall would have censored (censored calls count).
+- **Paired time ratio:** for pairs where neither cell has a censored or failed call, the median of `sum(xhigh elapsed) / sum(high elapsed)`. The number of pairs left out for censoring or failure is reported beside it. No mean of capped values and no ratio involving a censored call is reported.
+- Reasoning and output tokens per call from the rows' `callUsage` (`src/vtt/agent-session.ts:61-70`) [V-r4], completed calls only.
+
+Speed decides nothing; S-RESULT reports it beside the quality result.
+
+### 3.7 The pipeline, end to end (r4 P1-4)
+
+All operators are subcommands of `node node_modules/vite-node/vite-node.mjs tools/luna6-effort-study.ts <sub> --root /home/vagrant/dnd-slim-runs/luna6-effort`, run from the study checkout. Every file they write is opened with flag `wx`. Each prints one final line, `LUNA6 <SUB> PASS …`, and exits 0; or prints `LUNA6 <SUB> FAIL <where>: <reason>` lines and exits 1.
+
+| Stage | Command / actor | Reads | Writes | Checks (all in code, tested by T8 unless noted) |
+|---|---|---|---|---|
+| 1 schedule | `schedule --seed <P> --codex-bin <abs>` | registration | `schedule.json` | 240 entries, 120 pairs, pair-adjacent, each (arm, mode, basis, seed, rep) once; prints the sha256 |
+| 2 runs | `run-schedule.sh` (supervisor) | `schedule.json` | `cells/<o>.jsonl`, `cells/<o>.jsonl.luna-calls.jsonl`, `cells/<o>.exit` | exit files; V15 (i) |
+| 3 ingest | `ingest` | schedule, cells, call logs | `normalized/<mode>-<basis>.jsonl` (60 relabelled rows each), `normalized/guard-ledger.json`, `normalized/ingest-report.json` | per entry: exactly one row; `seed`, `room`, `round` (= rep), `scheduledCellKey` = `<room>:<rep>`, `dmMode`, `model` `gpt-6-luna`, `effort`, `arm` `single`, `roundWallBudgetMs` null and `turnContextMaximumBytes` equal the entry and the registered cap; seed in the registered cohort; call log reconciles with no pending record, every record's `cellKey`, model and effort equal the row's, `timeoutMs` 1,800,000, `boundKind` `hang_guard`, and the number of completions equals `callsPerRound`; relabel changes exactly the field `arm` (`single` → the arm id, as v5 did, `runbook-84326354.md:1229-1239`) [V]; guard ledger entry `{ mode, basis, seed, rep, arm, ordinal, calls }` for every cell with a firing; the infrastructure rule of §3.2 |
+| 4 packets | `packets --shuffle-seeds <blind-hard>,<blind-brutal>,<advice-hard>,<advice-brutal>` | normalized rows | `luna6-packet-<tag>.json`, `answer-keys/luna6-key-<tag>.json` for tags `blind-hard`, `blind-brutal`, `advice-hard`, `advice-brutal` | per tag: `buildRerunPacket(rows, seed, protocol)` with `R1_10_PROTOCOL` (hard) or `{ ...BRUTAL_10_PROTOCOL, reps: 3 }` (brutal) [V]; the builder's own `assertBlindedPacket` (`ai-dm-rerun-packet.ts:1212-1230`) [V]; then the study's token scan of the packet's canonical JSON for `gpt-6-luna`, `xhigh`, `reasoningEffort`, `"effort"`, `gpt-6-luna-high`, `gpt-6-luna-xhigh` (M78); 60 entries per packet, 30 per arm in the key |
+| 5 judging | `~/dnd-slim-runs/luna6-effort/scripts/judge-study.sh <tag>` (supervisor) | packet | `luna6-judge-{opus48,sol,fable,astra}-<tag>.*`, judge log `~/dnd-slim-runs/judge-luna6-effort/luna6.log` | the script is `~/dnd-slim-runs/d569-v5/scripts/judge-staged.sh` (sha `8004d85c…`) [V] with exactly these edits: `run_root=$root/luna6-effort`, `family=luna6-effort/luna6`, `judge_log=$root/judge-luna6-effort/luna6.log`, the tag `case` list and usage string, and the output prefix `d569-` → `luna6-`. Its pinned checks of `judge-one.sh` (`6ae7f6b8…`) and `judge-advisory.py` (`671bfedf…`) and the advisory gate (`5641653a…`) stay [V]. `judge-one.sh` reads `$D/$FAM-packet-$TAG.json` for any family (`judge-one.sh:2,23`) [V]. S-PREREG records the `diff` and the new script's sha |
+| 6 seat normalization | supervisor, python | seat outputs | `results/normalized-<tag>-{fable,astra,sol}.json` | the v5 method: `load_json_value` from `~/dnd-slim-runs/pool4-contrasts.py` (sha `0c20f794…`, `:69-88`) [V], refusing an existing target; no Opus artifact is opened |
+| 7 analysis | `analyze` | packets, keys, normalized seats, guard ledger | `results/luna6-effort-study-result.json` | per tag: packet, key and all three seats hold the same 60 blind ids (set equality, not counts; M76); no duplicate id; exactly the seats fable, astra and sol (M77); key arms only the two registered ids; every case (seed, rep) has both arms; integer components in range with `total` = sum (the checks of `analyze-primary-pair.ts:78-140`) [V]; value via `d569PanelValues`; SA-1 override joined on (mode, basis, seed, rep, arm) (M79); pairs, clusters, bootstrap, decision (§3.4); secondaries; speed (§3.6) |
+
+**Result document** (canonical JSON): `{ schema: 'luna6-effort-study-result-v1', registration: <id and sha>, decision: 'high'|'xhigh', delta: { mean, lower_qstar, upper_97_5 }, pairs, excludedPairs, clusters, sa1Overrides, secondary: {…}, speed: {…}, inputs: { schedule sha, packet shas, key shas, seat shas, ledger sha } }`.
+
+Next free id: D899.
