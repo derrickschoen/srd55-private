@@ -6,6 +6,7 @@ import { encounterMovementWorld } from '../../../src/combat/encounter-movement-w
 import { adjacentCells, boardCell, type GridCell } from '../../../src/combat/grid';
 import { GridSizeError, MAX_GRID_CELLS } from '../../../src/combat/grid-size';
 import type { MovementWorld } from '../../../src/combat/movement';
+import { buildMovementBoard } from '../../../src/combat/movement-board';
 import { persistentAreaContains, type PersistentArea } from '../../../src/combat/persistent-areas';
 import { feetPoint } from '../../../src/combat/templates';
 import { feet, persistentAreaId, type CombatantId } from '../../../src/combat/values';
@@ -141,6 +142,48 @@ describe('movement board: the in-bounds cell type', () => {
       refused = error;
     }
     expect(refused instanceof GridSizeError && refused.problem === 'over_max_cells').toBe(true);
+  });
+});
+
+describe('movement board: memory follows the cells, not the number of openings or areas', () => {
+  it('holds one set of per-cell arrays for 64 narrow openings and 64 difficult areas on a MAX_GRID_CELLS grid', () => {
+    // A full-grid array per opening or per difficult area multiplies with the authored content: at
+    // this grid, 1,024 single-cell openings would take 1 GiB. The board keeps every opening in one
+    // compressed-row index, and each area memo holds only the cells a traversal asked about.
+    const mover = playerProfile('board-memory-mover');
+    const { state } = encounter({ bounds: { columns: 3, rows: 1 }, combatants: [mover], tokens: [placedToken(mover, 0)] });
+    const bounds = { columns: 1_024, rows: 1_024 };
+    const cells = bounds.columns * bounds.rows;
+    expect(cells).toBe(MAX_GRID_CELLS);
+    const openings = Array.from({ length: 64 }, (_unused, index) => narrowOpeningRegion({
+      id: `memory-gap-${String(index)}`, sizedFor: 'Medium', cells: [{ column: index, row: 1_000 }], bounds,
+    }));
+    const areas = Array.from({ length: 64 }, (_unused, index) =>
+      difficultSphere(`area:memory-${String(index)}`, mover.id, index + 1, { column: 500 + index * 4, row: 600 }));
+    const atLimit: EncounterState = {
+      ...state, bounds, environment: { ...state.environment, narrowOpeningRegions: openings }, persistentAreas: areas,
+    };
+
+    // The board: 11 bytes per cell (movement-board.ts) and 4 per authored opening cell, whatever the count.
+    const board = buildMovementBoard(atLimit, []);
+    expect(board.openingOrdinals.length).toBe(64);
+    const boardBytes = [board.blocked, board.difficult, board.narrowestOpening, board.openingStart,
+      board.openingOrdinals, board.occupantStart, board.occupantOrdinals].reduce((sum, array) => sum + array.byteLength, 0);
+    expect(boardBytes).toBe(11 * cells + 2 * 4 + 64 * 4);
+
+    // The world end to end, areas included: premises from the area geometry, then one difficult step.
+    const entered = { column: 499, row: 600 };
+    expect(persistentAreaContains(areas[0] as PersistentArea, entered, null, atLimit)).toBe(true);
+    expect(areas.slice(1).some((area) => persistentAreaContains(area, entered, null, atLimit))).toBe(false);
+    const before = process.memoryUsage().arrayBuffers;
+    const world = encounterMovementWorld(atLimit);
+    expect(world.traversal(mover.id, onBoard(bounds, { column: 498, row: 600 }), onBoard(bounds, entered)))
+      .toEqual({ kind: 'enterable', cost: 10, canEnd: true });
+    expect(world.canTraverseStep(mover.id, onBoard(bounds, { column: 4, row: 999 }), onBoard(bounds, { column: 4, row: 1_000 })))
+      .toBe(true);
+    const grown = process.memoryUsage().arrayBuffers - before;
+    // 11 bytes per cell kept, at most 8 more while building; one array per opening or area would add 128.
+    expect(grown, `${String(grown)} bytes`).toBeLessThan(24 * cells);
   });
 });
 

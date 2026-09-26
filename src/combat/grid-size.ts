@@ -5,10 +5,15 @@ import type { GridBounds } from './grid';
  * The engine grid-size contract: an encounter grid has positive safe-integer columns and rows
  * and at most MAX_GRID_CELLS cells.
  *
- * Dense per-cell structures are sized by columns x rows: the movement board's typed arrays and
- * compressed occupancy, the movement world's per-area difficult-terrain memos, and any other
- * whole-grid index built for one state. This one number bounds all of them, so a valid
- * encounter can never ask for an allocation the engine did not plan for.
+ * The movement board's per-cell structures are sized by columns x rows and allocated once per
+ * state, never once per authored opening, region, area or creature: its masks and its compressed
+ * opening and occupancy rows (movement-board.ts states the bytes per cell). What grows with the
+ * authored content (opening and occupant cells) or with the questions asked (the movement
+ * world's per-area difficult-terrain memos, which hold only the cells a traversal visited) is
+ * never multiplied by the cell count. So this one number, times a small constant, bounds the
+ * movement board's dense memory, and a valid encounter cannot make it allocate more. Transient
+ * whole-grid passes elsewhere (an area template with no candidate list enumerates every cell,
+ * templates.ts) are proportional to the cell count too, and this contract bounds them the same way.
  *
  * It is enforced with a GridSizeError wherever a grid enters the engine: `createEncounter`,
  * and every decoder that turns stored or transmitted bytes into an EncounterState (the arena

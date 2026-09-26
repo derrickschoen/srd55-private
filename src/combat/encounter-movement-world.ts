@@ -5,6 +5,7 @@ import type { EncounterCombatantState, EncounterState } from './encounter';
 import type { BoardCell, GridCell } from './grid';
 import {
   buildMovementBoard,
+  openingCovers,
   squareAnchor,
   squareCell,
   NO_OPENING,
@@ -110,9 +111,11 @@ export function encounterMovementWorld(state: EncounterState): MovementWorld<Com
     ] as const),
   );
   const board = buildMovementBoard(state, occupantCells);
-  const { blocked, difficult, narrowestOpening, openings, occupantStart, occupantOrdinals } = board;
+  const { blocked, difficult, narrowestOpening, openingSizes, openingStart, openingOrdinals, occupantStart, occupantOrdinals } = board;
   const difficultAreas = state.persistentAreas.filter((area) => area.difficultTerrain);
-  const areaContains = difficultAreas.map(() => new Int8Array(board.columns * board.rows));
+  // One memo per area holding only the cells a traversal asked about, so its memory follows the
+  // cells visited, not the grid: a full-grid array per area would multiply with the area count.
+  const areaContains = difficultAreas.map(() => new Map<CellIndex, boolean>());
 
   const profiles = new Map<CombatantId, MoverProfile>();
   const profile = (actorId: CombatantId, anchor: BoardCell): MoverProfile => {
@@ -158,13 +161,13 @@ export function encounterMovementWorld(state: EncounterState): MovementWorld<Com
         : null;
   };
   const insideArea = (area: number, index: CellIndex): boolean => {
-    const known = areaContains[area] as Int8Array;
-    const remembered = known[index];
-    if (remembered !== UNKNOWN) return remembered === YES;
+    const known = areaContains[area] as Map<CellIndex, boolean>;
+    const remembered = known.get(index);
+    if (remembered !== undefined) return remembered;
     const current = difficultAreas[area] as EncounterState['persistentAreas'][number];
     const cell: GridCell = { column: index % board.columns, row: Math.floor(index / board.columns) };
     const value = persistentAreaContains(current, cell, areaAnchor(current), state);
-    known[index] = value ? YES : NO;
+    known.set(index, value);
     return value;
   };
   /** Normal placement: no footprint cell lies in an opening sized for a smaller creature. */
@@ -177,16 +180,24 @@ export function encounterMovementWorld(state: EncounterState): MovementWorld<Com
     return true;
   };
   /** Squeezed placement: one opening sized for `sizedFor` holds the whole footprint. */
-  const insideOneOpening = (mover: MoverProfile, sizedFor: KnownCreatureSize, anchor: CellIndex): boolean =>
-    openings.some((opening) => {
-      if (opening.sizedFor !== sizedFor) return false;
-      for (let row = 0; row < mover.side; row += 1) {
-        for (let column = 0; column < mover.side; column += 1) {
-          if (opening.covers[squareCell(board, anchor, column, row)] !== 1) return false;
-        }
+  const insideOneOpening = (mover: MoverProfile, sizedFor: KnownCreatureSize, anchor: CellIndex): boolean => {
+    // Such an opening covers the anchor cell, so the anchor's own openings are the only candidates.
+    const end = openingStart[anchor + 1] ?? 0;
+    for (let slot = openingStart[anchor] ?? 0; slot < end; slot += 1) {
+      const ordinal = openingOrdinals[slot] ?? 0;
+      if (openingSizes[ordinal] === sizedFor && holdsSquare(mover.side, anchor, ordinal)) return true;
+    }
+    return false;
+  };
+  /** Whether opening `ordinal` covers every cell of the `side` x `side` square at `anchor`. */
+  const holdsSquare = (side: FootprintSide, anchor: CellIndex, ordinal: number): boolean => {
+    for (let row = 0; row < side; row += 1) {
+      for (let column = 0; column < side; column += 1) {
+        if (!openingCovers(board, squareCell(board, anchor, column, row), ordinal)) return false;
       }
-      return true;
-    });
+    }
+    return true;
+  };
 
   // Scratch for one traversal: the overlapping occupants in token order, deduplicated by a
   // generation stamp, and the newly entered cells in row-major order. Nothing a traversal

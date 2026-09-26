@@ -16,6 +16,12 @@ import { terrainPassabilityAt } from './terrain';
  * dropping it changes no answer.
  *
  * The board is built once per state and never changes; states are immutable.
+ *
+ * Memory: every per-cell array is allocated once per board, never once per opening, region or
+ * occupant. A board holds 11 bytes per cell (three one-byte masks and two four-byte compressed-row
+ * offsets) plus four bytes per authored in-grid opening cell and per occupant cell, and building it
+ * briefly needs eight more bytes per cell. So the grid-size contract (grid-size.ts) bounds a
+ * board by the cell count, whatever the number of openings a valid encounter authors.
  */
 
 /** Row-major ordinal of a cell of one board, `row * columns + column`. Minted only in this module. */
@@ -26,13 +32,6 @@ export type FootprintSide = 1 | 2 | 3 | 4;
 
 /** A cell no narrow opening covers; creature-size ordinals are 0 (Tiny) to 5 (Gargantuan). */
 export const NO_OPENING = 127;
-
-/** One authored narrow opening, in authored order. */
-export interface NarrowOpeningMask {
-  readonly sizedFor: KnownCreatureSize;
-  /** 1 where the opening covers the cell. */
-  readonly covers: Uint8Array;
-}
 
 export interface MovementBoard {
   readonly columns: number;
@@ -46,7 +45,15 @@ export interface MovementBoard {
    * NO_OPENING. An opening sized for an unknown size holds -1, as `indexOf` gives it.
    */
   readonly narrowestOpening: Int8Array;
-  readonly openings: readonly NarrowOpeningMask[];
+  /** The size each narrow opening is sized for, by opening ordinal (its position in authored order). */
+  readonly openingSizes: readonly KnownCreatureSize[];
+  /**
+   * Opening coverage, compressed sparse rows: the openings covering cell i are
+   * `openingOrdinals[openingStart[i] .. openingStart[i + 1])`, ascending (an opening that lists a
+   * cell twice appears twice).
+   */
+  readonly openingStart: Int32Array;
+  readonly openingOrdinals: Int32Array;
   /**
    * Creature occupancy, compressed sparse rows: the occupants of cell i are
    * `occupantOrdinals[occupantStart[i] .. occupantStart[i + 1])`, ascending, where an
@@ -78,6 +85,49 @@ export function squareCell(
   rowOffset: number,
 ): CellIndex {
   return (anchor + rowOffset * board.columns + columnOffset) as CellIndex;
+}
+
+/** Whether narrow opening `ordinal` covers cell `index`. */
+export function openingCovers(board: MovementBoard, index: CellIndex, ordinal: number): boolean {
+  const end = board.openingStart[index + 1] ?? 0;
+  for (let slot = board.openingStart[index] ?? 0; slot < end; slot += 1) {
+    if (board.openingOrdinals[slot] === ordinal) return true;
+  }
+  return false;
+}
+
+/**
+ * The in-grid cells of `groups` as compressed sparse rows: the ordinals of the groups listing cell
+ * i are `ordinals[start[i] .. start[i + 1])`, ascending. `at` drops a cell off the grid.
+ */
+function compressedRows(
+  cellCount: number,
+  groups: readonly (readonly GridCell[])[],
+  at: (cell: GridCell) => CellIndex | null,
+): { readonly start: Int32Array; readonly ordinals: Int32Array } {
+  const start = new Int32Array(cellCount + 1);
+  if (groups.length === 0) return { start, ordinals: new Int32Array(0) };
+  for (const cells of groups) {
+    for (const cell of cells) {
+      const index = at(cell);
+      if (index !== null) start[index + 1] = (start[index + 1] ?? 0) + 1;
+    }
+  }
+  for (let index = 0; index < cellCount; index += 1) {
+    start[index + 1] = (start[index + 1] ?? 0) + (start[index] ?? 0);
+  }
+  const ordinals = new Int32Array(start[cellCount] ?? 0);
+  const next = start.slice(0, cellCount);
+  groups.forEach((cells, ordinal) => {
+    for (const cell of cells) {
+      const index = at(cell);
+      if (index === null) continue;
+      const slot = next[index] ?? 0;
+      ordinals[slot] = ordinal;
+      next[index] = slot + 1;
+    }
+  });
+  return { start, ordinals };
 }
 
 /**
@@ -120,39 +170,27 @@ export function buildMovementBoard(
   }
 
   const narrowestOpening = new Int8Array(cellCount).fill(NO_OPENING);
-  const openings = state.environment.narrowOpeningRegions.map((opening): NarrowOpeningMask => {
+  const regions = state.environment.narrowOpeningRegions;
+  for (const opening of regions) {
     const ordinal = creatureSizes.indexOf(opening.sizedFor);
-    const covers = new Uint8Array(cellCount);
     for (const cell of opening.cells) {
       const index = at(cell);
-      if (index === null) continue;
-      covers[index] = 1;
-      if (ordinal < (narrowestOpening[index] ?? NO_OPENING)) narrowestOpening[index] = ordinal;
-    }
-    return { sizedFor: opening.sizedFor, covers };
-  });
-
-  const occupantStart = new Int32Array(cellCount + 1);
-  for (const cells of occupantCells) {
-    for (const cell of cells) {
-      const index = at(cell);
-      if (index !== null) occupantStart[index + 1] = (occupantStart[index + 1] ?? 0) + 1;
+      if (index !== null && ordinal < (narrowestOpening[index] ?? NO_OPENING)) narrowestOpening[index] = ordinal;
     }
   }
-  for (let index = 0; index < cellCount; index += 1) {
-    occupantStart[index + 1] = (occupantStart[index + 1] ?? 0) + (occupantStart[index] ?? 0);
-  }
-  const occupantOrdinals = new Int32Array(occupantStart[cellCount] ?? 0);
-  const next = occupantStart.slice(0, cellCount);
-  occupantCells.forEach((cells, ordinal) => {
-    for (const cell of cells) {
-      const index = at(cell);
-      if (index === null) continue;
-      const slot = next[index] ?? 0;
-      occupantOrdinals[slot] = ordinal;
-      next[index] = slot + 1;
-    }
-  });
+  const openings = compressedRows(cellCount, regions.map((opening) => opening.cells), at);
+  const occupancy = compressedRows(cellCount, occupantCells, at);
 
-  return { columns, rows, blocked, difficult, narrowestOpening, openings, occupantStart, occupantOrdinals };
+  return {
+    columns,
+    rows,
+    blocked,
+    difficult,
+    narrowestOpening,
+    openingSizes: regions.map((opening) => opening.sizedFor),
+    openingStart: openings.start,
+    openingOrdinals: openings.ordinals,
+    occupantStart: occupancy.start,
+    occupantOrdinals: occupancy.ordinals,
+  };
 }
