@@ -40,6 +40,7 @@ import {
 } from '../combat/values';
 import { sha256 } from '../crypto/sha256';
 import type { DatabaseContext } from '../db/database';
+import { assertSupportedGrid } from '../combat/grid-size';
 import { decodeWildShapeOverlay, decodeWildShapeUseState } from '../combat/wild-shape';
 import {
   capturePartySessionState,
@@ -970,6 +971,9 @@ function decodeRevision(value: unknown): SessionRevision {
   ) {
     throw new TypeError('Malformed VTT session revision.');
   }
+  const bounds = value.encounterState.bounds;
+  if (!isRecord(bounds)) throw new TypeError('Persisted encounter bounds are malformed.');
+  assertSupportedGrid({ columns: bounds.columns, rows: bounds.rows });
   const transition = decodeTransition(value.transition);
   const partyState = value.partyState === null
     ? null

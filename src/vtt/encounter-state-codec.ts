@@ -9,6 +9,7 @@ import {
   type CombatantId,
 } from '../combat/values';
 import type { EncounterEnvironment } from '../combat/world-objects';
+import { assertSupportedGrid } from '../combat/grid-size';
 import {
   creatureSpace,
   placementFromSerialized,
@@ -395,6 +396,8 @@ export function decodeEncounterStateV1(value: unknown, mode: EncounterStateDecod
   exactOrOptionalKeys(bounds, ['columns', 'rows'], [], 'state.bounds');
   safeInteger(bounds['columns'], 'state.bounds.columns', 1);
   safeInteger(bounds['rows'], 'state.bounds.rows', 1);
+  const decodedBounds = { columns: bounds['columns'], rows: bounds['rows'] };
+  assertSupportedGrid(decodedBounds);
   const combatants = array(state['combatants'], 'state.combatants');
   if (combatants.length === 0) throw new TypeError('Encounter state requires at least one combatant.');
   const profiles = decodeProfiles(combatants);
@@ -420,7 +423,6 @@ export function decodeEncounterStateV1(value: unknown, mode: EncounterStateDecod
   const ids = profiles.map((profile) => profile.id);
   validateInitiative(state, mode, ids);
   if (mode === 'challenge') {
-    const decodedBounds = { columns: bounds['columns'] as number, rows: bounds['rows'] as number };
     const spaces = tokens.map((token) => {
       const profile = profiles.find((candidate) => candidate.id === token.combatantId);
       if (profile?.rules.sizeCategory === undefined) throw new TypeError('Challenge token has no mechanical size.');

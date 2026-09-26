@@ -13,6 +13,7 @@ import {
 import { TurnCoordinator, type DurableCoordinatorTransition } from '../../combat/coordinator';
 import type { EncounterCommand } from '../../combat/events';
 import { gridDistance } from '../../combat/grid';
+import { assertSupportedGrid } from '../../combat/grid-size';
 import { decodeProjectedCreatureSpace, minimumSpaceDistance } from '../../combat/creature-space';
 import { mulberry32 } from '../../combat/random';
 import {
@@ -80,6 +81,8 @@ export function reconstructEncounterState(capture: RolloutInputCapture): Encount
       `Rollout capture ${capture.logicalCallId} state hash mismatch: expected ${capture.stateHash}, received ${actualHash}.`,
     );
   }
+  if (!isRecord(parsed.bounds)) throw new TypeError(`Rollout capture ${capture.logicalCallId} has malformed encounter bounds.`);
+  assertSupportedGrid({ columns: parsed.bounds.columns, rows: parsed.bounds.rows });
   return parsed as unknown as EncounterState;
 }
 

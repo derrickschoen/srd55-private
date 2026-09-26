@@ -5,6 +5,7 @@ import {
   type EncounterConfig,
   type EncounterState,
 } from '../combat/encounter';
+import { assertSupportedGrid } from '../combat/grid-size';
 import { restoreMulberry32, type SerializableRngState } from '../combat/random';
 import {
   dmVisibleEncounter,
@@ -784,6 +785,7 @@ export function replayBundle(
   let rounds = 0;
   for (const [index, replayRecord] of bundle.revisions.entries()) {
     const revision = replayRecord.revision;
+    assertSupportedGrid(revision.encounterState.bounds);
     assertEqual(
       'bundle', index, 'encounterConfig', bundle.encounterConfig, revision.encounterState.config,
     );

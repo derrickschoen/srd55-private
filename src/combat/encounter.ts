@@ -92,6 +92,7 @@ import {
   type GridBounds,
   type GridCell,
 } from './grid';
+import { assertSupportedGrid } from './grid-size';
 import {
   applySizeSteps,
   autoRelocatePlacement,
@@ -1148,14 +1149,7 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
   if (setup.rulesEdition !== undefined && setup.rulesEdition !== '2014' && setup.rulesEdition !== '2024') {
     throw new EncounterRuleError('validation', 'Encounter detection rules edition must be 2014 or 2024.');
   }
-  if (
-    !Number.isSafeInteger(setup.bounds.columns) ||
-    !Number.isSafeInteger(setup.bounds.rows) ||
-    setup.bounds.columns < 1 ||
-    setup.bounds.rows < 1
-  ) {
-    throw new EncounterRuleError('validation', 'Encounter bounds must be positive safe integers.');
-  }
+  assertSupportedGrid(setup.bounds);
   if (setup.combatants.length === 0) {
     throw new EncounterRuleError('validation', 'An encounter requires at least one combatant.');
   }
