@@ -2546,3 +2546,17 @@ OWNER, verbatim choice: "Re-baseline all five first".
 - Queue position: in the first quiet window after #3/#6 and B1 land, beside FOOTPRINT (D900) and PATH-ONE (D901).
 
 Next free id: D903.
+
+## D903 — 2026-09-26 15:47 — owner: DATA-01 S-4 is Option A (teacher and judge rubrics carry the monster-knowledge instruction)
+
+QUESTION (AskUserQuestion, recommendation A): .claude/consensus/data-01/plan-r5.md:22 (S-4).
+- Option A adds MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION (src/vtt/mcp/engine-server.ts:1022, D847) to the teacher and judge rubrics.
+- Option B uses full-context oracle labels.
+- D886 had already chosen A for the B4–B6 generation baseline only.
+
+OWNER, verbatim choice: "A: monsters know only the plausible (Recommended)".
+- Teacher labels mean the strongest legal tactic under actor-plausible knowledge. Judges enforce the same limit and penalise the use of hidden facts. The hidden-visible cross measures play under that limit.
+- teacher_rubric_id, judge_rubric_id and monster_knowledge_baseline_id are frozen to the A variants in the DATA-01 amendment (queued after B1 lands).
+- This clears S-4 as a blocker for the paid teacher pilot and the judge-prompt freeze. The pilot still waits for S-RESULT (LUNA6) and the three named human audit roles (plan-r5 :24).
+
+Next free id: D904.
