@@ -6,7 +6,17 @@ import type { EncounterCommand, StatedRangeAttackCommand } from '../../../src/co
 import type { MovementEvaluation } from '../../../src/combat/movement-evaluator';
 import { GOBLIN_WARRIOR } from '../../../src/combat/statblocks/monsters';
 import { terrainBlocking } from '../../../src/combat/terrain';
-import { armorClass, damageType, dieSides, feet, worldObjectId } from '../../../src/combat/values';
+import {
+  armorClass,
+  damageType,
+  dieSides,
+  effectStackingIdentity,
+  encounterEffectId,
+  feet,
+  worldObjectId,
+  type CombatantId,
+} from '../../../src/combat/values';
+import type { ConditionName } from '../../../src/combat/conditions';
 import {
   projectedCloseCombatEnemies,
   projectedMovementOptions,
@@ -606,5 +616,94 @@ describe('CC-PC-DESTINATION-SIGHT: an enemy\'s sight of the PC is not carried to
     }, () => 0.5).events.find((event) => event.type === 'attack_resolved');
     if (shot?.type !== 'attack_resolved') throw new Error('The Longbow shot emitted no attack roll.');
     expect({ mode: shot.attack.roll.mode, faces: shot.attack.roll.faces.length }).toEqual({ mode: 'normal', faces: 1 });
+  });
+});
+
+function conditionEffect(
+  key: string,
+  target: CombatantId,
+  source: CombatantId,
+  condition: Exclude<ConditionName, 'Exhaustion'>,
+): EncounterState['effects'][number] {
+  return {
+    id: encounterEffectId(`effect:${key}`),
+    source,
+    targets: [target],
+    createdRevision: 0,
+    duration: { kind: 'permanent' },
+    concentrationOwner: null,
+    stackingIdentity: effectStackingIdentity(key),
+    stacking: 'replace_same_source',
+    repeatedSave: null,
+    payload: { kind: 'condition', condition },
+  };
+}
+
+/*
+ * CC-UNRESOLVED-PRONE (review r3 Q1; the recorded case is a Prone ranger in
+ * survival decision 4669, which avoided a square only because its close-combat
+ * verdict there was unresolved). The CC-PC-DESTINATION-SIGHT board with the
+ * ranger Prone: "You have Disadvantage on attack rolls"
+ * (docs/srd/full/srd-5.2.1.txt:11978-11979). The guard's sight of the ranger
+ * at (1,1) is still unknown, but the roll has Disadvantage whether or not the
+ * guard sees it there, so the plan states the number: hit 121/400, critical
+ * 1/400, ED = 120/400 x 7.5 + 1/400 x 12 = 2.28 (the CC-PC-DESTINATION-SIGHT
+ * derivation), the same as on the standing square, where the guard is seen to
+ * see the ranger (close combat and Prone). The unknown fact stays listed.
+ */
+describe('CC-UNRESOLVED-PRONE: an unknown close-combat fact that cannot change the roll mode does not hide the number', () => {
+  it('CC-UNRESOLVED-PRONE: a Prone ranger stepping beside a guard of unknown sight plans 2.28 there, as where it stands', () => {
+    const ranger = playerProfile('cc-prone-ranger', { initiativeBonus: 20 });
+    const guardBase = monsterProfile('cc-prone-guard', { initiativeBonus: -20 });
+    const guard = { ...guardBase, rules: { ...guardBase.rules, senses: [] } };
+    const goblinBase = monsterCombatantProfile(GOBLIN_WARRIOR, {
+      combatantId: 'combatant:cc-prone-goblin', tokenId: 'token:cc-prone-goblin',
+    });
+    const goblin = { ...goblinBase, rules: { ...goblinBase.rules, initiativeBonus: -20 } };
+    const standing = { column: 0, row: 1 } as const;
+    const dark = { column: 1, row: 1 } as const;
+    const created = createEncounter({
+      bounds: { columns: 8, rows: 3 },
+      combatants: [ranger, guard, goblin],
+      tokens: [placedToken(ranger, 0, 1), placedToken(guard, 1, 2), placedToken(goblin, 7, 0)],
+      environment: {
+        lightRegions: [{ id: 'cc-prone-dark', cells: [dark], level: 'darkness' }],
+        difficultTerrainRegions: [],
+        obscurementRegions: [],
+        narrowOpeningRegions: [],
+      },
+    });
+    const rolled = reduceEncounter(created, { type: 'roll_initiative' }, () => 0.5).state;
+    const state: EncounterState = {
+      ...rolled,
+      effects: [...rolled.effects, conditionEffect('cc-prone-ranger-prone', ranger.id, ranger.id, 'Prone')],
+    };
+    expect(state.activeCombatant).toBe(ranger.id);
+    const projection = projectActorKnowledge(state, ranger.id);
+    expect(projectedCloseCombatEnemies(state, projection, dark)).toEqual([
+      { id: guard.id, distanceFeet: 5, seesAttacker: { kind: 'unknown' }, incapacitated: false },
+    ]);
+    const request = longbowRequest(ranger.id, goblin.id);
+    const evaluation = projectedMovementOptions(state, projection, {
+      ...request, attack: { ...request.attack, attackerConditions: [{ name: 'Prone' }] },
+    });
+    if (evaluation === null) throw new Error('Expected a projected movement evaluation.');
+    const planned = (verdict: MovementEvaluation['candidates'][number]['after']) => {
+      if (verdict.status !== 'resolved') throw new Error('Expected an evaluated attack verdict.');
+      return {
+        mode: verdict.evaluation.rollMode.mode,
+        closeCombat: verdict.evaluation.rollMode.reasons.includes('ranged_close_combat_disadvantage'),
+        unresolved: verdict.evaluation.unresolved.includes('close_combat_unresolved'),
+        damage: verdict.evaluation.damage.status === 'resolved'
+          ? Math.round(verdict.evaluation.damage.expectedDamage * 1e9) / 1e9
+          : verdict.evaluation.damage.status,
+      };
+    };
+    expect(candidateAt(evaluation, dark).before).toMatchObject({ status: 'resolved' });
+    expect(planned(candidateAt(evaluation, dark).before))
+      .toEqual({ mode: 'disadvantage', closeCombat: true, unresolved: false, damage: 2.28 });
+    expect(planned(candidateAt(evaluation, dark).after))
+      .toEqual({ mode: 'disadvantage', closeCombat: false, unresolved: true, damage: 2.28 });
+    expect(evaluation.start).toEqual(standing);
   });
 });

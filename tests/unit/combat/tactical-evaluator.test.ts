@@ -603,6 +603,53 @@ describe('Ranged Attacks in Close Combat (docs/srd/full/srd-5.2.1.txt:911-917)',
     expect(closeCombatVerdict(attackRollDelivery({ kind: 'melee', reachFeet: feet(5) }, 5), [enemy()])).toEqual({ kind: 'melee_attack' });
   });
 
+  /*
+   * CC-UNRESOLVED-AGREES (review r3 Q1). The enemy's sight of the attacker is
+   * unknown, so whether close combat adds Disadvantage is unknown. When the
+   * roll mode is the same either way, the probability is still a number, and
+   * the unknown fact is still listed:
+   * - Prone: "You have Disadvantage on attack rolls"
+   *   (docs/srd/full/srd-5.2.1.txt:11978-11979). With close combat or
+   *   without, Disadvantage: 1.63625 (above).
+   * - A declared Advantage with Prone: "If circumstances cause a roll to have
+   *   both Advantage and Disadvantage, the roll has neither of them ... even
+   *   if multiple circumstances impose Disadvantage" (:507-512), so a third
+   *   source changes nothing: straight, 3.475.
+   * - A declared Advantage alone: Advantage if the enemy does not see the
+   *   attacker, straight if it does. The mode turns on the unknown: no number.
+   */
+  it('CC-UNRESOLVED-AGREES: an unknown close-combat fact that cannot change the roll mode leaves the number resolved', () => {
+    const unknownEnemy = [enemy({ seesAttacker: { kind: 'unknown' } })];
+    const prone = [{ name: 'Prone' }] as const;
+    const declaredAdvantage = [{ mode: 'advantage', reason: 'declared_advantage' }] as const;
+    const planned = (input: TacticalAttackInput) => {
+      const evaluation = evaluateTacticalAttack(input);
+      return {
+        mode: evaluation.rollMode.mode,
+        closeCombat: evaluation.rollMode.reasons.includes('ranged_close_combat_disadvantage'),
+        hit: evaluation.probabilities.status === 'resolved' ? evaluation.probabilities.hit : evaluation.probabilities.reason,
+        damage: evaluation.damage.status === 'resolved'
+          ? Math.round(evaluation.damage.expectedDamage * 1e9) / 1e9
+          : evaluation.damage.reason,
+        closeCombatUnknown: evaluation.unresolved.includes('close_combat_unresolved'),
+      };
+    };
+    expect(planned(baseInput({ attackerConditions: prone, closeCombatEnemies: unknownEnemy }))).toEqual({
+      mode: 'disadvantage', closeCombat: false, hit: 0.25, damage: 1.63625, closeCombatUnknown: true,
+    });
+    expect(planned(baseInput({
+      attackerConditions: prone, rollModeSources: declaredAdvantage, closeCombatEnemies: unknownEnemy,
+    }))).toEqual({ mode: 'normal', closeCombat: false, hit: 0.5, damage: 3.475, closeCombatUnknown: true });
+    expect(planned(baseInput({ rollModeSources: declaredAdvantage, closeCombatEnemies: unknownEnemy }))).toEqual({
+      mode: 'advantage', closeCombat: false,
+      hit: 'close_combat_unresolved', damage: 'close_combat_unresolved', closeCombatUnknown: true,
+    });
+    // The Prone attacker with the enemy known to see it: the same number, and nothing unknown.
+    expect(planned(baseInput({ attackerConditions: prone, closeCombatEnemies: [enemy()] }))).toEqual({
+      mode: 'disadvantage', closeCombat: true, hit: 0.25, damage: 1.63625, closeCombatUnknown: false,
+    });
+  });
+
   it('CC-REDUCER: the goblin archer rolls two d20s at a PC 15 feet away while a second PC stands next to it, and one when that PC is Paralyzed, Blinded, dying, Stable, 10 feet away, or a goblin ally', () => {
     const rolled = (board: ReturnType<typeof goblinArcherBoard>, target = board.target.id) =>
       rolledMode(board.state, monsterAttackCommand(board.shortbow, board.archer.id, target));

@@ -191,7 +191,9 @@ export type TacticalUnresolvedReason =
   /**
    * A ranged attack with an enemy within 5 feet whose sight of the attacker
    * the caller does not know, and no enemy there known to impose the
-   * close-combat Disadvantage (see CloseCombatEnemy).
+   * close-combat Disadvantage (see CloseCombatEnemy). The evaluation always
+   * lists the unknown fact; it blocks the probability only when the roll
+   * mode differs with it (another source may already give Disadvantage).
    */
   | 'close_combat_unresolved'
   | 'target_armor_class_unresolved'
@@ -738,14 +740,9 @@ export function evaluateTacticalAttack(
   );
   const distanceFeet = range.distanceFeet;
   const closeCombat = closeCombatVerdict(attackRollDelivery(input.range, distanceFeet), input.closeCombatEnemies);
-  const rangeSources: AttackRollModeSource[] = [
-    ...(range.status === 'resolved' && range.band === 'long'
-      ? [{ mode: 'disadvantage', reason: 'long_range_disadvantage' } as const]
-      : []),
-    ...(closeCombat.kind === 'disadvantage'
-      ? [{ mode: 'disadvantage', reason: 'ranged_close_combat_disadvantage' } as const]
-      : []),
-  ];
+  const longRangeSources: readonly AttackRollModeSource[] = range.status === 'resolved' && range.band === 'long'
+    ? [{ mode: 'disadvantage', reason: 'long_range_disadvantage' }]
+    : [];
   const conditionSources = conditionAttackRollModeSources({
     attackerId: input.attackerId,
     targetId: input.targetId,
@@ -755,14 +752,24 @@ export function evaluateTacticalAttack(
     attackerCanSeeTarget: input.attackerCanSeeTarget,
     targetCanSeeAttacker: input.targetCanSeeAttacker,
   });
-  const rollMode = combineAttackRollMode([
-    ...rangeSources,
+  const otherSources: readonly AttackRollModeSource[] = [
     ...input.rollModeSources,
     ...(input.featureRollModeInput === null
       ? []
       : projectMonsterRollModeSources(input.featureRollModeInput)),
     ...conditionSources,
+  ];
+  const rollModeWithCloseCombat = (disadvantage: boolean): TacticalRollModeVerdict => combineAttackRollMode([
+    ...longRangeSources,
+    ...(disadvantage ? [{ mode: 'disadvantage', reason: 'ranged_close_combat_disadvantage' } as const] : []),
+    ...otherSources,
   ]);
+  // An unresolved close-combat verdict leaves its source out of the reported
+  // mode; it decides the roll only when adding its Disadvantage would change
+  // that mode (another source may already give Disadvantage, e.g. Prone).
+  const rollMode = rollModeWithCloseCombat(closeCombat.kind === 'disadvantage');
+  const closeCombatDecidesMode = closeCombat.kind === 'unresolved' &&
+    rollModeWithCloseCombat(true).mode !== rollMode.mode;
   const criticalDistances = impliedTargetConditions(input.targetConditions)
     .flatMap((condition) => conditionMechanicalState([condition]).clauses)
     .flatMap((clause) => clause.kind === 'critical_if_hit_within' ? [Number(clause.feet)] : []);
@@ -794,7 +801,7 @@ export function evaluateTacticalAttack(
       };
   const blockingReason = firstBlockingReason(range, input.targetArmorClass);
   const probabilityBlockingReason = blockingReason ??
-    (closeCombat.kind === 'unresolved'
+    (closeCombatDecidesMode
       ? 'close_combat_unresolved'
       : input.unresolvedReasons?.includes('random_attack_modifier_unresolved') === true
       ? 'random_attack_modifier_unresolved'
