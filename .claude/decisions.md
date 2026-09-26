@@ -2528,3 +2528,21 @@ OWNER, verbatim choice: "Delete, after #3/#6 land (Recommended)".
 - Lands after #3/#6. It sits alongside FOOTPRINT (D900).
 
 Next free id: D902.
+
+## D902 — 2026-09-26 15:23 — owner: TEST-PERF-01 B2–B6 are re-baselined on main after #3/#6 land, then decided batch by batch
+
+QUESTION (AskUserQuestion). Context:
+- Only B1 landed (d583 31.61 → 11.02 s, D869/D871).
+- PERF-02 has since attacked the same costs:
+  - x1r: d569 and arena-basis (triage wf_9c85066f-340 solo medians d569-blind 44.71→15.87 s, d569-v5 108.61→29.33 s, arena-basis 21.88→10.58 s);
+  - cover6: los-cover 86→12 s, agent-reported.
+- Still open: tests/unit/tools/d569-v5.test.ts:413-414 builds two rows with top-level awaits (Part A:86); replay (B2) was never touched.
+- My recommendation was to close B3, B4 and B5 and keep B6 and B2.
+
+OWNER, verbatim choice: "Re-baseline all five first".
+- After #3/#6 land: solo medians (3 runs, quiet box, void rule) of each remaining batch's target files on that main, against each batch's frozen minimum saving in .tmp-plans/2026-09-16-test-perf-01-plan.md (sha af8fbadf…).
+- Then one decision per batch: dispatch, re-scope or retire, each recorded with its numbers.
+- The top-level-await finding (Part A:86) is carried regardless of B6's number.
+- Queue position: in the first quiet window after #3/#6 and B1 land, beside FOOTPRINT (D900) and PATH-ONE (D901).
+
+Next free id: D903.
