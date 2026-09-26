@@ -14,6 +14,7 @@ import {
   dieSides,
   encounterBranchId,
   encounterSessionId,
+  feet,
 } from '../../../src/combat/values';
 import {
   featureEffectsForCombatant,
@@ -450,6 +451,80 @@ describe('content-pack v1', () => {
       spellId: 'greenforge:prism-pebble',
     }));
     expect(cast.state.combatants.find(({ profile }) => profile.id === target.id)?.hitPoints).toBe(16);
+  });
+
+  /*
+   * CC-TRUE-STRIKE-IMPORTED (review r3 P1). A homebrew spell with True
+   * Strike's operation makes "one attack with the weapon used in the spell's
+   * casting" (docs/srd/source/spell-descriptions.txt:8079-8087), so the attack
+   * is at the weapon's range, whatever targeting the pack states. A pack
+   * written before the weapon_attack targeting existed states a 30-foot single
+   * target; it still loads, and the weapon still decides: a Longsword (melee,
+   * 5-foot reach, docs/srd/source/weapons-table.txt:34) cannot attack a target
+   * 10 feet away, though the spell's 30 feet would allow it. A pack stating
+   * weapon_attack loads too, and its Longbow (150/600, :50) shot at a target
+   * 20 feet away with a monster beside the caster has close-combat
+   * Disadvantage (docs/srd/full/srd-5.2.1.txt:911-917): two d20 faces at RNG 0.5.
+   */
+  it('CC-TRUE-STRIKE-IMPORTED: an imported True Strike shape attacks at its weapon\'s range whatever the pack\'s targeting', () => {
+    const source = fixture() as { spells: Array<Record<string, unknown>> };
+    const template = source.spells[0];
+    if (template === undefined) throw new Error('Fixture spell is missing.');
+    const operation = {
+      kind: 'weapon_attack_augmentation', timing: 'during_cast',
+      attackAbility: 'spellcasting', damageAbility: 'spellcasting', damageTypeChoice: 'weapon_or_radiant',
+      extraDamage: {
+        type: 'Radiant',
+        dice: { baseCount: 1, sides: 6, modifier: 0, perSlotCount: 0, perSlotModifier: 0, cantripUpgrade: false },
+      },
+    };
+    const content = loaded(loadContentPack({
+      ...source,
+      spells: [
+        { ...template, recordId: 'older-strike', name: 'Older Strike', level: 0,
+          targeting: { kind: 'single', rangeFeet: 30, willing: false }, operation },
+        { ...template, recordId: 'weapon-strike', name: 'Weapon Strike', level: 0,
+          targeting: { kind: 'weapon_attack' }, operation },
+      ],
+    }));
+    expect(content.spells.map((spell) => spell.definition.targeting)).toEqual([
+      { kind: 'single', rangeFeet: 30, willing: false },
+      { kind: 'weapon_attack' },
+    ]);
+    const caster = playerProfile('imported-strike-caster', { initiativeBonus: 20 });
+    const target = monsterProfile('imported-strike-target', { initiativeBonus: -20, hitPoints: 200 });
+    const guard = monsterProfile('imported-strike-guard', { initiativeBonus: -30, hitPoints: 200 });
+    const strike = (
+      spell: 'older-strike' | 'weapon-strike',
+      targetColumn: number,
+      tacticalRange: NonNullable<Extract<EncounterCommand, { readonly type: 'cast_spell' }>['weaponAttack']>['tacticalRange'],
+    ) => {
+      let state = createEncounter({
+        bounds: { columns: 8, rows: 2 },
+        combatants: [caster, target, guard],
+        tokens: [placedToken(caster, 0, 0), placedToken(target, targetColumn, 0), placedToken(guard, 0, 1)],
+        contentPacks: [content],
+      });
+      state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+      const base = importedSpellCommand(caster, target);
+      if (base.type !== 'cast_spell') throw new Error('Expected the imported spell command.');
+      return reduceEncounter(state, {
+        ...base,
+        spellId: `greenforge:${spell}`,
+        slotLevel: null,
+        weaponAttack: {
+          attackBonus: 5, damageType: damageType('Slashing'), damageCount: 1, damageSides: 8, damageModifier: 3,
+          tacticalRange,
+        },
+      }, () => 0.5).events.flatMap((event) => event.type === 'attack_resolved'
+        ? [`${event.attack.roll.mode}:${String(event.attack.roll.faces.length)}`]
+        : []);
+    };
+    const longsword = { kind: 'melee', reachFeet: feet(5) } as const;
+    const longbow = { kind: 'ranged', normalRangeFeet: feet(150), longRangeFeet: feet(600) } as const;
+    expect(() => strike('older-strike', 2, longsword)).toThrow('The target is out of Older Strike weapon range.');
+    expect(strike('older-strike', 1, longsword)).toEqual(['normal:1']);
+    expect(strike('weapon-strike', 4, longbow)).toEqual(['disadvantage:2']);
   });
 
   it('fires an imported feature rider through the ordinary attack reducer', () => {
