@@ -10,7 +10,7 @@ import {
   type ArenaBatchRunner,
 } from '../../../tools/rl/generate-data';
 import { readRepoCommit } from '../../../tools/rl/repo-commit';
-import { mkdtempSync, readFileSync, writeFileSync } from '../../helpers/test-filesystem';
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from '../../helpers/test-filesystem';
 
 /**
  * One batch (seeds 3943001-3943003, reps 2), typed by hand in the pre-LUNA6 schema (tools/rl/generate-data.ts at
@@ -66,6 +66,9 @@ async function storedBatch(targetDirectory: string, format: string, model: strin
  * never resumed and never replaced; without --resume, any other stored manifest is replaced only with --overwrite; one
  * that does not parse is never replaced.
  */
+const V1_RESUME_REFUSAL = 'HistoricalLunaBatchResumeError: LUNA6: <manifest> is an arena-rl-batch-v1 gpt-5.6-luna ' +
+  'low batch; this generator writes arena-rl-batch-v2 gpt-6-luna low batches (D887 b) and never resumes a v1 batch ' +
+  'into v2, which would mix the two routes in one batch. Start a new --target-dir.';
 const V1_OVERWRITE_REFUSAL = 'HistoricalLunaBatchOverwriteError: LUNA6: <manifest> is an arena-rl-batch-v1 ' +
   'gpt-5.6-luna low batch; a fresh arena-rl-batch-v2 gpt-6-luna low run never overwrites it, which would lose its ' +
   'provenance. Start a new --target-dir.';
@@ -122,6 +125,44 @@ async function generateOverStoredBatch(stored: {
     (error: unknown) => outcomeError(error, manifestPath),
   );
   return { outcome, calls, storedBytesKept: readFileSync(manifestPath, 'utf8') === bytes };
+}
+
+/**
+ * Runs two batches in one invocation: first 3943004-3943006, whose manifest path is empty, then 3943001-3943003, whose
+ * path holds `storedBatch` in the `second` schema (nothing when `second` is null). Records the outcome, the seeds the
+ * arena was called for, every entry of the target directory afterwards, and whether the second batch's stored bytes
+ * survived (null when it had none).
+ */
+async function generateTwoBatches(
+  second: { readonly format: string; readonly model: string } | null,
+  flags: readonly string[],
+) {
+  const targetDirectory = mkdtempSync(join(tmpdir(), 'luna6-two-batches-'));
+  const secondPath = join(targetDirectory, 'batch-3943001-3943003.manifest.json');
+  const bytes = second === null
+    ? null
+    : `${JSON.stringify(await storedBatch(targetDirectory, second.format, second.model))}\n`;
+  if (bytes !== null) writeFileSync(secondPath, bytes, 'utf8');
+  const calls: number[] = [];
+  const outcome = await Promise.resolve().then(() => generateData(parseGenerateDataArgs([
+    '--seed-range', '3943004-3943006', '--seed-range', '3943001-3943003', '--reps', '2',
+    '--target-dir', targetDirectory, ...flags,
+  ]), {
+    arenaRunner: async (config) => {
+      calls.push(config.seed);
+      return [{ outcome: 'authorized', serviceNull: false, flapRetries: 0 }];
+    },
+    heartbeat: () => undefined,
+  })).then(
+    (manifests) => ({ ok: manifests.map(({ range }) => `${String(range.start)}-${String(range.end)}`) }),
+    (error: unknown) => outcomeError(error, secondPath),
+  );
+  return {
+    outcome,
+    calls,
+    entries: readdirSync(targetDirectory).sort(),
+    secondBytesKept: bytes === null ? null : readFileSync(secondPath, 'utf8') === bytes,
+  };
 }
 
 describe('RL arena batch generator', () => {
@@ -315,6 +356,35 @@ describe('RL arena batch generator', () => {
         calls: [],
         storedBytesKept: true,
       },
+    ]);
+  });
+
+  it('checks every batch manifest before the first arena call, so a refused later batch makes no call and writes nothing', async () => {
+    // LUNA6 (B2 review r2 P3): with several --seed-range batches, a refusal for a later batch used to come only after
+    // the earlier batches had made their (in real runs, paid) arena calls and written their manifests. Every batch's
+    // stored manifest is now read and checked first. The first row is the control: the later batch's path is empty, so
+    // both batches run, in argv order.
+    const untouched = { calls: [], entries: ['batch-3943001-3943003.manifest.json'], secondBytesKept: true };
+    expect([
+      await generateTwoBatches(null, []),
+      await generateTwoBatches({ format: 'arena-rl-batch-v1', model: 'gpt-5.6-luna' }, []),
+      await generateTwoBatches({ format: 'arena-rl-batch-v2', model: 'gpt-6-luna' }, []),
+      await generateTwoBatches({ format: 'arena-rl-batch-v1', model: 'gpt-5.6-luna' }, ['--overwrite']),
+      await generateTwoBatches({ format: 'arena-rl-batch-v1', model: 'gpt-5.6-luna' }, ['--resume']),
+    ]).toEqual([
+      {
+        outcome: { ok: ['3943004-3943006', '3943001-3943003'] },
+        calls: [3_943_004, 3_943_005, 3_943_006, 3_943_001, 3_943_002, 3_943_003],
+        entries: [
+          'batch-3943001-3943003', 'batch-3943001-3943003.manifest.json',
+          'batch-3943004-3943006', 'batch-3943004-3943006.manifest.json',
+        ],
+        secondBytesKept: null,
+      },
+      { outcome: { error: V1_OVERWRITE_REFUSAL }, ...untouched },
+      { outcome: { error: storedManifestRefusal('arena-rl-batch-v2') }, ...untouched },
+      { outcome: { error: V1_OVERWRITE_REFUSAL }, ...untouched },
+      { outcome: { error: V1_RESUME_REFUSAL }, ...untouched },
     ]);
   });
 

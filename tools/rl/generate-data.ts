@@ -427,6 +427,13 @@ function replaceSeed(
   };
 }
 
+/** One --seed-range batch after its stored manifest was checked, before any batch of the run starts. */
+interface PlannedBatch {
+  readonly range: SeedRange;
+  readonly manifestPath: string;
+  readonly stored: GenerateDataManifest | null;
+}
+
 function arenaConfig(config: GenerateDataConfig, seed: number, outPath: string): ArenaConfig {
   return parseArenaArgs([
     '--rooms', '1',
@@ -455,16 +462,21 @@ export async function generateData(
     `start batches=${String(config.seedRanges.length)} reps=${String(config.reps)} ` +
     `target=${config.targetDirectory}`,
   );
-  await mkdir(config.targetDirectory, { recursive: true });
   const provenance = await manifestProvenance(config);
-  const completed: GenerateDataManifest[] = [];
+  // LUNA6 (B2 review r2): every batch's stored manifest is read and checked before the first arena call or write, so a
+  // refusal for a later --seed-range comes before any earlier batch has made a (paid) call or written a file.
+  const batches: PlannedBatch[] = [];
   for (const range of config.seedRanges) {
+    const manifestPath = join(config.targetDirectory, manifestName(range));
+    batches.push({ range, manifestPath, stored: await startingManifest(manifestPath, config, range, provenance) });
+  }
+  await mkdir(config.targetDirectory, { recursive: true });
+  const completed: GenerateDataManifest[] = [];
+  for (const { range, manifestPath, stored } of batches) {
     heartbeat(`batch start=${String(range.start)} end=${String(range.end)}`);
     const batchDirectory = join(config.targetDirectory, `batch-${String(range.start)}-${String(range.end)}`);
     await mkdir(batchDirectory, { recursive: true });
-    const manifestPath = join(config.targetDirectory, manifestName(range));
-    let manifest = await startingManifest(manifestPath, config, range, provenance) ??
-      emptyManifest(config, range, provenance);
+    let manifest = stored ?? emptyManifest(config, range, provenance);
     const alreadyComplete = new Set(manifest.seeds
       .filter((entry) => entry.status === 'complete')
       .map((entry) => entry.seed));
