@@ -22,7 +22,7 @@ import {
   exhaustionPenalty,
   isIncapacitated,
 } from './conditions';
-import { combatToken, type CombatantProfile, type CombatRulesProfile, type CombatToken } from './combatant';
+import { combatToken, type CombatantProfile, type CombatRulesProfile, type CombatToken, type CombatTokenSetup } from './combatant';
 import {
   automaticSaveFailure,
   combatantSpace,
@@ -839,7 +839,8 @@ export interface EncounterSetup {
   readonly dmNotes?: readonly string[];
   readonly alerting?: EncounterAlertingSetup;
   readonly combatants: readonly CombatantProfile[];
-  readonly tokens: readonly CombatToken[];
+  /** Unchecked authoring input: createEncounter checks each anchor against `bounds` and mints it. */
+  readonly tokens: readonly CombatTokenSetup[];
   readonly sharedSpaceRelations?: readonly SharedSpaceRelation[];
   readonly contentPacks?: readonly LoadedContentPack[];
   readonly equipment?: readonly CombatantEquipment[];
@@ -1196,12 +1197,18 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
   ) {
     throw new EncounterRuleError('validation', 'The alerting sound-propagation model is unsupported.');
   }
+  // The only place an authored anchor becomes a state's anchor: checked against the grid and minted.
+  const placedTokens: CombatToken[] = [];
   for (const token of setup.tokens) {
     const profile = setup.combatants.find((candidate) => candidate.id === token.combatantId);
     if (profile?.tokenId !== token.id) {
       throw new EncounterRuleError('validation', 'A token must match its profile token identity.');
     }
-    requireBoardCell(setup.bounds, token.position, `Token ${token.id} anchor`);
+    placedTokens.push({
+      ...token,
+      position: requireBoardCell(setup.bounds, token.position, `Token ${token.id} anchor`),
+      placementMode: { ...token.placementMode },
+    });
     const size = profile.rules.sizeCategory;
     if (size === undefined) throw new CreatureSizeRuleError('mechanical_size_required', profile.id);
     if (token.placementMode.actual !== size) {
@@ -1427,11 +1434,7 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
             },
           }),
     })),
-    tokens: setup.tokens.map((token) => ({
-      ...token,
-      position: { ...token.position },
-      placementMode: { ...token.placementMode },
-    })),
+    tokens: placedTokens,
     sharedSpaceRelations: structuredClone(relations),
     adjudicationPending: [],
     initiative: [],
@@ -3172,7 +3175,9 @@ function restoreBanishedTargets(
     const absentTokens = context.state.absentTokens ?? [];
     const stored = absentTokens.find((candidate) => candidate.combatantId === target);
     if (stored === undefined) continue;
-    const position = nearestReturnPosition(context.state, target, stored);
+    const position = requireBoardCell(
+      context.state.bounds, nearestReturnPosition(context.state, target, stored), `Combatant ${target} return anchor`,
+    );
     const returned = { ...stored, position };
     context.state = {
       ...context.state,
@@ -3255,7 +3260,7 @@ function stateAfterSizeTransition(
     tokens: withCombatant.tokens.map((entry) => entry.combatantId === target
       ? {
           ...entry,
-          position: { ...result.placement.anchor },
+          position: requireBoardCell(state.bounds, result.placement.anchor, `Combatant ${target} relocated anchor`),
           placementMode: serializedPlacementMode(result.placement.mode),
         }
       : entry),
@@ -3803,7 +3808,7 @@ function spendLegendaryResistance(
       ].sort((left, right) => left.createdRevision - right.createdRevision || String(left.id).localeCompare(String(right.id))),
       tokens: context.state.tokens.map((candidate) =>
         candidate.combatantId === target && checkpoint.tokenPosition !== null
-          ? { ...candidate, position: { ...checkpoint.tokenPosition } }
+          ? { ...candidate, position: requireBoardCell(context.state.bounds, checkpoint.tokenPosition, `Combatant ${target} checkpoint anchor`) }
           : candidate),
     };
   }
@@ -5325,7 +5330,7 @@ function processMove(
     context.state = {
       ...context.state,
       tokens: context.state.tokens.map((candidate) => candidate.combatantId === command.actor
-        ? { ...candidate, position: { ...step.to } }
+        ? { ...candidate, position: step.to }
         : candidate),
     };
     const destinationSpace = combatantSpace(context.state, command.actor);
@@ -8604,11 +8609,12 @@ function forceMove(
       context.state.tokens.some((entry) => entry.combatantId !== target &&
         spacesIntersect(candidateSpace, combatantSpace(context.state, entry.combatantId)))) break;
     const sourceSpace = combatantSpace(context.state, target);
-    position = candidate;
+    const anchor = requireBoardCell(context.state.bounds, candidate, `Combatant ${target} forced-movement anchor`);
+    position = anchor;
     context.state = {
       ...context.state,
       tokens: context.state.tokens.map((entry) =>
-        entry.combatantId === target ? { ...entry, position: { ...position } } : entry),
+        entry.combatantId === target ? { ...entry, position: anchor } : entry),
     };
     traversed.push({ ...position });
     processEnteredCells(
@@ -10061,8 +10067,10 @@ function resolveSummon(
     wildShapeUses: null,
     spellSlots: [],
   }));
-  const tokens = profiles.map((profile, index): CombatToken =>
-    combatToken(profile, { ...(destinations[index] as GridCell) }));
+  const tokens = profiles.map((profile, index): CombatToken => {
+    const summoned = combatToken(profile, { ...(destinations[index] as GridCell) });
+    return { ...summoned, position: requireBoardCell(context.state.bounds, summoned.position, `Summoned ${String(profile.id)} anchor`) };
+  });
   context.state = {
     ...context.state,
     combatants: [...context.state.combatants, ...summonedStates],
@@ -10769,7 +10777,7 @@ function executeSpellOperation(
         context.state = {
           ...context.state,
           tokens: context.state.tokens.map((placed) => placed.combatantId === mover
-            ? { ...placed, position: { ...destination } }
+            ? { ...placed, position: requireBoardCell(context.state.bounds, destination, `Combatant ${mover} teleport anchor`) }
             : placed),
         };
         const movement = combatant(context.state, mover).turn.movement;
@@ -12120,7 +12128,7 @@ function resolveMigrationPendingPlacement(
   const tokenPlacement: CombatToken = {
     id: head.originatingToken?.id ?? combatant(next, head.combatant).profile.tokenId,
     combatantId: head.combatant,
-    position: { ...placement.anchor },
+    position: requireBoardCell(next.bounds, placement.anchor, `Combatant ${head.combatant} placement anchor`),
     placementMode: serializedPlacementMode(placement.mode),
   };
   const withoutResolvedToken = next.tokens.filter((candidate) =>
@@ -12284,7 +12292,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
         ...context.state,
         tokens: context.state.tokens.map((candidate) =>
           candidate.combatantId === command.target
-            ? { ...candidate, position: { ...consequence.to } }
+            ? { ...candidate, position: requireBoardCell(context.state.bounds, consequence.to, `Combatant ${command.target} adjudicated anchor`) }
             : candidate,
         ),
       };

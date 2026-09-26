@@ -26,6 +26,7 @@ import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-envir
 import { ARENA_REACTION_OFFER_POLICY } from '../../../src/vtt/reaction-offer-host-policy';
 import { regretTurnLegalActions } from '../../../src/vtt/regret/legal-actions';
 import { generateRoom, type GeneratedRoom } from '../../../src/vtt/room-generator';
+import { onBoard } from '../../helpers/board-cell';
 
 const SEEDS = [5_831_001, 5_831_002, 5_831_003, 5_831_004] as const;
 const ENVELOPE_PATHS = {
@@ -211,7 +212,7 @@ describe('D583 challenge room fixtures', () => {
       const state = {
         ...structuredClone(base.encounter.state),
         tokens: base.encounter.state.tokens.map((token) => token.combatantId === 'combatant:wizard'
-          ? { ...structuredClone(token), position: { ...placement.wizard } }
+          ? { ...structuredClone(token), position: onBoard(base.encounter.state.bounds, placement.wizard) }
           : structuredClone(token)),
       };
       const fighterTrace = traceCombatantLine(state, 'combatant:fighter' as CombatantId, ogre);
@@ -244,7 +245,7 @@ describe('D583 challenge room fixtures', () => {
       const approached = {
         ...state,
         tokens: state.tokens.map((token) => token.combatantId === ogre
-          ? { ...token, position: { ...placement.end } }
+          ? { ...token, position: onBoard(state.bounds, placement.end) }
           : token),
       };
       expect(traceCombatantLine(approached, 'combatant:fighter' as CombatantId, ogre, {

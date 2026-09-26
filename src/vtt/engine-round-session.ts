@@ -1,5 +1,6 @@
 import { canonicalJson } from '../commands/canonical-json';
 import { evaluateMonsterTacticalAttack, type EncounterState } from '../combat/encounter';
+import { decodeTokenAnchors } from '../combat/grid';
 import type { EncounterCommand } from '../combat/events';
 import { monsterAttackCommand, monsterSavingThrowCommand } from '../combat/monster-commands';
 import { restoreMulberry32, type SerializableRng } from '../combat/random';
@@ -136,6 +137,12 @@ interface CanonicalEncounterState {
   readonly fixtureJson: string;
 }
 
+/**
+ * The state after a canonical JSON round trip (sorted keys, plain values), for fixtures that must
+ * match byte for byte. JSON parsing forgets every brand, so the token anchors are re-minted
+ * against the state's grid (decodeTokenAnchors) rather than cast: a state spread onto a grid its
+ * anchors are not on is refused here with OffGridAnchorError.
+ */
 function canonicalEncounterState(state: EncounterState): CanonicalEncounterState {
   const fixtureJson = canonicalJson({ encounter: { state } });
   const decoded: unknown = JSON.parse(fixtureJson) as unknown;
@@ -153,7 +160,13 @@ function canonicalEncounterState(state: EncounterState): CanonicalEncounterState
     typeof Reflect.get(canonicalState, 'revision') !== 'number') {
     throw new TypeError('Canonical engine fixture state is incomplete.');
   }
-  return { state: canonicalState as EncounterState, fixtureJson };
+  const anchors = {
+    tokens: decodeTokenAnchors(state.bounds, Reflect.get(canonicalState, 'tokens'), 'Canonical engine state tokens'),
+    ...(Object.hasOwn(canonicalState, 'absentTokens')
+      ? { absentTokens: decodeTokenAnchors(state.bounds, Reflect.get(canonicalState, 'absentTokens'), 'Canonical engine state absentTokens') }
+      : {}),
+  };
+  return { state: { ...canonicalState, ...anchors } as unknown as EncounterState, fixtureJson };
 }
 
 function livingMonsterIds(state: EncounterState): readonly CombatantId[] {

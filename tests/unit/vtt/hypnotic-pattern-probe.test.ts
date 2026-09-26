@@ -22,6 +22,7 @@ import {
 } from '../../../src/vtt/renderer-profile';
 import { readFileSync } from '../../helpers/test-filesystem';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { onBoard } from '../../helpers/board-cell';
 
 const FIXTURE = 'tests/fixtures/arena-scenarios/hypnotic-pattern-cc.json';
 const CASTER = combatantId('combatant:d432-incubus');
@@ -284,7 +285,7 @@ describe('D432 Hypnotic Pattern control probe', () => {
       blockedCells: [],
       tokens: state.tokens.map((token, index) => ({
         ...token,
-        position: { column: index, row: index },
+        position: onBoard({ columns: 6, rows: 6 }, { column: index, row: index }),
       })),
     };
     const option = hypnoticOption(availableEngineActorOptions(crowded, CASTER, OFFER_ENVIRONMENT));

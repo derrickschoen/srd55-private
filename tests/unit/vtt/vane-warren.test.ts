@@ -35,6 +35,7 @@ import {
   type VaneWarrenFightId,
 } from '../../../src/vtt/vane-warren';
 import { playerProfile } from '../combat/fixtures';
+import { onBoard } from '../../helpers/board-cell';
 
 function faceOne(): number {
   return 0;
@@ -382,7 +383,7 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
       encounter: {
         ...state.encounter,
         tokens: state.encounter.tokens.map((token) => token.combatantId === drummer
-          ? { ...token, position: { column: 2, row: 2 } }
+          ? { ...token, position: onBoard(state.encounter.bounds, { column: 2, row: 2 }) }
           : token),
       },
     };
@@ -404,7 +405,7 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
         tokens: state.encounter.tokens.map((token) => token.combatantId === drummer
           ? {
               ...token,
-              position: { column: warDrum.position.column + 2, row: warDrum.position.row },
+              position: onBoard(state.encounter.bounds, { column: warDrum.position.column + 2, row: warDrum.position.row }),
             }
           : token),
       },
@@ -773,7 +774,7 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
       encounter: {
         ...initial.encounter,
         tokens: initial.encounter.tokens.map((token) => token.combatantId === drummer
-          ? { ...token, position: { column: 9, row: 5 } }
+          ? { ...token, position: onBoard(initial.encounter.bounds, { column: 9, row: 5 }) }
           : token),
       },
     };
@@ -1002,7 +1003,7 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
       encounter: {
         ...bundled.encounter,
         tokens: bundled.encounter.tokens.map((token) => token.combatantId === target.id
-          ? { ...token, position: ignitionCell }
+          ? { ...token, position: onBoard(bundled.encounter.bounds, ignitionCell) }
           : token),
       },
     };

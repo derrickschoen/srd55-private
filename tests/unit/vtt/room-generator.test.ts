@@ -27,6 +27,7 @@ import { availableEngineActorOptions, resolveEngineActorOption } from '../../../
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { declareTestInputs } from '../../helpers/test-inputs';
+import { onBoard } from '../../helpers/board-cell';
 
 const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
@@ -309,7 +310,7 @@ function expectedCreatureSpaceFixture(bytes: string): string {
         occupied.add(`${String(column)},${String(row)}`);
       }
     }
-    return { ...token, position, placementMode: { kind: 'normal' as const, actual: size } };
+    return { ...token, position: onBoard(legacy.encounter.state.bounds, position), placementMode: { kind: 'normal' as const, actual: size } };
   });
   const upgraded: GeneratedRoom = {
     ...legacy,

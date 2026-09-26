@@ -163,7 +163,10 @@ describe('D359 encounter views', () => {
     const projected = player.combatants.find((entry) => entry.id === target.id);
     const canonicalToken = state.tokens.find((entry) => entry.combatantId === target.id);
     if (projected?.placementStatus !== 'placed' || canonicalToken === undefined) throw new Error('Placed projection fixture failed.');
-    (canonicalToken.position as { column: number }).column = 7;
+    // The canonical anchor is a frozen BoardCell, so it cannot be changed under the projection; the
+    // projection must still hold its own copy rather than the state's object.
+    expect(Object.isFrozen(canonicalToken.position)).toBe(true);
+    expect(projected.position).not.toBe(canonicalToken.position);
     expect(projected.position).toEqual({ column: 2, row: 2 });
   });
 

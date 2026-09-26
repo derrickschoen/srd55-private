@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { EncounterState } from '../src/combat/encounter';
+import { requireBoardCell } from '../src/combat/grid';
 import { boardChromeDimensions } from '../src/vtt/board-chrome';
 import { loadArenaFixture } from '../src/vtt/mcp/entrypoint';
 import {
@@ -27,7 +28,7 @@ function movedState(state: EncounterState): EncounterState {
   return {
     ...state,
     tokens: state.tokens.map((token, index) => index === 0
-      ? { ...token, position: { column: token.position.column + 1, row: token.position.row } }
+      ? { ...token, position: requireBoardCell(state.bounds, { column: token.position.column + 1, row: token.position.row }, 'Moved token anchor') }
       : token),
   };
 }

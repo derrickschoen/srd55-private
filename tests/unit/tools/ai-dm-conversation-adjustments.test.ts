@@ -15,6 +15,7 @@ import { alternatingInitiativeRoom } from '../../fixtures/initiative-segments/al
 import { createScriptedPartyPlan } from '../../../src/vtt/scripted-party-round';
 import { DEFAULT_RENDERER_PROFILE } from '../../../src/vtt/renderer-profile';
 import { runConversationWithPartyPolicy } from './ai-dm-conversation-fixtures';
+import { onBoard } from '../../helpers/board-cell';
 
 const ALL_OPTIONS_TEST_RENDERER_ARGS = [
   '--renderer-profile', JSON.stringify({
@@ -69,7 +70,7 @@ describe('AI-DM engine MCP conversation runner', () => {
         }
       }),
       tokens: base.tokens.map((token) => token.combatantId === 'combatant:generated-3943001-monster-1'
-        ? { ...token, position: { column: 4, row: 7 } }
+        ? { ...token, position: onBoard(base.bounds, { column: 4, row: 7 }) }
         : token),
     };
 
@@ -403,7 +404,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       })),
       tokens: base.tokens.map((token) =>
         token.combatantId === 'combatant:generated-3943001-monster-1'
-          ? { ...token, position: { column: 5, row: 4 } }
+          ? { ...token, position: onBoard(base.bounds, { column: 5, row: 4 }) }
           : token),
     };
     const result = await runConversationWithPartyPolicy('heuristic_v0', config, {

@@ -37,6 +37,7 @@ import {
 } from '../../../tools/ai-dm-conversation';
 import type { BoardImageArtifact, BoardSnapshotCapture } from '../../../tools/ai-dm-board-snapshot';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from '../../helpers/test-filesystem';
+import { onBoard } from '../../helpers/board-cell';
 
 type JsonPath = `$${string}`;
 type StringClass = 'free_text' | 'id' | 'digest' | 'label' | 'enum' | 'approved_literal';
@@ -666,12 +667,12 @@ function richState(base: EncounterState): EncounterState {
     const position = monsterPositions[monsterTokenIndex];
     monsterTokenIndex += 1;
     if (position === undefined || combatant.profile.rules.sizeCategory === undefined) throw new Error('Rich monster placement is incomplete.');
-    return { ...token, position, placementMode: { kind: 'normal' as const, actual: combatant.profile.rules.sizeCategory } };
+    return { ...token, position: onBoard(base.bounds, position), placementMode: { kind: 'normal' as const, actual: combatant.profile.rules.sizeCategory } };
   }).concat(appendedProfiles.map(({ entry, profile }) => ({
     ...templateToken,
     id: profile.tokenId,
     combatantId: profile.id,
-    position: entry.position,
+    position: onBoard(base.bounds, entry.position),
     placementMode: { kind: 'normal' as const, actual: profile.rules.sizeCategory ?? 'Medium' as const },
   })));
   return {
@@ -704,7 +705,7 @@ function emptyState(rich: EncounterState): EncounterState {
       const position = monsterPositions[monsterIndex];
       monsterIndex += 1;
       if (position === undefined) throw new Error('Empty witness monster placement is incomplete.');
-      return { ...token, position };
+      return { ...token, position: onBoard(rich.bounds, position) };
     }),
     environment: { lightRegions: [], difficultTerrainRegions: [], obscurementRegions: [], narrowOpeningRegions: [], movementRegions: [] },
   };

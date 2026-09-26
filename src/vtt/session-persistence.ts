@@ -40,7 +40,7 @@ import {
 } from '../combat/values';
 import { sha256 } from '../crypto/sha256';
 import type { DatabaseContext } from '../db/database';
-import { assertTokenAnchorsOnGrid } from '../combat/grid';
+import { decodeTokenAnchors } from '../combat/grid';
 import { assertSupportedGrid } from '../combat/grid-size';
 import { decodeWildShapeOverlay, decodeWildShapeUseState } from '../combat/wild-shape';
 import {
@@ -976,7 +976,13 @@ function decodeRevision(value: unknown): SessionRevision {
   if (!isRecord(bounds)) throw new TypeError('Persisted encounter bounds are malformed.');
   const grid = { columns: bounds.columns, rows: bounds.rows };
   assertSupportedGrid(grid);
-  assertTokenAnchorsOnGrid(grid, value.encounterState.tokens, 'Persisted encounter tokens');
+  // The decoded state holds the minted anchors, not the loaded ones (D895).
+  const anchors = {
+    tokens: decodeTokenAnchors(grid, value.encounterState.tokens, 'Persisted encounter tokens'),
+    ...(Object.hasOwn(value.encounterState, 'absentTokens')
+      ? { absentTokens: decodeTokenAnchors(grid, value.encounterState.absentTokens, 'Persisted encounter absentTokens') }
+      : {}),
+  };
   const transition = decodeTransition(value.transition);
   const partyState = value.partyState === null
     ? null
@@ -1031,6 +1037,7 @@ function decodeRevision(value: unknown): SessionRevision {
   }
   const encounterState = {
     ...value.encounterState,
+    ...anchors,
     combatants: encounterCombatants,
     observationHistory,
   } as unknown as EncounterState;

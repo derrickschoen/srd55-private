@@ -1,4 +1,4 @@
-import { combatToken, type CombatantProfile, type CombatToken } from '../combat/combatant';
+import { combatToken, type CombatantProfile, type CombatTokenSetup } from '../combat/combatant';
 import type { LegalActionSummary } from '../combat/controllers';
 import { combatantSpace, type EncounterState } from '../combat/encounter';
 import { minimumSpaceDistance, minimumSpaceDistanceToCells } from '../combat/creature-space';
@@ -81,7 +81,7 @@ export const REFERENCE_PLAYER_IDS: readonly CombatantId[] = [
 export function referenceEncounterSetup(): {
   readonly bounds: { readonly columns: number; readonly rows: number };
   readonly combatants: readonly CombatantProfile[];
-  readonly tokens: readonly CombatToken[];
+  readonly tokens: readonly CombatTokenSetup[];
   readonly blockedCells: readonly GridCell[];
   readonly foggedCells: readonly GridCell[];
   readonly environment: EncounterState['environment'];

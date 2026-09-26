@@ -17,7 +17,7 @@ import {
   type RollTrace,
 } from '../combat/roll-provenance';
 import { monsterSpellResourcePoolId, type MonsterAttackAction } from '../combat/statblock';
-import type { GridCell } from '../combat/grid';
+import { requireBoardCell, type GridCell } from '../combat/grid';
 import {
   encounterEffectId,
   effectStackingIdentity,
@@ -1204,7 +1204,9 @@ function replaceHitPoints(state: EncounterState, actor: CombatantId, hitPoints: 
 function replacePosition(state: EncounterState, actor: CombatantId, position: GridCell): EncounterState {
   return {
     ...state,
-    tokens: state.tokens.map((token) => token.combatantId === actor ? { ...token, position } : token),
+    tokens: state.tokens.map((token) => token.combatantId === actor
+      ? { ...token, position: requireBoardCell(state.bounds, position, `Combatant ${actor} scripted anchor`) }
+      : token),
   };
 }
 

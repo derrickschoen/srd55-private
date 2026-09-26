@@ -19,6 +19,7 @@ import { generateRoom } from '../../../src/vtt/room-generator';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { placedToken, playerProfile } from '../combat/fixtures';
+import { onBoard } from '../../helpers/board-cell';
 
 const SEED = 3_943_001;
 const ACTOR_ID = combatantId('combatant:generated-3943001-monster-2');
@@ -48,7 +49,7 @@ function placedState(
     },
     tokens: state.tokens.flatMap((token) => {
       const position = positions.get(token.combatantId);
-      return position === undefined ? [] : [{ ...token, position }];
+      return position === undefined ? [] : [{ ...token, position: onBoard(rows === undefined ? state.bounds : { ...state.bounds, rows }, position) }];
     }),
   });
 }
@@ -150,15 +151,18 @@ describe('canonical engine query port', () => {
   });
 
   it('withholds Dash when an enclosed actor has no endpoint closer to its target', () => {
+    // The target stands on the last column of the 18-column room (it stood at column 20, off the
+    // grid, before a token anchor became an in-bounds cell in the state type).
     const generated = placedState(
       SEED,
       new Map<CombatantId, GridCell>([
         [ACTOR_ID, { column: 0, row: 0 }],
-        [TARGET_ID, { column: 20, row: 0 }],
+        [TARGET_ID, { column: 17, row: 0 }],
       ]),
       [],
       1,
     );
+    expect(generated.bounds).toEqual({ columns: 18, rows: 1 });
     const state: EncounterState = {
       ...generated,
       blockedCells: [{ column: 1, row: 0 }],
@@ -166,7 +170,7 @@ describe('canonical engine query port', () => {
 
     expect(OFFER_ENVIRONMENT.queries.approach(state, {
       actorId: ACTOR_ID,
-      target: { column: 20, row: 0 },
+      target: { column: 17, row: 0 },
       movement: 'dash',
       maximumFeet: 60,
     })).toEqual({ legal: false, code: 'destination_unreachable' });

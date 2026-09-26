@@ -7,6 +7,7 @@ import {
   type LifeState,
 } from '../combat/encounter';
 import { isIncapacitated } from '../combat/conditions';
+import { requireBoardCell } from '../combat/grid';
 import { persistentAreaTouchesSpace } from '../combat/persistent-areas';
 import type { CombatantId } from '../combat/values';
 import { sha256 } from '../crypto/sha256';
@@ -516,7 +517,7 @@ function movedState(
   const moved: EncounterState = {
     ...state,
     tokens: state.tokens.map((token) => token.combatantId === playerId
-      ? { ...token, position: { ...destination } }
+      ? { ...token, position: requireBoardCell(state.bounds, destination, `Combatant ${playerId} speculative anchor`) }
       : token),
   };
   return {

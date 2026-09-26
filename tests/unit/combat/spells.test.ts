@@ -30,6 +30,7 @@ import type {
   SpellLevel,
 } from '../../../src/combat/spells/types';
 import { monsterProfile, placedToken, playerProfile } from './fixtures';
+import { onBoard } from '../../helpers/board-cell';
 
 const EXPECTED_LEVEL_TOTALS: Readonly<Record<SpellLevel, number>> = {
   0: 22,
@@ -1335,7 +1336,7 @@ describe('spell foundations and implemented value pins', () => {
     const outOfRange = {
       ...state,
       tokens: state.tokens.map((entry) =>
-        entry.combatantId === target.id ? { ...entry, position: { column: 3, row: 1 } } : entry),
+        entry.combatantId === target.id ? { ...entry, position: onBoard(state.bounds, { column: 3, row: 1 }) } : entry),
     };
     expect(() => reduceEncounter(outOfRange, castCommand(definition, caster, target), () => 0.5)).toThrow(
       'out of range',
@@ -1355,7 +1356,7 @@ describe('spell foundations and implemented value pins', () => {
     const obstructed = {
       ...state,
       tokens: state.tokens.map((entry) => entry.combatantId === target.id
-        ? { ...entry, position: { column: 4, row: 3 } }
+        ? { ...entry, position: onBoard(state.bounds, { column: 4, row: 3 }) }
         : entry),
       // A full-height wall crosses all four corner lines between the offset spaces.
       blockedCells: [0, 1, 2, 3, 4, 5].map((row) => ({ column: 2, row })),

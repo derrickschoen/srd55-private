@@ -14,6 +14,7 @@
 import { effectiveCreatureSize } from '../../src/combat/combat-rules';
 import type { EncounterState } from '../../src/combat/encounter';
 import type { GridCell } from '../../src/combat/grid';
+import { onBoard } from './board-cell';
 
 export interface NamedState {
   readonly name: string;
@@ -119,7 +120,7 @@ export function movementBoardVariants(base: NamedState, seed: number): NamedStat
     out.push({ name: `${base.name}+squeeze-split`, state: {
       ...huge,
       tokens: huge.tokens.map((token) => token.combatantId === squeezer.combatantId
-        ? { ...token, position: { column: column + 3, row }, placementMode: { kind: 'squeezed', actual: 'Huge', sizedFor: 'Large' } }
+        ? { ...token, position: onBoard(huge.bounds, { column: column + 3, row }), placementMode: { kind: 'squeezed', actual: 'Huge', sizedFor: 'Large' } }
         : token),
       environment: { ...huge.environment, narrowOpeningRegions: [...huge.environment.narrowOpeningRegions,
         { id: 'board3-split-left', sizedFor: 'Large', cells: [split[0], split[2]] },
@@ -174,7 +175,7 @@ export function movementBoardVariants(base: NamedState, seed: number): NamedStat
   let slot = 0;
   crowd = { ...crowd, tokens: crowd.tokens.map((token) => {
     if (!crowdIds.includes(String(token.combatantId)) || crowdTarget === undefined) return token;
-    const position = slot < 4 ? crowdTarget : { column: crowdTarget.column === 0 ? 1 : crowdTarget.column - 1, row: crowdTarget.row };
+    const position = slot < 4 ? crowdTarget : onBoard(crowd.bounds, { column: crowdTarget.column === 0 ? 1 : crowdTarget.column - 1, row: crowdTarget.row });
     slot += 1;
     return { ...token, position };
   }) } as EncounterState;

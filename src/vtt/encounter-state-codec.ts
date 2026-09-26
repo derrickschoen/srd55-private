@@ -1,6 +1,6 @@
 import type { EncounterState } from '../combat/encounter';
 import { isEncounterParticipant } from '../combat/alerting';
-import type { CombatToken, CombatantProfile } from '../combat/combatant';
+import type { CombatTokenSetup, CombatantProfile } from '../combat/combatant';
 import { creatureSizes, type KnownCreatureSize } from '../domain/enums';
 import { BUNDLED_MONSTER_ROSTER } from '../combat/statblocks/roster';
 import {
@@ -9,7 +9,7 @@ import {
   type CombatantId,
 } from '../combat/values';
 import type { EncounterEnvironment } from '../combat/world-objects';
-import { assertTokenAnchorsOnGrid } from '../combat/grid';
+import { decodeTokenAnchors } from '../combat/grid';
 import { assertSupportedGrid } from '../combat/grid-size';
 import {
   creatureSpace,
@@ -281,7 +281,8 @@ function decodeProfiles(values: unknown[]): readonly CombatantProfile[] {
   return profiles as unknown as readonly CombatantProfile[];
 }
 
-function decodeTokens(values: unknown[], profiles: readonly CombatantProfile[]): readonly CombatToken[] {
+/** The loaded tokens with every field but the anchor checked; decodeTokenAnchors checks and mints the anchor. */
+function decodeTokens(values: unknown[], profiles: readonly CombatantProfile[]): readonly CombatTokenSetup[] {
   const tokens = values.map((entry, index) => {
     const token = record(entry, `state.tokens[${String(index)}]`);
     exactOrOptionalKeys(token, ['id', 'combatantId', 'position', 'placementMode'], [], `state.tokens[${String(index)}]`);
@@ -302,7 +303,7 @@ function decodeTokens(values: unknown[], profiles: readonly CombatantProfile[]):
   });
   unique(tokens.map((entry) => String(entry['id'])), 'Token ids');
   unique(tokens.map((entry) => String(entry['combatantId'])), 'Token combatant ids');
-  return tokens as unknown as readonly CombatToken[];
+  return tokens as unknown as readonly CombatTokenSetup[];
 }
 
 function decodeEnvironment(value: unknown): EncounterEnvironment {
@@ -403,7 +404,13 @@ export function decodeEncounterStateV1(value: unknown, mode: EncounterStateDecod
   if (combatants.length === 0) throw new TypeError('Encounter state requires at least one combatant.');
   const profiles = decodeProfiles(combatants);
   const tokens = decodeTokens(array(state['tokens'], 'state.tokens'), profiles);
-  assertTokenAnchorsOnGrid(decodedBounds, tokens, 'state.tokens');
+  // The state gets the minted anchors, not the loaded ones (D895); absent tokens return to the board.
+  const anchors = {
+    tokens: decodeTokenAnchors(decodedBounds, tokens, 'state.tokens'),
+    ...(own(state, 'absentTokens')
+      ? { absentTokens: decodeTokenAnchors(decodedBounds, state['absentTokens'], 'state.absentTokens') }
+      : {}),
+  };
   decodeEnvironment(state['environment']);
   const cells = (key: 'blockedCells' | 'foggedCells') => array(state[key], `state.${key}`).map((entry, index) =>
     decodeCell(entry, `state.${key}[${String(index)}]`));
@@ -449,5 +456,5 @@ export function decodeEncounterStateV1(value: unknown, mode: EncounterStateDecod
       }
     }
   }
-  return state as unknown as EncounterState;
+  return { ...state, ...anchors } as unknown as EncounterState;
 }

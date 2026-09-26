@@ -80,21 +80,25 @@ export function requireBoardCell(bounds: GridBounds, position: unknown, label: s
   return decoded;
 }
 
+/** A loaded token whose anchor passed the decode-time check; every other field is as loaded. */
+export type DecodedAnchorToken = { readonly [field: string]: unknown; readonly position: BoardCell };
+
 /**
- * The decode-time anchor check of a loaded state (D895: a malformed position is
- * unconstructible): every token on the board must stand on a cell of the state's own
- * grid. A footprint may still reach past the grid from an in-bounds anchor, as a Huge
- * creature's does on the last two columns; the movement board answers that step by step.
- * Throws OffGridAnchorError naming the first token that does not, TypeError when `tokens`
- * is not an array.
+ * The decode-time anchor check of loaded tokens (D895: a malformed position is unconstructible):
+ * every token must stand on a cell of its state's own grid. It returns each token with its
+ * position replaced by the minted BoardCell, so a decoder installs the checked value and never
+ * casts the loaded one. A footprint may still reach past the grid from an in-bounds anchor, as a
+ * Huge creature's does on the last two columns; the movement board answers that step by step.
+ * Throws OffGridAnchorError naming the first token that is off the grid or has no anchor,
+ * TypeError when `tokens` is not an array.
  */
-export function assertTokenAnchorsOnGrid(bounds: GridBounds, tokens: unknown, label: string): void {
+export function decodeTokenAnchors(bounds: GridBounds, tokens: unknown, label: string): readonly DecodedAnchorToken[] {
   if (!Array.isArray(tokens)) throw new TypeError(`${label} must be an array.`);
-  tokens.forEach((token: unknown, index) => {
-    const position = typeof token === 'object' && token !== null
-      ? (token as { readonly position?: unknown }).position
-      : undefined;
-    requireBoardCell(bounds, position, `${label}[${String(index)}] anchor`);
+  return tokens.map((token: unknown, index): DecodedAnchorToken => {
+    const loaded = typeof token === 'object' && token !== null ? token as { readonly [field: string]: unknown } : {};
+    // A token that is not an object has no anchor, and requireBoardCell refuses it.
+    const position = requireBoardCell(bounds, loaded['position'], `${label}[${String(index)}] anchor`);
+    return { ...loaded, position };
   });
 }
 

@@ -12,7 +12,7 @@ import {
 } from '../../combat/encounter';
 import { TurnCoordinator, type DurableCoordinatorTransition } from '../../combat/coordinator';
 import type { EncounterCommand } from '../../combat/events';
-import { assertTokenAnchorsOnGrid, gridDistance } from '../../combat/grid';
+import { decodeTokenAnchors, gridDistance } from '../../combat/grid';
 import { assertSupportedGrid } from '../../combat/grid-size';
 import { decodeProjectedCreatureSpace, minimumSpaceDistance } from '../../combat/creature-space';
 import { mulberry32 } from '../../combat/random';
@@ -84,8 +84,14 @@ export function reconstructEncounterState(capture: RolloutInputCapture): Encount
   if (!isRecord(parsed.bounds)) throw new TypeError(`Rollout capture ${capture.logicalCallId} has malformed encounter bounds.`);
   const grid = { columns: parsed.bounds.columns, rows: parsed.bounds.rows };
   assertSupportedGrid(grid);
-  assertTokenAnchorsOnGrid(grid, parsed.tokens, `Rollout capture ${capture.logicalCallId} tokens`);
-  return parsed as unknown as EncounterState;
+  // The reconstructed state holds the minted anchors, not the parsed ones (D895).
+  const anchors = {
+    tokens: decodeTokenAnchors(grid, parsed.tokens, `Rollout capture ${capture.logicalCallId} tokens`),
+    ...(Object.hasOwn(parsed, 'absentTokens')
+      ? { absentTokens: decodeTokenAnchors(grid, parsed.absentTokens, `Rollout capture ${capture.logicalCallId} absentTokens`) }
+      : {}),
+  };
+  return { ...parsed, ...anchors } as unknown as EncounterState;
 }
 
 function visibleSubject(state: DmVisibleEncounterState, id: CombatantId) {

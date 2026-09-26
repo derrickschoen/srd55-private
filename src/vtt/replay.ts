@@ -5,7 +5,7 @@ import {
   type EncounterConfig,
   type EncounterState,
 } from '../combat/encounter';
-import { assertTokenAnchorsOnGrid } from '../combat/grid';
+import { decodeTokenAnchors, type DecodedAnchorToken, type GridBounds } from '../combat/grid';
 import { assertSupportedGrid } from '../combat/grid-size';
 import { restoreMulberry32, type SerializableRngState } from '../combat/random';
 import {
@@ -495,6 +495,41 @@ export function validateReplayMigrationRegistry(): void {
   }
 }
 
+/**
+ * A replay revision's token anchors (board and absent) checked against its own grid, as minted
+ * BoardCells: OffGridAnchorError names the first one that is not a cell of it.
+ */
+function revisionAnchors(
+  bounds: GridBounds,
+  state: { readonly tokens?: unknown; readonly absentTokens?: unknown },
+  index: number,
+): { readonly tokens: readonly DecodedAnchorToken[]; readonly absentTokens?: readonly DecodedAnchorToken[] } {
+  const label = `Replay revision ${String(index + 1)}`;
+  return {
+    tokens: decodeTokenAnchors(bounds, state.tokens, `${label} tokens`),
+    ...(Object.hasOwn(state, 'absentTokens')
+      ? { absentTokens: decodeTokenAnchors(bounds, state.absentTokens, `${label} absentTokens`) }
+      : {}),
+  };
+}
+
+/**
+ * The decoded bundle holds minted anchors, not the parsed ones (D895): every revision whose state
+ * has a grid gets its anchors checked and installed here. A revision too malformed to have a grid
+ * is left as it is, for replayBundle to refuse in its own order.
+ */
+function withMintedAnchors(revisions: readonly unknown[]): readonly unknown[] {
+  return revisions.map((entry, index) => {
+    if (!record(entry) || !record(entry.revision) || !record(entry.revision.encounterState)) return entry;
+    const state = entry.revision.encounterState;
+    if (!record(state.bounds)) return entry;
+    const bounds = { columns: state.bounds.columns, rows: state.bounds.rows };
+    assertSupportedGrid(bounds);
+    const encounterState = { ...state, ...revisionAnchors(bounds, state, index) };
+    return { ...entry, revision: { ...entry.revision, encounterState } };
+  });
+}
+
 function migrateReplayBundle(value: unknown): ReplayBundle {
   validateReplayMigrationRegistry();
   if (!record(value) || !Number.isSafeInteger(value.schemaVersion)) {
@@ -526,7 +561,7 @@ function migrateReplayBundle(value: unknown): ReplayBundle {
   ) {
     throw new TypeError('Replay bundle is malformed.');
   }
-  return migrated as unknown as ReplayBundle;
+  return { ...migrated, revisions: withMintedAnchors(migrated.revisions) } as unknown as ReplayBundle;
 }
 
 export function exportReplayBundle(bundle: ReplayBundle): string {
@@ -787,7 +822,8 @@ export function replayBundle(
   for (const [index, replayRecord] of bundle.revisions.entries()) {
     const revision = replayRecord.revision;
     assertSupportedGrid(revision.encounterState.bounds);
-    assertTokenAnchorsOnGrid(revision.encounterState.bounds, revision.encounterState.tokens, `Replay revision ${String(index + 1)} tokens`);
+    // A typed bundle can still be built or spread together in memory, so every revision is checked here too.
+    revisionAnchors(revision.encounterState.bounds, revision.encounterState, index);
     assertEqual(
       'bundle', index, 'encounterConfig', bundle.encounterConfig, revision.encounterState.config,
     );

@@ -15,6 +15,7 @@ import { SUGGESTED_PLAN_MAX_BYTES } from '../../../src/vtt/mcp/engine-server';
 import { SNIPPET_REGISTRY } from '../../../src/vtt/snippet-registry-runtime';
 import type { EngineOfferableOption, EngineTurnProposal } from '../../../src/vtt/turn-proposal';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { onBoard } from '../../helpers/board-cell';
 
 const CLIENT = Object.freeze({ name: 'snippet-test', version: '1.0.0' });
 const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
@@ -135,7 +136,7 @@ async function controlRegistryFixture() {
   const state = freshMonsterPlanningState({
     ...loaded,
     tokens: loaded.tokens.map((token) => token.combatantId === actorId
-      ? { ...token, position: { column: 3, row: 6 } }
+      ? { ...token, position: onBoard(loaded.bounds, { column: 3, row: 6 }) }
       : token),
   });
   const runtime = createBoundEngineMcpRuntime(state);

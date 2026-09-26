@@ -43,6 +43,7 @@ import {
   importSavedSession,
 } from '../../../src/vtt/session-persistence';
 import { monsterProfile, placedToken } from '../combat/fixtures';
+import { onBoard } from '../../helpers/board-cell';
 
 function jsonObject(value: unknown, path: string): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -5393,7 +5394,7 @@ describe('external party-pack batch 2b mutation boundaries', () => {
     const legal = loadedPartyTurnLegalActions(loaded.party.members);
     const withDuplicateActorToken = {
       ...state,
-      tokens: [...state.tokens, combatToken(actor.profile, { column: 1, row: 0 })],
+      tokens: [...state.tokens, { ...combatToken(actor.profile, { column: 1, row: 0 }), position: onBoard(state.bounds, { column: 1, row: 0 }) }],
     };
     expect(legal(withDuplicateActorToken, actor.profile.id).actions.flatMap((action) =>
       action.type === 'move' ? action.path : [])).toContainEqual({ column: 1, row: 0 });
@@ -5882,7 +5883,7 @@ describe('external party-pack batch 2b mutation boundaries', () => {
       ...state,
       tokens: state.tokens.map((token, index) => index === 0
         ? token
-        : { ...token, position: { column: index, row: 0 } }),
+        : { ...token, position: onBoard(state.bounds, { column: index, row: 0 }) }),
     };
     expect(slow(clustered)).toHaveLength(1);
     expect(loadedPartyTurnLegalActions(loaded.party.members)(clustered, actor.profile.id).actions

@@ -3,6 +3,7 @@ import { canonicalJson } from '../../../src/commands/canonical-json';
 import { combatantSpace, createEncounter, type EncounterState } from '../../../src/combat/encounter';
 import { EncounterRuleError } from '../../../src/combat/encounter-rule-error';
 import { OffGridAnchorError, type GridCell } from '../../../src/combat/grid';
+import type { CombatToken } from '../../../src/combat/combatant';
 import { mulberry32 } from '../../../src/combat/random';
 import { combatantId, encounterBranchId, encounterSessionId, feet, type CombatantId } from '../../../src/combat/values';
 import { sha256 } from '../../../src/crypto/sha256';
@@ -12,7 +13,9 @@ import type { RolloutInputCapture } from '../../../src/vtt/experiment-telemetry'
 import { reconstructEncounterState } from '../../../src/vtt/regret';
 import { regretTurnLegalActions } from '../../../src/vtt/regret/legal-actions';
 import { REFERENCE_FIGHTER_ID, referenceEncounterSetup, referenceTurnLegalActions } from '../../../src/vtt/reference-encounter';
-import { replayBundle, type ReplayBundle } from '../../../src/vtt/replay';
+import { decodeReplayBundle, exportReplayBundle, replayBundle, type ReplayBundle } from '../../../src/vtt/replay';
+import { EngineRoundSession } from '../../../src/vtt/engine-round-session';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { recordScriptedReferenceSkirmish } from '../../../src/vtt/scripted-skirmish';
 import {
   EncounterSessionJournal,
@@ -21,12 +24,19 @@ import {
   MemoryMirrorSink,
 } from '../../../src/vtt/session-persistence';
 import { declareTestInputs } from '../../helpers/test-inputs';
+import { onBoard } from '../../helpers/board-cell';
 
 // PERF-02 board3 fix 1 (codex r1 P1; owner D895: a malformed position is unconstructible through an
 // in-bounds type checked at decode). Every decoder that turns stored or transmitted bytes into an
 // EncounterState checks each board token's anchor with the boardCell bounds check and refuses an
 // off-grid one with OffGridAnchorError, instead of loading an actor the movement callers would
 // silently strand. An in-bounds anchor whose footprint reaches past the grid stays legal.
+//
+// Fix 2 (codex r2 P2): a token anchor is a BoardCell in the EncounterState type, board and absent
+// tokens alike, and the decoders install the minted cells rather than casting the loaded ones. So
+// this file builds an off-grid state only three ways: as JSON (what a decoder meets), by an explicit
+// cast (a corrupted save the exporter itself must checksum), or by spreading a state onto a smaller
+// grid (the one hole the brand leaves, since it does not name its grid; the callers re-check).
 
 const BRUTAL = 'tests/fixtures/arena-basis-brutal/seed-6203001.json';
 const HUGE_OVERHANG = 'tests/fixtures/arena-basis-brutal/seed-6203009.json';
@@ -39,9 +49,37 @@ function fixtureState(path: typeof BRUTAL | typeof HUGE_OVERHANG | typeof CHALLE
   return (JSON.parse(inputs.fixtures.readText(path)) as { readonly encounter: { readonly state: JsonState } }).encounter.state;
 }
 
-/** `state` with token `index` moved to `position`; nothing else changes. */
-function moved<State extends { readonly tokens: readonly object[] }>(state: State, index: number, position: GridCell): State {
+/** JSON `state` with token `index` moved to `position`; nothing else changes. Not for an EncounterState. */
+function moved<State extends Readonly<Record<string, unknown>> & { readonly tokens: readonly object[] }>(
+  state: State, index: number, position: GridCell,
+): State {
   return { ...state, tokens: state.tokens.map((token, at) => at === index ? { ...token, position } : token) };
+}
+
+/** A state whose token `index` stands on `position` of its own grid: the anchor is minted, so no cast. */
+function anchoredAt(state: EncounterState, index: number, position: GridCell): EncounterState {
+  return { ...state, tokens: state.tokens.map((token, at) => at === index ? { ...token, position: onBoard(state.bounds, position) } : token) };
+}
+
+/**
+ * A corrupted state: token `index` forced to an off-grid `position`. The EncounterState type refuses
+ * it, so only this cast can build it; the exporter checksums it like a real save.
+ */
+function forcedOffGrid(state: EncounterState, index: number, position: GridCell, key: 'tokens' | 'absentTokens' = 'tokens'): EncounterState {
+  const tokens = (key === 'tokens' ? state.tokens : state.absentTokens ?? [])
+    .map((token, at) => at === index ? { ...token, position: position as CombatToken['position'] } : token);
+  return { ...state, [key]: tokens };
+}
+
+/** Canonical JSON of `state`, as a decoder receives it. */
+function json(state: unknown): JsonState {
+  return JSON.parse(canonicalJson(state)) as JsonState;
+}
+
+/** Every token anchor of `tokens` is a fresh frozen cell, not one of `loaded`'s objects. */
+function mintedAnchors(tokens: readonly { readonly position: object }[], loaded: readonly unknown[]): boolean {
+  const loadedPositions = new Set(loaded.map((token) => (token as { readonly position?: unknown }).position));
+  return tokens.length === loaded.length && tokens.every((token) => Object.isFrozen(token.position) && !loadedPositions.has(token.position));
 }
 
 /** The value `action` returns, asserting that it does not throw (a refusal here is an assertion failure). */
@@ -70,7 +108,7 @@ function offGrid(error: unknown, label: string, position: GridCell, columns: num
 function referenceWithFighter(position: GridCell): EncounterState {
   const created = createEncounter(referenceEncounterSetup());
   const index = created.tokens.findIndex((token) => token.combatantId === REFERENCE_FIGHTER_ID);
-  return moved({
+  return anchoredAt({
     ...created,
     combatants: created.combatants.map((combatant) => combatant.profile.id === REFERENCE_FIGHTER_ID
       ? { ...combatant, turn: { ...combatant.turn, movement: { ...combatant.turn.movement, remaining: feet(30) } } }
@@ -134,18 +172,18 @@ describe('loaded token anchors are decoded against the grid', () => {
       mirror: new MemoryMirrorSink(),
     }).export();
     const created = createEncounter(referenceEncounterSetup());
-    const edge = moved(created, 0, { column: 9, row: 6 });
+    const edge = anchoredAt(created, 0, { column: 9, row: 6 });
     const imported = new MemoryBrowserSessionStore();
     const sessionId = accepted(() => importSavedSession(imported, exported(edge)));
     expect(imported.revisions(sessionId).at(-1)?.encounterState.tokens[0]?.position).toEqual({ column: 9, row: 6 });
     // Only a decoder can meet this state: createEncounter refuses it too (last test).
-    const error = thrown(() => importSavedSession(new MemoryBrowserSessionStore(), exported(moved(created, 0, { column: 10, row: 6 }))));
+    const error = thrown(() => importSavedSession(new MemoryBrowserSessionStore(), exported(forcedOffGrid(created, 0, { column: 10, row: 6 }))));
     expect(offGrid(error, 'Persisted encounter tokens[0] anchor', { column: 10, row: 6 }, 10, 7), String(error)).toBe(true);
   });
 
   it('a rollout capture and a replay bundle with an off-grid anchor are refused', () => {
-    const created = createEncounter(referenceEncounterSetup());
-    const capture = (state: EncounterState): RolloutInputCapture => {
+    const created = json(createEncounter(referenceEncounterSetup()));
+    const capture = (state: JsonState): RolloutInputCapture => {
       const serializedEncounterState = canonicalJson(state);
       return {
         logicalCallId: 'loaded-anchor-bounds:call:0',
@@ -190,14 +228,136 @@ describe('loaded token anchors are decoded against the grid', () => {
     }));
     expect(offGrid(created, 'Token token:fighter anchor', { column: 10, row: 3 }, 10, 7), String(created)).toBe(true);
 
-    // In memory, a state can still be spread off the grid; a caller must not answer it with "no moves".
+    // In memory, a state can still be spread onto a smaller grid, leaving an anchor off it (the brand
+    // does not name its grid); a caller must not answer that state with "no moves".
     const inside = referenceWithFighter({ column: 9, row: 3 });
-    const outside = referenceWithFighter({ column: 10, row: 3 });
+    const outside: EncounterState = { ...inside, bounds: { columns: 9, rows: 7 } };
     const fighter: CombatantId = REFERENCE_FIGHTER_ID;
     expect(accepted(() => referenceTurnLegalActions(inside, fighter)).actions.filter((action) => action.type === 'move')).toHaveLength(5);
     const reference = thrown(() => referenceTurnLegalActions(outside, fighter));
-    expect(offGrid(reference, 'Combatant combatant:fighter anchor', { column: 10, row: 3 }, 10, 7), String(reference)).toBe(true);
+    expect(offGrid(reference, 'Combatant combatant:fighter anchor', { column: 9, row: 3 }, 9, 7), String(reference)).toBe(true);
     const regret = thrown(() => regretTurnLegalActions(outside, fighter));
-    expect(offGrid(regret, 'Combatant combatant:fighter anchor', { column: 10, row: 3 }, 10, 7), String(regret)).toBe(true);
+    expect(offGrid(regret, 'Combatant combatant:fighter anchor', { column: 9, row: 3 }, 9, 7), String(regret)).toBe(true);
+  });
+});
+
+describe('a token anchor is an in-bounds cell in the EncounterState type', () => {
+  it('createEncounter mints every anchor: a fresh frozen cell equal to the authored one, and a GridCell does not compile', () => {
+    const setup = referenceEncounterSetup();
+    const created = createEncounter(setup);
+    expect(created.tokens.map((token) => token.position)).toEqual(setup.tokens.map((token) => token.position));
+    expect(mintedAnchors(created.tokens, setup.tokens)).toBe(true);
+    const unchecked = (): EncounterState => ({
+      ...created,
+      // @ts-expect-error a GridCell is not a token anchor: only createEncounter, a reducer's checked mint or a decoder makes one.
+      tokens: created.tokens.map((token) => ({ ...token, position: { column: 10, row: 3 } })),
+    });
+    const uncheckedAbsent = (): EncounterState => ({
+      ...created,
+      // @ts-expect-error the same for an absent token, whose anchor is where it returns.
+      absentTokens: [{ ...created.tokens[0], position: { column: -1, row: 0 } }],
+    });
+    expect([typeof unchecked, typeof uncheckedAbsent]).toEqual(['function', 'function']);
+  });
+
+  it('every decoder installs the minted anchors, never the loaded objects, board and absent tokens alike', () => {
+    const created = createEncounter(referenceEncounterSetup());
+    const withAbsent: EncounterState = { ...created, absentTokens: [anchoredAt(created, 3, { column: 9, row: 6 }).tokens[3] as CombatToken] };
+    const loaded = json(withAbsent);
+    const absentLoaded = loaded['absentTokens'] as readonly JsonState[];
+
+    const decoded = accepted(() => decodeEncounterStateV1(loaded, 'session'));
+    expect(json(decoded)).toEqual(loaded);
+    expect(mintedAnchors(decoded.tokens, loaded.tokens)).toBe(true);
+    expect(mintedAnchors(decoded.absentTokens ?? [], absentLoaded)).toBe(true);
+
+    const store = new MemoryBrowserSessionStore();
+    const sessionId = accepted(() => importSavedSession(store, EncounterSessionJournal.create({
+      sessionId: encounterSessionId('session:loaded-anchor-mint'),
+      branchId: encounterBranchId('branch:main'),
+      encounterState: withAbsent,
+      coordinatorState: { requestSequence: 1, pendingRequest: null, pendingCommand: null, continuation: { kind: 'idle' }, pause: null },
+      controllers: [],
+      rng: mulberry32(6_203_002),
+      store: new MemoryBrowserSessionStore(),
+      mirror: new MemoryMirrorSink(),
+    }).export()));
+    const imported = store.revisions(sessionId).at(-1)?.encounterState;
+    expect(imported === undefined ? null : json(imported)).toEqual(loaded);
+    expect(mintedAnchors(imported?.tokens ?? [], loaded.tokens)).toBe(true);
+    expect(mintedAnchors(imported?.absentTokens ?? [], absentLoaded)).toBe(true);
+
+    const serializedEncounterState = canonicalJson(loaded);
+    const rebuilt = accepted(() => reconstructEncounterState({
+      logicalCallId: 'loaded-anchor-mint:call:0', stateHash: sha256(serializedEncounterState),
+      legalActionSetHash: sha256(canonicalJson(['loaded-anchor-mint'])), selectedAction: [], input: {},
+      serializedEncounterState, candidateTurnK: 1, candidateTurns: [],
+    }));
+    expect(json(rebuilt)).toEqual(loaded);
+    expect(mintedAnchors(rebuilt.tokens, loaded.tokens)).toBe(true);
+    expect(mintedAnchors(rebuilt.absentTokens ?? [], absentLoaded)).toBe(true);
+
+    const bytes = exportReplayBundle(recordScriptedReferenceSkirmish().bundle);
+    const parsed = JSON.parse(bytes) as { readonly revisions: readonly { readonly revision: { readonly encounterState: JsonState } }[] };
+    const replayed = accepted(() => decodeReplayBundle(bytes));
+    expect(replayed.revisions).toHaveLength(parsed.revisions.length);
+    expect(replayed.revisions.every((record, index) =>
+      mintedAnchors(record.revision.encounterState.tokens, parsed.revisions[index]?.revision.encounterState.tokens ?? []))).toBe(true);
+  });
+
+  it('every decoder refuses an absent token whose return anchor is off the grid', () => {
+    const created = createEncounter(referenceEncounterSetup());
+    const absentAt = (position: GridCell): JsonState => ({ ...json(created), absentTokens: [{ ...json(created).tokens[3], position }] });
+    const offBoard = { column: 10, row: 6 };
+    expect(accepted(() => decodeEncounterStateV1(absentAt({ column: 9, row: 6 }), 'session')).absentTokens?.[0]?.position)
+      .toEqual({ column: 9, row: 6 });
+    const codec = thrown(() => decodeEncounterStateV1(absentAt(offBoard), 'session'));
+    expect(offGrid(codec, 'state.absentTokens[0] anchor', offBoard, 10, 7), String(codec)).toBe(true);
+
+    const withAbsent: EncounterState = { ...created, absentTokens: [created.tokens[3] as CombatToken] };
+    const session = thrown(() => importSavedSession(new MemoryBrowserSessionStore(), EncounterSessionJournal.create({
+      sessionId: encounterSessionId('session:loaded-anchor-absent'),
+      branchId: encounterBranchId('branch:main'),
+      encounterState: forcedOffGrid(withAbsent, 0, offBoard, 'absentTokens'),
+      coordinatorState: { requestSequence: 1, pendingRequest: null, pendingCommand: null, continuation: { kind: 'idle' }, pause: null },
+      controllers: [],
+      rng: mulberry32(6_203_003),
+      store: new MemoryBrowserSessionStore(),
+      mirror: new MemoryMirrorSink(),
+    }).export()));
+    expect(offGrid(session, 'Persisted encounter absentTokens[0] anchor', offBoard, 10, 7), String(session)).toBe(true);
+
+    const serializedEncounterState = canonicalJson(absentAt(offBoard));
+    const rollout = thrown(() => reconstructEncounterState({
+      logicalCallId: 'loaded-anchor-absent:call:0', stateHash: sha256(serializedEncounterState),
+      legalActionSetHash: sha256(canonicalJson(['loaded-anchor-absent'])), selectedAction: [], input: {},
+      serializedEncounterState, candidateTurnK: 1, candidateTurns: [],
+    }));
+    expect(offGrid(rollout, 'Rollout capture loaded-anchor-absent:call:0 absentTokens[0] anchor', offBoard, 10, 7), String(rollout))
+      .toBe(true);
+
+    const { bundle } = recordScriptedReferenceSkirmish();
+    const candidate = structuredClone(bundle) as unknown as {
+      revisions: Array<{ revision: { encounterState: JsonState & { bounds: { columns: number; rows: number } } } }>;
+    };
+    const first = candidate.revisions[0]!.revision.encounterState;
+    const replayOffBoard = { column: first.bounds.columns, row: 0 };
+    candidate.revisions[0]!.revision.encounterState = { ...first, absentTokens: [{ ...first.tokens[0], position: replayOffBoard }] };
+    const replay = thrown(() => replayBundle(candidate as unknown as ReplayBundle));
+    expect(offGrid(replay, 'Replay revision 1 absentTokens[0] anchor', replayOffBoard, first.bounds.columns, first.bounds.rows), String(replay))
+      .toBe(true);
+  });
+
+  it('the engine round session re-mints anchors after its canonical JSON round trip, and refuses a state spread off its grid', () => {
+    const created = createEncounter(referenceEncounterSetup());
+    // The Training Brute stands at (3, 3); on a 3-column grid its anchor is not a cell.
+    const spread: EncounterState = { ...created, bounds: { columns: 3, rows: 7 } };
+    const session = new EngineRoundSession(spread, mulberry32(6_203_004), { kind: 'unattended', askDefault: 'decline' },
+      buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' }));
+    const error = thrown(() => session.snapshot({
+      runId: encounterSessionId('encounter:loaded-anchor-remint'), branchId: encounterBranchId('branch:loaded-anchor-remint'),
+      revision: spread.revision, requestId: 'request:loaded-anchor-remint', phase: 'initial', room: 1, historyKind: 'room_ready',
+    }));
+    expect(offGrid(error, 'Canonical engine state tokens[3] anchor', { column: 3, row: 3 }, 3, 7), String(error)).toBe(true);
   });
 });

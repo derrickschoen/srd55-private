@@ -16,7 +16,7 @@ import {
   type CreatureSpace,
 } from '../combat/creature-space';
 import type { AppliedCondition, ExhaustionLevel } from '../combat/conditions';
-import { adjacentCells, gridDistance, type GridCell } from '../combat/grid';
+import { adjacentCells, gridDistance, requireBoardCell, type GridCell } from '../combat/grid';
 import { findPath, findPathToAny, findPathToBest, findReachableCells } from '../combat/movement';
 import { encounterMovementWorld } from '../combat/encounter-movement-world';
 import {
@@ -1441,7 +1441,7 @@ function stateWithActorAt(
   return {
     ...state,
     tokens: state.tokens.map((token) => token.combatantId === actorId
-      ? { ...token, position: { ...position } }
+      ? { ...token, position: requireBoardCell(state.bounds, position, `Combatant ${actorId} hypothetical anchor`) }
       : token),
   };
 }
@@ -1832,7 +1832,7 @@ export function compareTacticalAllocations(
       const attackState = resolution.valid ? {
         ...state,
         tokens: state.tokens.map((token) => token.combatantId === choice.actorId
-          ? { ...token, position: resolution.mechanics.finalPosition }
+          ? { ...token, position: requireBoardCell(state.bounds, resolution.mechanics.finalPosition, `Combatant ${choice.actorId} final anchor`) }
           : token),
       } : state;
       for (const actionId of actionIds) {

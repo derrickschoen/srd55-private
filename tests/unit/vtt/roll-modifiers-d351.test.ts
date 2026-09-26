@@ -8,6 +8,7 @@ import type { ModifierDuration, RollDefenseModifierOperation, SpellOperation } f
 import { damageType, dieSides } from '../../../src/combat/values';
 import { loadContentPack, type LoadedContentPack } from '../../../src/content/content-pack';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
+import { onBoard } from '../../helpers/board-cell';
 
 const { readText: readFileSync } = declareTestInputs({
   fixtures: ['tests/fixtures/content-pack-v1-homebrew.json'],
@@ -358,7 +359,7 @@ describe('D351 imported roll/defense modifier lever', () => {
     const ally = playerProfile('d351-circle-ally', { initiativeBonus: 10, hitPoints: 30 });
     let state = started(pack, [caster, enemy, ally]);
     state = { ...state, tokens: state.tokens.map((entry) => entry.combatantId === ally.id
-      ? { ...entry, position: { column: 6, row: 0 } }
+      ? { ...entry, position: onBoard(state.bounds, { column: 6, row: 0 }) }
       : entry) };
     state = cast(state, caster, caster, 'circle-shape');
     state = endTurn(state, caster);

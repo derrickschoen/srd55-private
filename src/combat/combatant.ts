@@ -1,7 +1,7 @@
 import { abilities, creatureSizes, skills, type Ability, type KnownCreatureSize, type Skill } from '../domain/enums';
 import type { CharacterSheet } from '../queries/character-sheet-builder';
 import type { CombatFeatureEffect } from './effects';
-import type { GridCell } from './grid';
+import type { BoardCell, GridCell } from './grid';
 import {
   normalPlacementFor,
   serializedPlacementMode,
@@ -119,10 +119,27 @@ export type CombatantProfile =
       readonly rules: CombatRulesProfile;
     };
 
-export interface CombatToken {
+/**
+ * A token as authoring input (EncounterSetup, a summon's chosen destination): its anchor is an
+ * unchecked GridCell. createEncounter and the reducers check it against the grid before any of it
+ * becomes a CombatToken.
+ */
+export interface CombatTokenSetup {
   readonly id: TokenId;
   readonly combatantId: CombatantId;
   readonly position: GridCell;
+  readonly placementMode: SerializedPlacementMode;
+}
+
+/**
+ * A token of an EncounterState (on the board or absent). Its anchor is a BoardCell: a cell of the
+ * state's own grid, minted only by createEncounter, the reducers' checked mints and the state
+ * decoders (grid.ts decodeTokenAnchors), so an off-grid anchor does not compile into a state.
+ */
+export interface CombatToken {
+  readonly id: TokenId;
+  readonly combatantId: CombatantId;
+  readonly position: BoardCell;
   readonly placementMode: SerializedPlacementMode;
 }
 
@@ -352,7 +369,7 @@ export function monsterCombatantProfile(
 export function combatToken(
   profile: CombatantProfile,
   position: GridCell,
-): CombatToken {
+): CombatTokenSetup {
   if (!Number.isSafeInteger(position.column) || !Number.isSafeInteger(position.row)) {
     throw new RangeError('Combat token coordinates must be safe integers.');
   }

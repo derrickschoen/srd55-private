@@ -4,6 +4,7 @@ import {
   planningSavingThrowFacts,
 } from '../../combat/combat-rules';
 import type { EncounterState } from '../../combat/encounter';
+import { requireBoardCell } from '../../combat/grid';
 import { combatantSpace } from '../../combat/combat-rules';
 import { minimumSpaceDistance } from '../../combat/creature-space';
 import {
@@ -918,7 +919,7 @@ function movedState(
   return {
     ...state,
     tokens: state.tokens.map((token) => token.combatantId === mechanics.actorId
-      ? { ...token, position: { ...mechanics.finalPosition } }
+      ? { ...token, position: requireBoardCell(state.bounds, mechanics.finalPosition, `Combatant ${mechanics.actorId} final anchor`) }
       : token),
   };
 }

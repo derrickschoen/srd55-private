@@ -3,6 +3,7 @@ import { createEncounter, type EncounterState } from '../../../src/combat/encoun
 import type { GridCell } from '../../../src/combat/grid';
 import { feet } from '../../../src/combat/values';
 import { REFERENCE_FIGHTER_ID, referenceEncounterSetup, referenceTurnLegalActions } from '../../../src/vtt/reference-encounter';
+import { onBoard } from '../../helpers/board-cell';
 
 // PERF-02 board3. Movement questions take a BoardCell (src/combat/grid.ts), so a caller decodes each
 // step before it asks. referenceTurnLegalActions, the DM host's default, used to ask the
@@ -20,7 +21,7 @@ describe('reference movement actions on the grid edge', () => {
       combatants: created.combatants.map((combatant) => combatant.profile.id === REFERENCE_FIGHTER_ID
         ? { ...combatant, turn: { ...combatant.turn, movement: { ...combatant.turn.movement, remaining: feet(30) } } }
         : combatant),
-      tokens: created.tokens.map((token) => token.combatantId === REFERENCE_FIGHTER_ID ? { ...token, position: { column, row } } : token),
+      tokens: created.tokens.map((token) => token.combatantId === REFERENCE_FIGHTER_ID ? { ...token, position: onBoard(created.bounds, { column, row }) } : token),
     });
     const steps = (state: EncounterState): readonly GridCell[] => referenceTurnLegalActions(state, REFERENCE_FIGHTER_ID).actions
       .flatMap((action) => action.type === 'move' ? action.path : []);

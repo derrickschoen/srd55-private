@@ -46,6 +46,7 @@ import {
   createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
+import { onBoard } from '../../helpers/board-cell';
 
 class RegistryTransport implements RpcTransport {
   readonly #messages = new Set<(event: MessageEvent<RpcResponse>) => void>();
@@ -252,7 +253,7 @@ function fullPathMeleeLegalActions(
   }
   if (acting.turn.movement.remaining >= 5 && gridDistance(origin, destination) > 5) {
     const path: Array<{ readonly column: number; readonly row: number }> = [];
-    let cursor = origin;
+    let cursor: { readonly column: number; readonly row: number } = origin;
     while (gridDistance(cursor, destination) > 5) {
       cursor = {
         column: cursor.column + Math.sign(destination.column - cursor.column),
@@ -734,7 +735,7 @@ describe('player-character AlgorithmController policy', () => {
           }
         : candidate),
       tokens: composed.state.tokens.map((token) => token.combatantId === caster.profile.id
-        ? { ...token, position: { column: 4, row: 6 } }
+        ? { ...token, position: onBoard(composed.state.bounds, { column: 4, row: 6 }) }
         : token),
       eventLog: [...composed.state.eventLog, {
         sequence: composed.state.nextEventSequence,

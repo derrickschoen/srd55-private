@@ -9,6 +9,7 @@ import { generateRoom } from '../../../src/vtt/room-generator';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
 import { engineActorOptions } from '../../../src/vtt/turn-option-registry';
 import type { EngineTurnProposal } from '../../../src/vtt/turn-proposal';
+import { onBoard } from '../../helpers/board-cell';
 
 type Assert<Condition extends true> = Condition;
 type HumanOnlyIdIsRejectedByProposal = Assert<
@@ -32,10 +33,10 @@ function adjacentState(): {
       ? { ...combatant, turn: { ...combatant.turn, reactionAvailable: true } }
       : combatant),
     tokens: generated.tokens.map((token) => token.combatantId === actor.profile.id
-      ? { ...token, position: { column: 0, row: 0 } }
+      ? { ...token, position: onBoard(generated.bounds, { column: 0, row: 0 }) }
       : token.combatantId === hostile.profile.id
-        ? { ...token, position: { column: 1, row: 0 } }
-        : { ...token, position: { column: generated.bounds.columns - 1, row: generated.bounds.rows - 1 } }),
+        ? { ...token, position: onBoard(generated.bounds, { column: 1, row: 0 }) }
+        : { ...token, position: onBoard(generated.bounds, { column: generated.bounds.columns - 1, row: generated.bounds.rows - 1 }) }),
   });
   return { state, actorId: actor.profile.id };
 }
@@ -75,7 +76,7 @@ describe('engine option modeling partition', () => {
       ...fixture.state,
       tokens: fixture.state.tokens.map((token) => token.combatantId === fixture.actorId
         ? token
-        : { ...token, position: { column: fixture.state.bounds.columns - 1, row: fixture.state.bounds.rows - 1 } }),
+        : { ...token, position: onBoard(fixture.state.bounds, { column: fixture.state.bounds.columns - 1, row: fixture.state.bounds.rows - 1 }) }),
     };
     const disposition = classifyOptionModeling(state, {
       kind: 'executable',

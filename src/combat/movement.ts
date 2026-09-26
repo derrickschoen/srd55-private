@@ -63,8 +63,9 @@ export interface MovementRequest<TActorId extends string> {
 }
 
 export interface MovementStep<TActorId extends string> {
-  readonly from: GridCell;
-  readonly to: GridCell;
+  /** Both ends are cells of the world's grid, minted by the plan's own bounds check. */
+  readonly from: BoardCell;
+  readonly to: BoardCell;
   readonly cost: Feet;
   /** Reaction windows that must resolve before this step changes position. */
   readonly beforeLeaving: readonly {
@@ -104,7 +105,7 @@ export interface PathToAnyRequest<TActorId extends string> {
   readonly actorId: TActorId;
   readonly start: GridCell;
   readonly maximumCost: Feet;
-  readonly isGoal: (cell: GridCell) => boolean;
+  readonly isGoal: (cell: BoardCell) => boolean;
 }
 
 export interface PathToBestRequest<TActorId extends string> {
@@ -112,7 +113,7 @@ export interface PathToBestRequest<TActorId extends string> {
   readonly start: GridCell;
   readonly maximumCost: Feet;
   /** Null excludes an endpoint; otherwise lower lexicographic values are better. */
-  readonly rank: (cell: GridCell) => readonly number[] | null;
+  readonly rank: (cell: BoardCell) => readonly number[] | null;
 }
 
 export type PathResult =

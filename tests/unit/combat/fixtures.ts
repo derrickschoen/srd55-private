@@ -5,7 +5,7 @@ import {
   monsterCombatantProfile,
   type CharacterCombatSheet,
   type CombatantProfile,
-  type CombatToken,
+  type CombatTokenSetup,
   type SpellSlotCapacity,
 } from '../../../src/combat/combatant';
 import { monsterStatblock } from '../../../src/combat/statblock';
@@ -149,6 +149,6 @@ export function placedToken(
   profile: CombatantProfile,
   column: number,
   row = 0,
-): CombatToken {
+): CombatTokenSetup {
   return combatToken(profile, { column, row });
 }
