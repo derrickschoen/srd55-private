@@ -150,7 +150,12 @@ function concentrationCondition(source: CombatantId, target: CombatantId): Encou
   return { type: 'apply_effect', actor: source, effect, cost: 'none' };
 }
 
-function adjacentOpenCell(state: EncounterState, actor: CombatantId): GridCell | null {
+/**
+ * The scripted mover's first open orthogonal neighbour (right, down, left, up) it may end in, or
+ * null. Exported for its direct witness: an actor whose anchor is not a cell of the state's grid
+ * is refused with OffGridAnchorError, never answered with "no cell".
+ */
+export function adjacentOpenCell(state: EncounterState, actor: CombatantId): GridCell | null {
   const token = state.tokens.find((candidate) => candidate.combatantId === actor);
   if (token === undefined) return null;
   const origin = requireBoardCell(state.bounds, token.position, `Combatant ${actor} anchor`);

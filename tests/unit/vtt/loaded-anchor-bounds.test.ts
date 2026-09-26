@@ -12,11 +12,23 @@ import { decodeEncounterStateV1, type EncounterStateDecodeMode } from '../../../
 import type { RolloutInputCapture } from '../../../src/vtt/experiment-telemetry';
 import { reconstructEncounterState } from '../../../src/vtt/regret';
 import { regretTurnLegalActions } from '../../../src/vtt/regret/legal-actions';
-import { REFERENCE_FIGHTER_ID, referenceEncounterSetup, referenceTurnLegalActions } from '../../../src/vtt/reference-encounter';
+import {
+  REFERENCE_FIGHTER_ID,
+  REFERENCE_MONSTER_ID,
+  referenceEncounterSetup,
+  referenceTurnLegalActions,
+} from '../../../src/vtt/reference-encounter';
 import { decodeReplayBundle, exportReplayBundle, replayBundle, type ReplayBundle } from '../../../src/vtt/replay';
 import { EngineRoundSession } from '../../../src/vtt/engine-round-session';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
-import { recordScriptedReferenceSkirmish } from '../../../src/vtt/scripted-skirmish';
+import { adjacentOpenCell, recordScriptedReferenceSkirmish } from '../../../src/vtt/scripted-skirmish';
+import {
+  loadExternalPartyPack,
+  loadedPartyTurnLegalActions,
+  type ExternalPartyPackV2,
+  type LoadedPartyMember,
+} from '../../../src/vtt/party-pack';
+import { composeStoredCharacterEncounter } from '../../../src/vtt/stored-character-encounter';
 import {
   EncounterSessionJournal,
   importSavedSession,
@@ -359,5 +371,96 @@ describe('a token anchor is an in-bounds cell in the EncounterState type', () =>
       revision: spread.revision, requestId: 'request:loaded-anchor-remint', phase: 'initial', room: 1, historyKind: 'room_ready',
     }));
     expect(offGrid(error, 'Canonical engine state tokens[3] anchor', { column: 3, row: 3 }, 3, 7), String(error)).toBe(true);
+  });
+});
+
+/** A level-2 Fighter pack member with one melee attack (the pack shape party-session-state.test.ts uses). */
+function fighterMember(index: number): ExternalPartyPackV2['members'][number] {
+  return {
+    combatantId: `combatant:anchor-${String(index)}`,
+    tokenId: `token:anchor-${String(index)}`,
+    characterId: index,
+    classes: [{ classId: 'Fighter', level: 2 }],
+    hitDice: [{ sides: 10, maximum: 2 }],
+    abilities: { strength: 14, dexterity: 10, constitution: 12, intelligence: 10, wisdom: 10, charisma: 10 },
+    armorClass: 16,
+    hitPointMaximum: 20,
+    sizeCategory: 'Medium',
+    walkingSpeedFeet: 30,
+    initiativeBonus: 0,
+    savingThrowBonuses: { strength: 0, dexterity: 0, constitution: 0, intelligence: 0, wisdom: 0, charisma: 0 },
+    attacksPerAction: 1,
+    attacks: [{
+      attackId: `attack:anchor-${String(index)}`, kind: 'melee', attackBonus: 4, criticalFloor: 20, reachFeet: 5, rangeFeet: 5,
+      damage: [{ damageTypeId: 'Slashing', count: 1, sides: 8, modifier: 2 }],
+    }],
+    startingConditions: [],
+  };
+}
+
+function loadedFighters(): readonly LoadedPartyMember[] {
+  const loaded = loadExternalPartyPack({
+    schemaVersion: 2, partyId: 'party:loaded-anchor-callers', allowPartial: false,
+    members: [fighterMember(1), fighterMember(2), fighterMember(3)],
+  });
+  if (loaded.status !== 'loaded') throw new Error(`Party refused: ${loaded.refusal.reason}.`);
+  return loaded.party.members;
+}
+
+/** `state` with `actor` holding 30 feet of movement, so a caller reaches its anchor. */
+function withMovement(state: EncounterState, actor: CombatantId): EncounterState {
+  return {
+    ...state,
+    combatants: state.combatants.map((combatant) => combatant.profile.id === actor
+      ? { ...combatant, turn: { ...combatant.turn, movement: { ...combatant.turn.movement, remaining: feet(30) } } }
+      : combatant),
+  };
+}
+
+const movePaths = (actions: readonly { readonly type: string; readonly path?: readonly GridCell[] }[]): readonly GridCell[] =>
+  actions.flatMap((action) => action.type === 'move' ? action.path ?? [] : []);
+
+describe('the movement callers refuse an off-grid actor loudly instead of listing no moves', () => {
+  // The stored-character room (stored-character-encounter.ts): a 10 x 7 grid, the three Fighters at
+  // (1, 1), (1, 3) and (1, 5), the Training Brute at (2, 2), a blocked cell at (7, 2). Each state
+  // below is then spread onto a narrower grid that leaves the actor's anchor off it.
+
+  it('the loaded party lists its steps on the grid and refuses an actor spread off it', () => {
+    const members = loadedFighters();
+    const composed = composeStoredCharacterEncounter(members);
+    const actor = combatantId('combatant:anchor-1');
+    const state = withMovement(composed.state, actor);
+    expect(state.tokens.find((token) => token.combatantId === actor)?.position).toEqual({ column: 1, row: 1 });
+    // Every neighbour of (1, 1) in row-major order but (2, 2), the hostile Brute's square.
+    expect(movePaths(accepted(() => loadedPartyTurnLegalActions(members)(state, actor)).actions)).toEqual([
+      { column: 0, row: 0 }, { column: 1, row: 0 }, { column: 2, row: 0 }, { column: 0, row: 1 },
+      { column: 2, row: 1 }, { column: 0, row: 2 }, { column: 1, row: 2 },
+    ]);
+    const error = thrown(() => loadedPartyTurnLegalActions(members)({ ...state, bounds: { columns: 1, rows: 7 } }, actor));
+    expect(offGrid(error, 'Combatant combatant:anchor-1 anchor', { column: 1, row: 1 }, 1, 7), String(error)).toBe(true);
+  });
+
+  it('the stored-character room lists the Brute\'s steps on the grid and refuses it spread off', () => {
+    const composed = composeStoredCharacterEncounter(loadedFighters());
+    const brute: CombatantId = REFERENCE_MONSTER_ID;
+    const state = withMovement(composed.state, brute);
+    expect(state.tokens.find((token) => token.combatantId === brute)?.position).toEqual({ column: 2, row: 2 });
+    // Column step -1..1, then row step -1..1 (the caller's loop), without the Fighters' squares (1, 1) and (1, 3).
+    expect(movePaths(accepted(() => composed.turnLegalActions(state, brute)).actions)).toEqual([
+      { column: 1, row: 2 }, { column: 2, row: 1 }, { column: 2, row: 3 },
+      { column: 3, row: 1 }, { column: 3, row: 2 }, { column: 3, row: 3 },
+    ]);
+    const error = thrown(() => composed.turnLegalActions({ ...state, bounds: { columns: 2, rows: 7 } }, brute));
+    expect(offGrid(error, 'Combatant combatant:training-brute anchor', { column: 2, row: 2 }, 2, 7), String(error)).toBe(true);
+  });
+
+  it('the scripted skirmish finds its open neighbour on the grid and refuses an actor spread off it', () => {
+    // The reference room: the Fighter at (2, 3), the Training Brute at (3, 3), the Cleric at (1, 4).
+    const state = createEncounter(referenceEncounterSetup());
+    const fighter: CombatantId = REFERENCE_FIGHTER_ID;
+    // Right is the hostile Brute's square; down, (2, 4), is the first open one.
+    expect(accepted(() => adjacentOpenCell(state, fighter))).toEqual({ column: 2, row: 4 });
+    const error = thrown(() => adjacentOpenCell({ ...state, bounds: { columns: 2, rows: 7 } }, fighter));
+    expect(offGrid(error, 'Combatant combatant:fighter anchor', { column: 2, row: 3 }, 2, 7), String(error)).toBe(true);
   });
 });
