@@ -24,7 +24,12 @@ import { terrainPassabilityAt } from './terrain';
  * board by the cell count, whatever the number of openings a valid encounter authors.
  */
 
-/** Row-major ordinal of a cell of one board, `row * columns + column`. Minted only in this module. */
+/**
+ * Row-major ordinal of a cell of one board, `row * columns + column`. Minted by this module's
+ * checks: squareAnchor for a question's square, squareCell inside a square squareAnchor accepted,
+ * and buildMovementBoard for authored cells after isCellInside. The movement world re-brands only
+ * indices it stored from squareCell (its entered-cell scratch).
+ */
 export type CellIndex = Brand<number, 'CellIndex'>;
 
 /** Side of a creature's square footprint in cells (SRD Creature Size table: 1, 2, 3 or 4). */
@@ -66,10 +71,11 @@ export interface MovementBoard {
 /**
  * The index of the anchor of the `side` x `side` square at `anchor`, or null when the
  * square does not lie on this board. A footprint that reaches past the grid from an
- * in-bounds anchor is an answer (null), not an error. This is the only way a question
- * gets a CellIndex, and it checks the whole square against this board's own columns and
- * rows, so an index is never out of range, whatever grid the BoardCell was decoded
- * against (a BoardCell is never negative).
+ * in-bounds anchor is an answer (null), not an error. Every CellIndex a movement question
+ * reads starts here (squareCell only offsets inside a square this accepted), and this checks
+ * the whole square against this board's own columns and rows, so no question reads out of
+ * range, whatever grid the BoardCell was decoded against (a BoardCell is never negative).
+ * The board's own build indexes authored cells separately, after isCellInside.
  */
 export function squareAnchor(board: MovementBoard, anchor: BoardCell, side: FootprintSide): CellIndex | null {
   return anchor.column + side <= board.columns && anchor.row + side <= board.rows
@@ -77,7 +83,10 @@ export function squareAnchor(board: MovementBoard, anchor: BoardCell, side: Foot
     : null;
 }
 
-/** The cell `columnOffset`, `rowOffset` (each below the side) inside a square `squareAnchor` accepted. */
+/**
+ * The cell `columnOffset`, `rowOffset` (each below the side) inside a square `squareAnchor`
+ * accepted. It derives a CellIndex from one squareAnchor gave; the offsets keep it on the board.
+ */
 export function squareCell(
   board: MovementBoard,
   anchor: CellIndex,

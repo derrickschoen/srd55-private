@@ -232,6 +232,27 @@ describe('loaded token anchors are decoded against the grid', () => {
       .toBe(true);
   });
 
+  it('a replay bundle checks the anchors of every revision: an off-grid anchor in its last revision is refused there', () => {
+    const { bundle } = recordScriptedReferenceSkirmish();
+    const candidate = structuredClone(bundle) as unknown as {
+      revisions: Array<{ revision: { encounterState: JsonState & {
+        bounds: { columns: number; rows: number }; config: { initiativeMode: string };
+      } } }>;
+    };
+    const lastIndex = candidate.revisions.length - 1;
+    expect(lastIndex).toBeGreaterThan(1);
+    const last = candidate.revisions[lastIndex]!.revision.encounterState;
+    const offBoard = { column: 0, row: last.bounds.rows };
+    // Also break that revision's first replay check, so the refusal must come first; every earlier revision replays.
+    candidate.revisions[lastIndex]!.revision.encounterState = {
+      ...moved(last, 0, offBoard),
+      config: { initiativeMode: bundle.encounterConfig.initiativeMode === 'shared_enemy' ? 'per_combatant' : 'shared_enemy' },
+    };
+    const refused = thrown(() => replayBundle(candidate as unknown as ReplayBundle));
+    expect(offGrid(refused, `Replay revision ${String(lastIndex + 1)} tokens[0] anchor`, offBoard, last.bounds.columns, last.bounds.rows),
+      String(refused)).toBe(true);
+  });
+
   it('createEncounter and the movement callers refuse an off-grid actor loudly instead of listing no moves', () => {
     const setup = referenceEncounterSetup();
     const created = thrown(() => createEncounter({

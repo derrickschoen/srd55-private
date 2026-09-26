@@ -32,12 +32,16 @@ function isWholeNumber(value: number): boolean {
  * BoardCell is a fresh frozen {column, row}; no caller holds a reference through which
  * it could change.
  *
- * The brand does not name its grid, and need not: one encounter has one immutable
- * bounds. createEncounter and every decoder fix it (grid-size.ts), no reducer changes
- * it, and every movement board and BoardCell of the encounter's states is decoded
- * against it. A BoardCell from some other grid still cannot index a board out of range:
- * the movement board mints a cell index only through its square fit check against its
- * own columns and rows (movement-board.ts, squareAnchor), and no BoardCell is negative.
+ * The brand does not name its grid. One encounter has one immutable bounds: createEncounter
+ * and every decoder fix it (grid-size.ts), no reducer changes it, and the encounter's token
+ * anchors and movement questions are minted against it. A state can still be spread onto
+ * other bounds in memory, so a BoardCell can meet a grid it was not decoded against, and the
+ * type does not stop that. Two runtime guards do. The movement callers re-check the actor's
+ * own anchor against the state's grid (requireBoardCell, OffGridAnchorError). And the movement
+ * board's array safety rests on squareAnchor's dimension check (movement-board.ts): every
+ * CellIndex a movement question reads comes from squareAnchor, which checks the whole square
+ * against the board's own columns and rows (no BoardCell is negative), or is derived inside a
+ * square squareAnchor accepted.
  */
 export type BoardCell = Brand<GridCell, 'BoardCell'>;
 

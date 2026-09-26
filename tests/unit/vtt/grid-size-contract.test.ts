@@ -151,4 +151,22 @@ describe('engine grid-size contract', () => {
     first.bounds = AT_LIMIT;
     expect(thrown(() => replayBundle(candidate as unknown as ReplayBundle))).toBeInstanceOf(ReplayDivergenceError);
   });
+
+  it('a replay bundle is checked at every revision: its last state one cell past the limit is refused before that revision replays', () => {
+    const { bundle } = recordScriptedReferenceSkirmish();
+    const candidate = structuredClone(bundle) as unknown as {
+      revisions: Array<{ revision: { encounterState: { bounds: GridBounds; config: { initiativeMode: string } } } }>;
+    };
+    const lastIndex = candidate.revisions.length - 1;
+    expect(lastIndex).toBeGreaterThan(1);
+    const last = candidate.revisions[lastIndex]!.revision.encounterState;
+    last.bounds = PAST_LIMIT;
+    // Also break that revision's first replay check, so the refusal must come first; every earlier revision replays.
+    last.config = { initiativeMode: bundle.encounterConfig.initiativeMode === 'shared_enemy' ? 'per_combatant' : 'shared_enemy' };
+    expect(overLimit(thrown(() => replayBundle(candidate as unknown as ReplayBundle)))).toBe(true);
+    last.bounds = AT_LIMIT;
+    const diverged = thrown(() => replayBundle(candidate as unknown as ReplayBundle));
+    expect(diverged instanceof ReplayDivergenceError && diverged.recordIndex === lastIndex && diverged.field === 'encounterConfig.initiativeMode',
+      String(diverged)).toBe(true);
+  });
 });
