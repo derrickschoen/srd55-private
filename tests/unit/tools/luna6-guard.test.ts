@@ -1,8 +1,16 @@
-import { execFileSync } from 'node:child_process';
-import { join } from 'node:path';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { existsSync, readFileSync } from '../../helpers/test-filesystem';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from '../../helpers/test-filesystem';
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
 
@@ -93,18 +101,28 @@ function scanForHistoricalLunaLiteral(
 }
 
 /**
- * Every file under the scanned roots that `git add -A` would commit: tracked files plus untracked files that are
- * not ignored. Ignored scratch (for example a mutation backup under .tmp-*) is not code and is not scanned.
+ * Every file under the scanned roots that `git add -A` would commit in the repository at `root`: tracked files plus
+ * untracked files that are not ignored. Ignored scratch (for example a mutation backup under .tmp-*) is not code and
+ * is not scanned. A listing that fails, or that holds no file, throws: a guard that scans nothing proves nothing.
  */
-function scannedRepositoryFiles(): Map<string, string> {
-  const listing = execFileSync(
+function scannedRepositoryFiles(root: string, env: NodeJS.ProcessEnv = process.env): Map<string, string> {
+  const listing = spawnSync(
     'git',
     ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', ...SCANNED_ROOTS],
-    { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+    { cwd: root, env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
   );
+  if (listing.error !== undefined || listing.status !== 0) {
+    const reason = listing.error?.message ?? `git ls-files exited ${listing.status}: ${listing.stderr.trim()}`;
+    throw new Error(`the Luna guard could not list the files of ${root}: ${reason}`);
+  }
+  const paths = listing.stdout.split('\0').filter((entry) => entry !== '');
+  if (paths.length === 0) {
+    throw new Error(`the Luna guard found no file under ${SCANNED_ROOTS.join(' or ')} in ${root}: ` +
+      'a scan of nothing proves nothing');
+  }
   const files = new Map<string, string>();
-  for (const path of listing.split('\0').filter((entry) => entry !== '')) {
-    const absolute = join(repoRoot, path);
+  for (const path of paths) {
+    const absolute = join(root, path);
     // A tracked file deleted in the working tree has no bytes that could hold the literal.
     if (!existsSync(absolute)) continue;
     files.set(path, readFileSync(absolute, 'utf8'));
@@ -112,12 +130,33 @@ function scannedRepositoryFiles(): Map<string, string> {
   return files;
 }
 
+/** git cut off from this machine's configuration and ignore files, and from any repository that encloses `scratch`. */
+function isolatedGitEnvironment(scratch: string): NodeJS.ProcessEnv {
+  const inherited = Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_'));
+  return {
+    ...Object.fromEntries(inherited),
+    GIT_CEILING_DIRECTORIES: scratch,
+    GIT_CONFIG_GLOBAL: join(scratch, 'no-global-gitconfig'),
+    GIT_CONFIG_NOSYSTEM: '1',
+    XDG_CONFIG_HOME: join(scratch, 'no-xdg-config'),
+  };
+}
+
+/** Writes each file under `root`, each holding the text `// <path>: 'gpt-5.6-luna'`, so a read names its source. */
+function writeLiteralFiles(root: string, paths: readonly string[]): void {
+  for (const path of paths) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), `// ${path}: '${HISTORICAL_LUNA_LITERAL}'`);
+  }
+}
+
 describe('LUNA6 historical Luna literal guard', () => {
   it('forbids gpt-5.6-luna in tools/ and src/ outside the exact historical allowlist', () => {
-    const files = scannedRepositoryFiles();
+    const files = scannedRepositoryFiles(repoRoot);
     const report = scanForHistoricalLunaLiteral(files, HISTORICAL_LUNA_ALLOWLIST);
     expect({
-      // Vacuity guard: an empty or partial listing would match an empty report while proving nothing.
+      // Vacuity guard: the enumerator refuses an empty listing; a partial one would match an empty report while
+      // proving nothing.
       scansMoreThan500Files: files.size > 500,
       scansBothRoots: files.has('tools/d569-blind-experiment.ts') && files.has('src/vtt/agent-adapters/codex.ts'),
       counts: report.counts,
@@ -191,5 +230,68 @@ describe('LUNA6 historical Luna literal guard', () => {
       },
       outsideTheScannedRoots: { counts: { 'tools/history.ts': 2 }, violations: [] },
     });
+  });
+
+  it('lists the files git add -A would commit under src/ and tools/ and refuses an empty or failed listing', () => {
+    // Throwaway repositories hold one file of each kind the listing must tell apart. Every expectation below is typed
+    // by hand from the paths written here and from git's own messages; none is read back from a scan.
+    const scratch = mkdtempSync(join(tmpdir(), 'dnd-luna6-guard-'));
+    try {
+      const env = isolatedGitEnvironment(scratch);
+      const git = (cwd: string, args: readonly string[]): void => {
+        execFileSync('git', args, { cwd, env, stdio: 'pipe' });
+      };
+      const mixed = join(scratch, 'mixed');
+      writeLiteralFiles(mixed, [
+        'src/tracked.ts',
+        'tools/untracked.ts',
+        'tools/.tmp-mutation/ignored.ts',
+        'tools/deleted-from-the-working-tree.ts',
+        'docs/tracked-outside-the-roots.md',
+      ]);
+      writeFileSync(join(mixed, '.gitignore'), '.tmp-*\n');
+      git(mixed, ['init', '-q']);
+      git(mixed, ['add', '--', 'src/tracked.ts', 'tools/deleted-from-the-working-tree.ts',
+        'docs/tracked-outside-the-roots.md']);
+      rmSync(join(mixed, 'tools/deleted-from-the-working-tree.ts'));
+      const nothingUnderTheRoots = join(scratch, 'nothing-under-the-roots');
+      writeLiteralFiles(nothingUnderTheRoots, ['docs/untracked-outside-the-roots.md']);
+      git(nothingUnderTheRoots, ['init', '-q']);
+      const notARepository = join(scratch, 'not-a-repository');
+      writeLiteralFiles(notARepository, ['src/plain.ts']);
+      const scan = (root: string) => {
+        try {
+          return { ok: Object.fromEntries(scannedRepositoryFiles(root, env)) };
+        } catch (error) {
+          return { error: (error instanceof Error ? error.message : String(error)).replaceAll(scratch, '<scratch>') };
+        }
+      };
+      expect({
+        trackedUntrackedAndIgnored: scan(mixed),
+        nothingUnderTheRoots: scan(nothingUnderTheRoots),
+        notARepository: scan(notARepository),
+        missingDirectory: scan(join(scratch, 'missing')),
+      }).toEqual({
+        trackedUntrackedAndIgnored: {
+          ok: {
+            'src/tracked.ts': "// src/tracked.ts: 'gpt-5.6-luna'",
+            'tools/untracked.ts': "// tools/untracked.ts: 'gpt-5.6-luna'",
+          },
+        },
+        nothingUnderTheRoots: {
+          error: 'the Luna guard found no file under src/ or tools/ in <scratch>/nothing-under-the-roots: ' +
+            'a scan of nothing proves nothing',
+        },
+        notARepository: {
+          error: 'the Luna guard could not list the files of <scratch>/not-a-repository: git ls-files exited 128: ' +
+            'fatal: not a git repository (or any of the parent directories): .git',
+        },
+        missingDirectory: {
+          error: 'the Luna guard could not list the files of <scratch>/missing: spawnSync git ENOENT',
+        },
+      });
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
   });
 });
