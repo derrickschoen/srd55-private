@@ -9,8 +9,17 @@ import {
   reduceEncounter,
   type EncounterState,
 } from '../../../src/combat/encounter';
-import { damageType, dieSides, feet } from '../../../src/combat/values';
+import {
+  armorClass,
+  damageType,
+  dieSides,
+  effectStackingIdentity,
+  feet,
+  worldObjectId,
+} from '../../../src/combat/values';
 import { feetPoint } from '../../../src/combat/templates';
+import { terrainBlocking, type TerrainKind } from '../../../src/combat/terrain';
+import type { WorldObject } from '../../../src/combat/world-objects';
 import {
   IMPLEMENTED_SPELL_DEFINITIONS,
   spellDefinition,
@@ -1653,5 +1662,105 @@ describe('CC-TRUE-STRIKE: True Strike attacks with the weapon used in its castin
     // A weapon without a stated long range is unresolved beyond its normal range.
     expect(() => trueStrike({ kind: 'ranged', normalRangeFeet: feet(20), longRangeFeet: null }, 5, 'none'))
       .toThrow('The True Strike weapon long range is unresolved.');
+  });
+
+  /*
+   * CC-TRUE-STRIKE-TOTAL-COVER and -DECLARED (review r4 P1). The attack is the
+   * weapon's, so it has the weapon attack's line and cover rules: a target
+   * behind Total Cover "can't be targeted directly" (the Cover table,
+   * docs/srd/full/srd-5.2.1.txt:952-954), a spell needs "a clear path to it, so
+   * it can't be behind Total Cover" (:6468-6470), and Half and Three-Quarters
+   * Cover give +2 and +5 AC (:945-948).
+   *
+   * BOARD (14 x 6, bright light): the caster at (0,1) and the target (AC 12,
+   * tests/unit/combat/fixtures.ts:27) at (6,3), 30 feet away: a Longbow shot in
+   * its normal range, nobody within 5 feet of the caster, so a straight roll.
+   * Column 3, rows 0-5, is open or a full-height strip of one terrain kind.
+   * The target is two rows lower so that the corner lines cross the strip's
+   * cells instead of running along a row boundary between them (the D576
+   * corner-line trace; a same-row target behind this strip has only Half
+   * Cover).
+   * The cast states attack bonus +4; at RNG 0.5 the d20 is 11
+   * (Math.floor(0.5 * 20) + 1), total 15.
+   */
+  const coverStrip = (terrain: TerrainKind): WorldObject => ({
+    id: worldObjectId(`object:cc-true-strike-${terrain}`),
+    name: `cc-true-strike-${terrain}`,
+    kind: 'cover',
+    position: { column: 3, row: 0 },
+    footprint: [0, 1, 2, 3, 4, 5].map((row) => ({ column: 3, row })),
+    durability: { kind: 'indestructible' },
+    armorClass: armorClass(10),
+    damageResponses: [],
+    blocking: terrainBlocking(terrain),
+    createdRevision: 0,
+  });
+  const slowPayload: Extract<EffectPayload, { readonly kind: 'slow' }> = {
+    kind: 'slow', speedMultiplier: 0.5, armorClassPenalty: 2, dexteritySavePenalty: 2,
+    reactionsAllowed: false, actionOrBonusOnly: true, attacksPerAction: 1,
+    somaticSpellFailurePercent: 25,
+  };
+  const coveredStrike = (terrain: TerrainKind, options: { readonly slowed: boolean; readonly rng: number }) => {
+    const definition = spellDefinition('true-strike');
+    if (definition === null) throw new Error('True Strike definition missing.');
+    const caster = playerProfile('cc-true-strike-cover-caster', { hitPoints: 200, initiativeBonus: 20 });
+    const target = monsterProfile('cc-true-strike-cover-target', { hitPoints: 200, initiativeBonus: 0 });
+    const created = createEncounter({
+      bounds: { columns: 14, rows: 6 },
+      combatants: [caster, target],
+      tokens: [placedToken(caster, 0, 1), placedToken(target, 6, 3)],
+      worldObjects: terrain === 'open' ? [] : [coverStrip(terrain)],
+    });
+    let state = reduceEncounter(created, { type: 'roll_initiative' }, () => 0.5).state;
+    expect(state.activeCombatant).toBe(caster.id);
+    if (options.slowed) {
+      state = reduceEncounter(state, {
+        type: 'apply_effect', actor: caster.id, cost: 'none',
+        effect: {
+          targets: [caster.id], duration: { kind: 'permanent' }, concentration: false,
+          stackingIdentity: effectStackingIdentity('cc-true-strike:slow'),
+          stacking: 'replace_any_source', repeatedSave: null, payload: slowPayload,
+        },
+      }, () => 0.5).state;
+    }
+    const base = castCommand(definition, caster, target);
+    if (base.weaponAttack === null) throw new Error('The True Strike fixture names no weapon.');
+    return reduceEncounter(state, {
+      ...base,
+      attackBonus: 4,
+      weaponAttack: { ...base.weaponAttack, tacticalRange: LONGBOW },
+    }, () => options.rng).events;
+  };
+  const coveredAttack = (terrain: TerrainKind) => coveredStrike(terrain, { slowed: false, rng: 0.5 })
+    .flatMap((event) => event.type === 'attack_resolved'
+      ? [{ outcome: event.attack.outcome, total: event.attack.total, mode: event.attack.roll.mode }]
+      : []);
+
+  it('CC-TRUE-STRIKE-TOTAL-COVER: True Strike cannot attack a target behind Total Cover, and cover raises the target\'s AC', () => {
+    expect(() => coveredAttack('open'), 'a clear line is a legal True Strike attack').not.toThrow();
+    // No cover: 15 against AC 12 hits.
+    expect(coveredAttack('open')).toEqual([{ outcome: 'hit', total: 15, mode: 'normal' }]);
+    // Half Cover, AC 14: 15 still hits. Three-Quarters Cover, AC 17: 15 misses.
+    expect(coveredAttack('half_cover')).toEqual([{ outcome: 'hit', total: 15, mode: 'normal' }]);
+    expect(coveredAttack('three_quarters_cover')).toEqual([{ outcome: 'miss', total: 15, mode: 'normal' }]);
+    // A wall is Total Cover: the target cannot be attacked at all.
+    expect(() => coveredAttack('wall')).toThrow('The target has Total Cover or is outside line of sight.');
+  });
+
+  it('CC-TRUE-STRIKE-DECLARED: a target behind Total Cover is refused when True Strike is cast, before anything the casting sets off', () => {
+    // Slow (25% somatic failure, docs/srd/source/spell-descriptions.txt:7153-7156;
+    // the reducer fails the spell on a d20 of 25 / 5 = 5 or lower) is checked
+    // after the spell's targets are selected and before its operation runs.
+    // At RNG 0.1 the d20 is 3 (Math.floor(0.1 * 20) + 1): with a clear line the
+    // spell fails there and no attack is made.
+    const clear = coveredStrike('open', { slowed: true, rng: 0.1 });
+    expect(clear).toContainEqual(expect.objectContaining({
+      type: 'slow_spellcasting_checked', roll: 3, failureMaximum: 5, outcome: 'spell_failed',
+    }));
+    expect(clear.some((event) => event.type === 'attack_resolved')).toBe(false);
+    // Behind a wall the cast itself is refused: the illegal target is never
+    // declared, so the Slow check cannot swallow it as a failed spell.
+    expect(() => coveredStrike('wall', { slowed: true, rng: 0.1 }))
+      .toThrow('The target has Total Cover or is outside line of sight.');
   });
 });

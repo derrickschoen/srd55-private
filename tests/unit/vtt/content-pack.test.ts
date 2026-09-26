@@ -528,6 +528,88 @@ describe('content-pack v1', () => {
     expect(strike('weapon-strike', 4, longbow)).toEqual(['disadvantage:2']);
   });
 
+  /*
+   * CC-TRUE-STRIKE-NESTED (review r4 P1). True Strike's attack nested in
+   * another operation, here an imported random branch whose every face makes
+   * it, has no weapon_attack targeting: the pack's 120-foot single target
+   * selects the creature, so only the attack itself can check the weapon. The
+   * attack is still the weapon's: it must reach the target (a Longsword is
+   * melee with a 5-foot reach, docs/srd/source/weapons-table.txt:34) along a
+   * clear line (a wall is Total Cover, which "can't be targeted directly",
+   * docs/srd/full/srd-5.2.1.txt:952-954).
+   * BOARD (8 x 4, bright light): the caster at (0,1), the target at the stated
+   * cell; the wall, when present, is blocked cells filling column 2. The
+   * Longbow (150/600, weapons-table.txt:50) target is at (4,3), 20 feet away,
+   * two rows lower so the corner lines cross the wall's cells; nobody is
+   * beside the caster: one d20. The Longsword target is at (2,1), 10 feet
+   * away. RNG 0.5 throughout (the branch's d4 shows 3, inside its 1-4 range).
+   */
+  it('CC-TRUE-STRIKE-NESTED: a True Strike attack nested in an imported branch keeps its weapon\'s range and line', () => {
+    const source = fixture() as { spells: Array<Record<string, unknown>> };
+    const template = source.spells[0];
+    if (template === undefined) throw new Error('Fixture spell is missing.');
+    const content = loaded(loadContentPack({
+      ...source,
+      spells: [{
+        ...template, recordId: 'branch-strike', name: 'Branch Strike', level: 0,
+        targeting: { kind: 'single', rangeFeet: 120, willing: false },
+        operation: {
+          kind: 'random_branch', dieSides: 4,
+          branches: [{
+            minimum: 1, maximum: 4,
+            operation: {
+              kind: 'weapon_attack_augmentation', timing: 'during_cast',
+              attackAbility: 'spellcasting', damageAbility: 'spellcasting', damageTypeChoice: 'weapon_or_radiant',
+              extraDamage: {
+                type: 'Radiant',
+                dice: { baseCount: 1, sides: 6, modifier: 0, perSlotCount: 0, perSlotModifier: 0, cantripUpgrade: false },
+              },
+            },
+          }],
+        },
+      }],
+    }));
+    expect(content.spells.map((spell) => spell.definition.targeting))
+      .toEqual([{ kind: 'single', rangeFeet: 120, willing: false }]);
+    const caster = playerProfile('nested-strike-caster', { initiativeBonus: 20 });
+    const target = monsterProfile('nested-strike-target', { initiativeBonus: -20, hitPoints: 200 });
+    const strike = (
+      targetCell: readonly [number, number],
+      tacticalRange: NonNullable<Extract<EncounterCommand, { readonly type: 'cast_spell' }>['weaponAttack']>['tacticalRange'],
+      wall: boolean,
+    ) => {
+      let state = createEncounter({
+        bounds: { columns: 8, rows: 4 },
+        combatants: [caster, target],
+        tokens: [placedToken(caster, 0, 1), placedToken(target, targetCell[0], targetCell[1])],
+        blockedCells: wall ? [0, 1, 2, 3].map((row) => ({ column: 2, row })) : [],
+        contentPacks: [content],
+      });
+      state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+      const base = importedSpellCommand(caster, target);
+      if (base.type !== 'cast_spell') throw new Error('Expected the imported spell command.');
+      return reduceEncounter(state, {
+        ...base,
+        spellId: 'greenforge:branch-strike',
+        slotLevel: null,
+        weaponAttack: {
+          attackBonus: 5, damageType: damageType('Piercing'), damageCount: 1, damageSides: 8, damageModifier: 3,
+          tacticalRange,
+        },
+      }, () => 0.5).events.flatMap((event) => event.type === 'attack_resolved'
+        ? [`${event.attack.roll.mode}:${String(event.attack.roll.faces.length)}`]
+        : []);
+    };
+    const longsword = { kind: 'melee', reachFeet: feet(5) } as const;
+    const longbow = { kind: 'ranged', normalRangeFeet: feet(150), longRangeFeet: feet(600) } as const;
+    expect(() => strike([4, 3], longbow, false), 'a Longbow reaches a target 20 feet away along a clear line').not.toThrow();
+    expect(strike([4, 3], longbow, false)).toEqual(['normal:1']);
+    // Within the spell's 120 feet, but beyond the Longsword's reach.
+    expect(() => strike([2, 1], longsword, false)).toThrow('The target is out of Branch Strike weapon range.');
+    // Within both ranges, but behind the wall.
+    expect(() => strike([4, 3], longbow, true)).toThrow('The target has Total Cover or is outside line of sight.');
+  });
+
   it('fires an imported feature rider through the ordinary attack reducer', () => {
     const content = loaded();
     const attacker = withImportedFeature(

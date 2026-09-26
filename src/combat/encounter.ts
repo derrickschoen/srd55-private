@@ -2426,27 +2426,40 @@ function weaponRangeRollModeSources(
 }
 
 /**
- * A weapon attack's target must be within the weapon's range: its reach, or
- * its long range (a long range the weapon does not state is unresolved, never
- * the normal range). The attack command's rule, shared with the attack a
- * spell makes with the weapon used in its casting.
+ * Whether a weapon attack can be made at this target now. It is the one rule
+ * for every weapon attack that is not an Opportunity Attack: an attack
+ * command's, and the attack a spell makes with the weapon used in its casting
+ * (True Strike), both when the spell selects its target and when the attack
+ * is made.
+ * - Range, when the attack states it: the weapon's reach, or its long range (a
+ *   long range the weapon does not state is unresolved, never the normal range).
+ * - A clear line: a target behind Total Cover "can't be targeted directly"
+ *   (the Cover table, docs/srd/full/srd-5.2.1.txt:952-954; glossary
+ *   :11493-11495), and a spell needs "a clear path to it, so it can't be
+ *   behind Total Cover" (:6468-6470).
  */
-function assertWithinWeaponRange(
+function assertWeaponAttackReachesTarget(
   state: EncounterState,
   attacker: CombatantId,
   target: CombatantId,
-  range: TacticalAttackRange,
+  range: TacticalAttackRange | undefined,
   subject: string,
 ): void {
-  const verdict = tacticalRangeVerdictAtDistance(
-    minimumSpaceDistance(combatantSpace(state, attacker), combatantSpace(state, target)),
-    range,
-  );
-  if (verdict.status === 'unresolved') {
-    throw new EncounterRuleError('validation', `The ${subject} long range is unresolved.`);
+  if (range !== undefined) {
+    const verdict = tacticalRangeVerdictAtDistance(
+      minimumSpaceDistance(combatantSpace(state, attacker), combatantSpace(state, target)),
+      range,
+    );
+    if (verdict.status === 'unresolved') {
+      throw new EncounterRuleError('validation', `The ${subject} long range is unresolved.`);
+    }
+    if (!verdict.legal) {
+      throw new EncounterRuleError('validation', `The target is out of ${subject} range.`);
+    }
   }
-  if (!verdict.legal) {
-    throw new EncounterRuleError('validation', `The target is out of ${subject} range.`);
+  const line = combatantLineVerdict(state, attacker, target);
+  if (line.blocksSight) {
+    throw new EncounterRuleError('validation', 'The target has Total Cover or is outside line of sight.');
   }
 }
 
@@ -7192,15 +7205,8 @@ function processAttack(
   if (cannotHarmTarget(context.state, command.actor, command.target)) {
     throw new EncounterRuleError('validation', 'The Charmed condition prohibits harming this target.');
   }
-  const attackLine = combatantLineVerdict(context.state, command.actor, command.target);
-  if (opportunityTrigger === null && command.tacticalRange !== undefined) {
-    assertWithinWeaponRange(context.state, command.actor, command.target, command.tacticalRange, 'attack');
-  }
-  if (
-    opportunityTrigger === null &&
-    attackLine.blocksSight
-  ) {
-    throw new EncounterRuleError('validation', 'The target has Total Cover or is outside line of sight.');
+  if (opportunityTrigger === null) {
+    assertWeaponAttackReachesTarget(context.state, command.actor, command.target, command.tacticalRange, 'attack');
   }
   breakCalmIndifferenceOnHostileAct(context, command.actor, command.target);
   const madeModes = rollDefenseModes(
@@ -7968,7 +7974,9 @@ function selectedSpellTargets(
       }
       const target = command.targets[0] as CombatantId;
       validateTargetPresence(state, command.actor, target, false);
-      assertWithinWeaponRange(state, command.actor, target, command.weaponAttack.tacticalRange, `${definition.name} weapon`);
+      // The target the attack is made at: refused here, before the spell is
+      // cast, when the weapon cannot make that attack.
+      assertWeaponAttackReachesTarget(state, command.actor, target, command.weaponAttack.tacticalRange, `${definition.name} weapon`);
       return command.targets;
     }
   }
@@ -11309,11 +11317,14 @@ function executeSpellOperation(
           throw new EncounterRuleError('validation', 'True Strike damage must use the weapon type or Radiant.');
         }
         const target = targets[0] as CombatantId;
-        // The attack is the weapon's: it must reach the target, and its range
-        // band and Ranged Attacks in Close Combat come from the weapon's range,
-        // exactly as for an attack command with that weapon.
+        // The attack is the weapon's: it must reach the target along a clear
+        // line, the target's cover raises its AC, and its range band and Ranged
+        // Attacks in Close Combat come from the weapon's range, exactly as for
+        // an attack command with that weapon. The legality is checked again
+        // here because a weapon attack nested in another operation (an
+        // imported random branch, say) has no weapon_attack targeting.
         const weaponRange = command.weaponAttack.tacticalRange;
-        assertWithinWeaponRange(context.state, command.actor, target, weaponRange, `${definition.name} weapon`);
+        assertWeaponAttackReachesTarget(context.state, command.actor, target, weaponRange, `${definition.name} weapon`);
         const advantageEffects = context.state.effects.filter((effect) => {
           if (effect.payload.kind !== 'attack_roll_mode_modifier') return false;
           const appliesTo = effect.payload.appliesTo;
