@@ -738,7 +738,7 @@ describe('CC-UNRESOLVED-PRONE: an unknown close-combat fact that cannot change t
  *   ED = 120/400 x 7.5 + 1/400 x 12 = 2.28. At (0,1) its own sight of the goblin
  *   from there is unknown to the plan: sight_unresolved.
  */
-describe('SIGHT-INVISIBLE-STEP: who sees whom is observed only on the square the PC stands on', () => {
+describe('PC sight facts (review r3 Q5): who sees whom is observed only on the square the PC stands on', () => {
   const board = (condition: 'Invisible' | 'Frightened') => {
     const ranger = playerProfile(`sight-${condition}-ranger`, { initiativeBonus: 20 });
     const goblinBase = monsterCombatantProfile(GOBLIN_WARRIOR, {

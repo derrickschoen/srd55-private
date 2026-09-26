@@ -1640,7 +1640,7 @@ describe('CC-TRUE-STRIKE: True Strike attacks with the weapon used in its castin
     expect(trueStrike(DAGGER, 3, 'none')).toEqual(['normal:1']);
   });
 
-  it('CC-TRUE-STRIKE-RANGE: the legal targets and the long range band are the weapon\'s', () => {
+  it('CC-TRUE-STRIKE-WEAPON-RANGE: the legal targets and the long range band are the weapon\'s', () => {
     // Dart 20/60: 20 feet is normal range, 25 feet long range (Disadvantage),
     // 65 feet beyond its long range (no attack).
     expect(trueStrike(DART, 4, 'none')).toEqual(['normal:1']);
