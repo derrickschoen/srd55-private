@@ -295,13 +295,17 @@ describe('RL arena batch generator', () => {
     // LUNA6 (B2 review r1 P3, review r2 P2): a run without --resume used to replace whatever manifest its batch path
     // held, so a fresh v2 run over a v1 batch erased the v1 batch's provenance. Without --overwrite, a fresh run now
     // refuses every stored manifest and leaves it byte for byte: a v1 batch (with its own error), a v2 batch, a
-    // manifest of a format this generator does not know, and one that does not parse (a write cut short).
+    // manifest of a format this generator does not know, one that does not parse (a write cut short), and JSON that
+    // is not a manifest object at all (null: no format to name).
     expect([
       await generateOverStoredBatch({ format: 'arena-rl-batch-v1', model: 'gpt-5.6-luna', resume: false }),
       await generateOverStoredBatch({ format: 'arena-rl-batch-v2', model: 'gpt-6-luna', resume: false }),
       await generateOverStoredBatch({ format: 'arena-rl-batch-v3', model: 'gpt-6-luna', resume: false }),
       await generateOverStoredBatch({
         format: 'arena-rl-batch-v2', model: 'gpt-6-luna', resume: false, bytes: (manifest) => manifest.slice(0, 100),
+      }),
+      await generateOverStoredBatch({
+        format: 'arena-rl-batch-v2', model: 'gpt-6-luna', resume: false, bytes: () => 'null\n',
       }),
     ]).toEqual([
       {
@@ -316,6 +320,7 @@ describe('RL arena batch generator', () => {
       { outcome: { error: storedManifestRefusal('arena-rl-batch-v2') }, calls: [], storedBytesKept: true },
       { outcome: { error: storedManifestRefusal('arena-rl-batch-v3') }, calls: [], storedBytesKept: true },
       { outcome: { error: UNREADABLE_MANIFEST_REFUSAL }, calls: [], storedBytesKept: true },
+      { outcome: { error: storedManifestRefusal('<none>') }, calls: [], storedBytesKept: true },
     ]);
   });
 
