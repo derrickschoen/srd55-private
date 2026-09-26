@@ -257,24 +257,46 @@ interface SourceCell {
 }
 
 /**
- * A dense row-major grid over the bounding box of every source cell: one array read per visited
- * cell. Cells outside the box hold no source.
+ * The largest bounding box of source cells, in cells, that the source index stores as a dense
+ * array (256 x 256, say). The box is set by the two sources farthest apart, not by how many
+ * sources there are: without this bound, a valid 65,536 x 65,536 encounter with walls in two
+ * opposite corners asks for 2^32 slots and throws before any line is traced.
  */
-interface SourceGrid {
-  readonly minimumColumn: number;
-  readonly minimumRow: number;
-  readonly width: number;
-  readonly height: number;
-  readonly cells: readonly (SourceCell | undefined)[];
-}
+const DENSE_SOURCE_GRID_MAX_CELLS = 65_536;
+
+/**
+ * Where the cover sources are, read once per visited cell.
+ * - `dense`: a row-major array over the bounding box of every source cell, one array read per
+ *   visited cell; cells outside the box hold no source.
+ * - `sparse`, when that box holds more than DENSE_SOURCE_GRID_MAX_CELLS cells: the source cells
+ *   by row, then by column, so memory follows the number of source cells, not their spread.
+ */
+type SourceGrid =
+  | {
+      readonly kind: 'dense';
+      readonly minimumColumn: number;
+      readonly minimumRow: number;
+      readonly width: number;
+      readonly height: number;
+      readonly cells: readonly (SourceCell | undefined)[];
+    }
+  | {
+      readonly kind: 'sparse';
+      readonly rows: ReadonlyMap<number, ReadonlyMap<number, SourceCell>>;
+    };
 
 interface PlacedSource {
   readonly cell: GridCell;
   readonly source: TerrainLineSource;
 }
 
+interface BuildingSourceCell {
+  readonly cell: GridCell;
+  readonly sources: TerrainLineSource[];
+}
+
 function sourceGrid(placed: readonly PlacedSource[]): SourceGrid {
-  if (placed.length === 0) return { minimumColumn: 0, minimumRow: 0, width: 0, height: 0, cells: [] };
+  if (placed.length === 0) return { kind: 'dense', minimumColumn: 0, minimumRow: 0, width: 0, height: 0, cells: [] };
   let minimumColumn = Number.POSITIVE_INFINITY;
   let minimumRow = Number.POSITIVE_INFINITY;
   let maximumColumn = Number.NEGATIVE_INFINITY;
@@ -287,22 +309,42 @@ function sourceGrid(placed: readonly PlacedSource[]): SourceGrid {
   }
   const width = maximumColumn - minimumColumn + 1;
   const height = maximumRow - minimumRow + 1;
-  const building: ({ readonly cell: GridCell; readonly sources: TerrainLineSource[] } | undefined)[] =
-    new Array<undefined>(width * height).fill(undefined);
+  if (width * height > DENSE_SOURCE_GRID_MAX_CELLS) return sparseSourceGrid(placed);
+  const building: (BuildingSourceCell | undefined)[] = new Array<undefined>(width * height).fill(undefined);
   for (const { cell, source } of placed) {
     const index = (cell.row - minimumRow) * width + cell.column - minimumColumn;
     const existing = building[index];
     if (existing === undefined) building[index] = { cell: { ...cell }, sources: [source] };
     else existing.sources.push(source);
   }
-  return { minimumColumn, minimumRow, width, height, cells: building };
+  return { kind: 'dense', minimumColumn, minimumRow, width, height, cells: building };
+}
+
+function sparseSourceGrid(placed: readonly PlacedSource[]): SourceGrid {
+  const rows = new Map<number, Map<number, BuildingSourceCell>>();
+  for (const { cell, source } of placed) {
+    let columns = rows.get(cell.row);
+    if (columns === undefined) {
+      columns = new Map<number, BuildingSourceCell>();
+      rows.set(cell.row, columns);
+    }
+    const existing = columns.get(cell.column);
+    if (existing === undefined) columns.set(cell.column, { cell: { ...cell }, sources: [source] });
+    else existing.sources.push(source);
+  }
+  return { kind: 'sparse', rows };
 }
 
 function sourceAt(grid: SourceGrid, column: number, row: number): SourceCell | undefined {
-  const localColumn = column - grid.minimumColumn;
-  const localRow = row - grid.minimumRow;
-  if (localColumn < 0 || localRow < 0 || localColumn >= grid.width || localRow >= grid.height) return undefined;
-  return grid.cells[localRow * grid.width + localColumn];
+  switch (grid.kind) {
+    case 'dense': {
+      const localColumn = column - grid.minimumColumn;
+      const localRow = row - grid.minimumRow;
+      if (localColumn < 0 || localRow < 0 || localColumn >= grid.width || localRow >= grid.height) return undefined;
+      return grid.cells[localRow * grid.width + localColumn];
+    }
+    case 'sparse': return grid.rows.get(row)?.get(column);
+  }
 }
 
 function terrainSources(state: EncounterState): PlacedSource[] {

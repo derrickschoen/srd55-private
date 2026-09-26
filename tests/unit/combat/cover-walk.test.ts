@@ -13,6 +13,10 @@
  * it (the coverself rule, owner ruling D888), which the pre-walk code only knew for real positions.
  * The exhaustive version (every fixture, every anchor) is experiment evidence only:
  * tools/experiments/cover-walk/exhaustive-differential.ts.
+ *
+ * The sparse block checks the source index on a valid 65,536 x 65,536 encounter whose sources
+ * span the whole grid, too far apart to index as one dense array, against the same reference and
+ * against hand-derived answers.
  */
 import { describe, expect, it } from 'vitest';
 import { canonicalJson } from '../../../src/commands/canonical-json';
@@ -32,6 +36,7 @@ import {
   walkCornerLine,
   type CornerPoint,
 } from '../../../src/combat/cover';
+import { sharedSpaceRelation } from '../../../src/combat/creature-space';
 import { createEncounter, type EncounterState } from '../../../src/combat/encounter';
 import type { GridCell } from '../../../src/combat/grid';
 import { terrainBlocking } from '../../../src/combat/terrain';
@@ -568,6 +573,165 @@ describe('PERF-02 cover6 bounded differential against the frozen pre-walk cover 
     const results = states.map(([label, state]) => differential(label, state));
     expect(results.flatMap((result) => result.mismatches)).toEqual([]);
     expect(results.map((result) => result.compared > 1_000)).toEqual([true, true, true]);
+  });
+});
+
+function tinyMonster(key: string) {
+  const profile = monsterProfile(key);
+  return { ...profile, rules: { ...profile.rules, sizeCategory: 'Tiny' as const } };
+}
+
+/** The last row and column of the sparse encounter's 65,536 x 65,536 grid. */
+const SPARSE_LAST = 65_535;
+
+/**
+ * A valid 65,536 x 65,536 encounter whose cover sources reach all four corners: walls in the
+ * bottom-left and top-right corners, half-cover objects in the other two. Every source index over it
+ * (terrain, terrain with creatures, objects only) has a 65,536 x 65,536 bounding box of 2^32 cells,
+ * one more than the longest JavaScript array, so an index that allocated its box would throw
+ * RangeError at once. Near the far corners: a wall W at (65532, 2) and a Three-Quarters slit at
+ * (65532, 65532). Near the bottom-left: the fighter at (3, 65530), the goblin at (7, 65530), a Tiny
+ * imp and a Tiny rat sharing (5, 65530), a Large ogre at (5..6, 65527..65528).
+ */
+function sparseHugeState() {
+  const fighter = playerProfile('sparse-fighter');
+  const goblin = monsterProfile('sparse-goblin');
+  const imp = tinyMonster('sparse-imp');
+  const rat = tinyMonster('sparse-rat');
+  const baseOgre = monsterProfile('sparse-ogre');
+  const ogre = { ...baseOgre, rules: { ...baseOgre.rules, sizeCategory: 'Large' as const } };
+  const last = SPARSE_LAST;
+  const state = createEncounter({
+    bounds: { columns: last + 1, rows: last + 1 },
+    combatants: [fighter, goblin, imp, rat, ogre],
+    tokens: [
+      placedToken(fighter, 3, last - 5), placedToken(goblin, 7, last - 5), placedToken(imp, 5, last - 5),
+      placedToken(rat, 5, last - 5), placedToken(ogre, 5, last - 8),
+    ],
+    sharedSpaceRelations: [sharedSpaceRelation({
+      left: imp.id, right: rat.id, provenance: 'tiny_capacity', originatingId: 'setup:sparse-tiny-cell',
+    })],
+    blockedCells: [{ column: 0, row: last }, { column: last, row: 0 }, { column: last - 3, row: 2 }],
+    worldObjects: [
+      feature('sparse-corner-a', [{ column: 0, row: 0 }], 'half_cover'),
+      feature('sparse-corner-b', [{ column: last, row: last }], 'half_cover'),
+      feature('sparse-slit', [{ column: last - 3, row: last - 3 }], 'three_quarters_cover'),
+      feature('sparse-mid', [{ column: 30_000, row: 30_000 }], 'half_cover'),
+    ],
+  });
+  return { state, fighter: fighter.id, goblin: goblin.id, imp: imp.id, rat: rat.id, ogre: ogre.id };
+}
+
+describe('PERF-02 cover6 sparse source index on a huge grid', () => {
+  it('COVER-SPARSE-HUGE-EXTENT traces a 65,536 x 65,536 encounter with sources in opposite corners like the reference', () => {
+    // The frozen reference indexes sources in a Map, so it answers here. A candidate that throws is a
+    // mismatch caught by the assertions below, not an escaped error.
+    const { state, fighter, goblin, imp, rat, ogre } = sparseHugeState();
+    const last = SPARSE_LAST;
+    const names: string[] = [];
+    const thrown: string[] = [];
+    const mismatches: string[] = [];
+    const check = (name: string, expected: () => unknown, actual: () => unknown) => {
+      const want = outcome(expected);
+      const got = outcome(actual);
+      names.push(name);
+      if (got.startsWith('THROW')) thrown.push(`${name}: ${got}`);
+      if (want !== got) mismatches.push(name);
+    };
+    const cellPairs: readonly (readonly [string, GridCell, GridCell])[] = [
+      ['wall off the diagonal', { column: last - 4, row: 1 }, { column: last - 2, row: 3 }],
+      ['wall off the diagonal, reversed', { column: last - 2, row: 3 }, { column: last - 4, row: 1 }],
+      ['slit', { column: last - 4, row: last - 4 }, { column: last - 2, row: last - 2 }],
+      ['bottom-left corner wall', { column: 0, row: last - 1 }, { column: 1, row: last }],
+      ['top-right corner wall', { column: last - 1, row: 0 }, { column: last, row: 1 }],
+      ['top-left corner object', { column: 1, row: 0 }, { column: 0, row: 1 }],
+      ['bottom-right corner object', { column: last, row: last - 1 }, { column: last - 1, row: last }],
+      ['across the whole grid', { column: 1, row: 1 }, { column: last - 1, row: last - 1 }],
+      ['open ground', { column: 100, row: 200 }, { column: 400, row: 300 }],
+    ];
+    for (const [label, from, to] of cellPairs) {
+      check(`terrain trace ${label}`, () => reference.traceTerrainLine(state, from, to), () => traceTerrainLine(state, from, to));
+      check(`terrain verdict ${label}`, () => verdictFields(reference.traceTerrainLine(state, from, to)),
+        () => verdictFields(terrainLineVerdict(state, from, to)));
+      check(`objects ${label}`, () => reference.coverTierBetweenObjects(state.worldObjects, from, to),
+        () => coverTierBetweenObjects(state.worldObjects, from, to));
+    }
+    const creatures = [fighter, goblin, imp, rat, ogre];
+    for (const a of creatures) {
+      for (const b of creatures) {
+        if (a === b) continue;
+        const pair = `${String(a)}->${String(b)}`;
+        check(`${pair} trace`, () => reference.traceCombatantLine(state, a, b), () => traceCombatantLine(state, a, b));
+        check(`${pair} cover`, () => reference.coverBetweenCombatants(state, a, b), () => coverBetweenCombatants(state, a, b));
+        check(`${pair} verdict`, () => verdictFields(reference.traceCombatantLine(state, a, b)),
+          () => verdictFields(combatantLineVerdict(state, a, b)));
+      }
+    }
+    for (const cell of [{ column: 9, row: last - 5 }, { column: 6, row: last - 9 }, { column: last - 2, row: 3 }]) {
+      const label = `${String(fighter)}->${String(cell.column)},${String(cell.row)}`;
+      check(`${label} trace`, () => reference.traceCombatantLineToCells(state, fighter, [cell]),
+        () => traceCombatantLineToCells(state, fighter, [cell]));
+      check(`${label} verdict`, () => verdictFields(reference.traceCombatantLineToCells(state, fighter, [cell])),
+        () => verdictFields(combatantLineVerdictToCells(state, fighter, [cell])));
+    }
+    for (const anchor of [{ column: 9, row: last - 5 }, { column: 5, row: last - 3 }, { column: 2, row: last - 9 }]) {
+      const moved = withTokenAt(state, goblin, anchor);
+      for (const target of creatures) {
+        if (target === goblin) continue;
+        const label = `${String(goblin)}@${String(anchor.column)},${String(anchor.row)}->${String(target)}`;
+        check(`${label} trace`, () => reference.traceCombatantLine(moved, goblin, target),
+          () => traceCombatantLine(state, goblin, target, { sourceAnchor: anchor }));
+        check(`${label} verdict`, () => verdictFields(reference.traceCombatantLine(moved, goblin, target)),
+          () => verdictFields(combatantLineVerdict(state, goblin, target, { sourceAnchor: anchor })));
+      }
+    }
+    // 9 cell pairs x 3 + 20 creature pairs x 3 + 3 cells x 2 + 3 anchors x 4 targets x 2.
+    expect(names).toHaveLength(117);
+    expect(thrown).toEqual([]);
+    expect(mismatches).toEqual([]);
+  });
+
+  it('COVER-SPARSE-HAND finds each source of a huge sparse encounter at its own cell, with every source sharing it', () => {
+    const { state, fighter, goblin, imp, rat } = sparseHugeState();
+    const last = SPARSE_LAST;
+    // S = (65531, 1), T = (65533, 3), wall W = (65532, 2) off the row/column diagonal symmetry.
+    // Corner (65531,1): all four lines cross W -> Total. Corner (65532,2) is W's own top-left
+    // corner: all four lines cross W -> Total. Corner (65532,1): to (65533,3) cells (65532,1),
+    // (65532,2)=W; to (65534,3) the diagonal (65532,1),(65533,2) misses W; to (65533,4) and
+    // (65534,4) through (65532,2)=W -> 3 obstructed -> Three-Quarters. Corner (65531,2) is its
+    // mirror -> Three-Quarters. The least protective tie goes to row 1: corner (65532,1).
+    const source = { column: last - 4, row: 1 };
+    const target = { column: last - 2, row: 3 };
+    expect(terrainLineVerdict(state, source, target)).toEqual({
+      sourceCell: source, targetCell: target, tier: 'three_quarters', blocksSight: false,
+      sourceIds: [`blocked:${String(last - 3)},2`],
+    });
+    const trace = traceTerrainLine(state, source, target);
+    expect(trace.sourceCorner).toEqual({ column: last - 3, row: 1 });
+    expect(trace.lines.map((line) => line.tier)).toEqual(['total', 'none', 'total', 'total']);
+    // Fighter (3, 65530) to goblin (7, 65530): from each source corner the two lines to target
+    // corners on its own row run along a grid line and cross nothing; the two others cross row
+    // 65530 between columns 4 and 6, through (5, 65530) where the imp and the rat both stand.
+    // Every corner has 2 obstructed lines -> Half, naming both creatures.
+    expect(coverBetweenCombatants(state, fighter, goblin)).toEqual({
+      tier: 'half', sourceIds: [`creature:${String(imp)}`, `creature:${String(rat)}`],
+    });
+    // The goblin considering (9, 65530): the same geometry mirrored, and its own body at (7, 65530)
+    // goes with it (coverself), so again only the imp and the rat.
+    expect(coverBetweenCombatants(state, goblin, fighter, { sourceAnchor: { column: 9, row: last - 5 } })).toEqual({
+      tier: 'half', sourceIds: [`creature:${String(imp)}`, `creature:${String(rat)}`],
+    });
+    // (65531, 65531) to (65533, 65533) past the slit at (65532, 65532): the wall case's geometry on
+    // the diagonal. Corners (65531,65531) and (65532,65532) have 4 lines through the slit, the
+    // other two 3; each line is Three-Quarters, so every corner is Three-Quarters and the tie goes
+    // to the first corner, (65531, 65531).
+    const slitSource = { column: last - 4, row: last - 4 };
+    const slitTarget = { column: last - 2, row: last - 2 };
+    expect(coverTierBetweenObjects(state.worldObjects, slitSource, slitTarget)).toBe('three_quarters');
+    expect(terrainLineVerdict(state, slitSource, slitTarget)).toEqual({
+      sourceCell: slitSource, targetCell: slitTarget, tier: 'three_quarters', blocksSight: false,
+      sourceIds: ['object:object:sparse-slit'],
+    });
   });
 });
 
