@@ -2,6 +2,7 @@ import { creatureSizes, type KnownCreatureSize } from '../domain/enums';
 import type { Brand } from '../domain/ids';
 import type { EncounterState } from './encounter';
 import { isCellInside, type BoardCell, type GridCell } from './grid';
+import { assertSupportedGrid } from './grid-size';
 import { terrainPassabilityAt } from './terrain';
 
 /**
@@ -79,26 +80,21 @@ export function squareCell(
   return (anchor + rowOffset * board.columns + columnOffset) as CellIndex;
 }
 
-function wholeGridCellCount(state: EncounterState): number {
-  const { columns, rows } = state.bounds;
-  return Number.isSafeInteger(columns) && Number.isSafeInteger(rows) && columns > 0 && rows > 0
-    ? columns * rows
-    : 0;
-}
-
 /**
  * Builds the board of `state`. `occupantCells[ordinal]` is the stationary footprint of
  * occupant `ordinal`; the caller decides who occupies (living, placed creatures in token
- * order). A state whose bounds are not a positive whole grid gets an empty board: no
- * `BoardCell` of such a grid exists, so no question can reach it.
+ * order). Every array is sized by the cell count, so the board first checks the engine
+ * grid-size contract (grid-size.ts) and throws GridSizeError before allocating anything
+ * for a grid outside it. createEncounter and every decoder refuse such a grid already;
+ * only a state spread together in memory can reach this check.
  */
 export function buildMovementBoard(
   state: EncounterState,
   occupantCells: readonly (readonly GridCell[])[],
 ): MovementBoard {
-  const cellCount = wholeGridCellCount(state);
-  const columns = cellCount === 0 ? 0 : state.bounds.columns;
-  const rows = cellCount === 0 ? 0 : state.bounds.rows;
+  assertSupportedGrid(state.bounds);
+  const { columns, rows } = state.bounds;
+  const cellCount = columns * rows;
   const at = (cell: GridCell): CellIndex | null =>
     isCellInside(state.bounds, cell) ? (cell.row * columns + cell.column) as CellIndex : null;
   const mark = (mask: Uint8Array, cell: GridCell): void => {

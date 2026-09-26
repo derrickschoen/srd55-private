@@ -4,6 +4,7 @@ import { narrowOpeningRegion, sharedSpaceRelation } from '../../../src/combat/cr
 import { createEncounter, type EncounterSetup, type EncounterState } from '../../../src/combat/encounter';
 import { encounterMovementWorld } from '../../../src/combat/encounter-movement-world';
 import { adjacentCells, boardCell, type GridCell } from '../../../src/combat/grid';
+import { GridSizeError, MAX_GRID_CELLS } from '../../../src/combat/grid-size';
 import type { MovementWorld } from '../../../src/combat/movement';
 import { persistentAreaContains, type PersistentArea } from '../../../src/combat/persistent-areas';
 import { feetPoint } from '../../../src/combat/templates';
@@ -120,6 +121,26 @@ describe('movement board: the in-bounds cell type', () => {
     expect(typeof undecoded).toBe('function');
     expect(world.traversal(mover.id, onBoard(state.bounds, { column: 0, row: 0 }), decoded))
       .toEqual({ kind: 'enterable', cost: 5, canEnd: true });
+  });
+
+  it('builds a board of exactly MAX_GRID_CELLS and refuses one cell more before allocating', () => {
+    // Only a state spread together in memory can carry such bounds: createEncounter and every
+    // decoder refuse them first (tests/unit/vtt/grid-size-contract.test.ts).
+    const mover = playerProfile('board-grid-size-mover');
+    const { state } = encounter({ bounds: { columns: 3, rows: 1 }, combatants: [mover], tokens: [placedToken(mover, 0)] });
+    const atLimit = { ...state, bounds: { columns: 1_024, rows: 1_024 } };
+    expect(MAX_GRID_CELLS).toBe(1_024 * 1_024);
+    let world: MovementWorld<CombatantId> | undefined;
+    expect(() => { world = encounterMovementWorld(atLimit); }).not.toThrow();
+    expect(world?.traversal(mover.id, onBoard(atLimit.bounds, { column: 1_023, row: 1_023 }),
+      onBoard(atLimit.bounds, { column: 1_022, row: 1_022 }))).toEqual({ kind: 'enterable', cost: 5, canEnd: true });
+    let refused: unknown;
+    try {
+      encounterMovementWorld({ ...state, bounds: { columns: 17, rows: 61_681 } });
+    } catch (error) {
+      refused = error;
+    }
+    expect(refused instanceof GridSizeError && refused.problem === 'over_max_cells').toBe(true);
   });
 });
 
