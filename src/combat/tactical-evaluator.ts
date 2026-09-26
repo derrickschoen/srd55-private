@@ -196,6 +196,15 @@ export type TacticalUnresolvedReason =
    * mode differs with it (another source may already give Disadvantage).
    */
   | 'close_combat_unresolved'
+  /**
+   * A condition clause of the roll mode reads whether the attacker sees the
+   * target or the target sees the attacker (a Frightened attacker's source in
+   * sight; an Invisible attacker or target unseen), and the caller does not
+   * know that fact (TacticalSightFact). Listed whenever such a clause reads
+   * an unknown; it blocks the probability only when the roll mode differs
+   * with the fact.
+   */
+  | 'sight_unresolved'
   | 'target_armor_class_unresolved'
   | 'damage_unresolved'
   | 'conditional_damage_rider_unresolved'
@@ -206,6 +215,13 @@ export type TacticalUnresolvedReason =
 export interface TacticalUnknownTargetFact {
   readonly kind: 'unknown';
 }
+
+/**
+ * Whether one creature sees another. The engine knows it; an actor-local
+ * planner knows it only where the facts were observed (the square the actor
+ * stands on), and states it unknown elsewhere.
+ */
+export type TacticalSightFact = boolean | TacticalUnknownTargetFact;
 
 /**
  * Ranged Attacks in Close Combat, docs/srd/full/srd-5.2.1.txt:911-917: "When
@@ -309,8 +325,9 @@ export interface TacticalAttackInput {
   readonly damageTerms: readonly TacticalDamageTerm[] | null;
   readonly attackerConditions: readonly AppliedCondition[];
   readonly targetConditions: readonly AppliedCondition[];
-  readonly attackerCanSeeTarget: boolean;
-  readonly targetCanSeeAttacker: boolean;
+  /** Read only by the condition clauses (conditionAttackRollModeSources). */
+  readonly attackerCanSeeTarget: TacticalSightFact;
+  readonly targetCanSeeAttacker: TacticalSightFact;
   readonly rollModeSources: readonly AttackRollModeSource[];
   readonly featureRollModeInput: MonsterRollModeFeatureInput | null;
   /**
@@ -362,6 +379,7 @@ export type TacticalProbabilityVerdict =
         | 'attack_out_of_range'
         | 'long_range_unresolved'
         | 'close_combat_unresolved'
+        | 'sight_unresolved'
         | 'target_armor_class_unresolved'
         | 'random_attack_modifier_unresolved'
         | 'target_has_total_cover'
@@ -382,6 +400,7 @@ export type TacticalDamageVerdict =
         | 'attack_out_of_range'
         | 'long_range_unresolved'
         | 'close_combat_unresolved'
+        | 'sight_unresolved'
         | 'target_armor_class_unresolved'
         | 'damage_unresolved'
         | 'random_attack_modifier_unresolved'
@@ -730,6 +749,44 @@ function modifiedAttackRollProbabilities(input: TacticalAttackInput, mode: RollM
   return { hit, critical, miss };
 }
 
+/** A known sight fact admits itself; an unknown one both. */
+function sightOutcomes(fact: TacticalSightFact): readonly boolean[] {
+  return typeof fact === 'boolean' ? [fact] : [true, false];
+}
+
+function sameSource(left: AttackRollModeSource, right: AttackRollModeSource): boolean {
+  return left.mode === right.mode && left.reason === right.reason;
+}
+
+function sourcesKey(sources: readonly AttackRollModeSource[]): string {
+  return sources.map((source) => `${source.mode}:${source.reason}`).join(',');
+}
+
+/**
+ * The roll-mode verdict over several possible outcomes: the sources present
+ * in every outcome (counted, in the first outcome's order), and the mode all
+ * outcomes agree on; when they disagree, the mode of those common sources.
+ */
+function agreedRollMode(
+  verdicts: readonly TacticalRollModeVerdict[],
+  modes: ReadonlySet<RollMode>,
+): TacticalRollModeVerdict {
+  const [first, ...rest] = verdicts;
+  if (first === undefined) return combineAttackRollMode([]);
+  const remaining = rest.map((verdict) => [...verdict.sources]);
+  const common = first.sources.filter((source) => {
+    const indexes = remaining.map((sources) => sources.findIndex((candidate) => sameSource(candidate, source)));
+    if (indexes.some((index) => index < 0)) return false;
+    remaining.forEach((sources, position) => {
+      const index = indexes[position];
+      if (index !== undefined) sources.splice(index, 1);
+    });
+    return true;
+  });
+  const verdict = combineAttackRollMode(common);
+  return modes.size === 1 ? { ...verdict, mode: first.mode } : verdict;
+}
+
 export function evaluateTacticalAttack(
   input: TacticalAttackInput,
 ): TacticalAttackEvaluation {
@@ -743,33 +800,55 @@ export function evaluateTacticalAttack(
   const longRangeSources: readonly AttackRollModeSource[] = range.status === 'resolved' && range.band === 'long'
     ? [{ mode: 'disadvantage', reason: 'long_range_disadvantage' }]
     : [];
-  const conditionSources = conditionAttackRollModeSources({
-    attackerId: input.attackerId,
-    targetId: input.targetId,
-    attackerConditions: input.attackerConditions,
-    targetConditions: input.targetConditions,
-    distanceFeet,
-    attackerCanSeeTarget: input.attackerCanSeeTarget,
-    targetCanSeeAttacker: input.targetCanSeeAttacker,
-  });
-  const otherSources: readonly AttackRollModeSource[] = [
+  const statedSources: readonly AttackRollModeSource[] = [
     ...input.rollModeSources,
     ...(input.featureRollModeInput === null
       ? []
       : projectMonsterRollModeSources(input.featureRollModeInput)),
-    ...conditionSources,
   ];
-  const rollModeWithCloseCombat = (disadvantage: boolean): TacticalRollModeVerdict => combineAttackRollMode([
-    ...longRangeSources,
-    ...(disadvantage ? [{ mode: 'disadvantage', reason: 'ranged_close_combat_disadvantage' } as const] : []),
-    ...otherSources,
-  ]);
-  // An unresolved close-combat verdict leaves its source out of the reported
-  // mode; it decides the roll only when adding its Disadvantage would change
-  // that mode (another source may already give Disadvantage, e.g. Prone).
-  const rollMode = rollModeWithCloseCombat(closeCombat.kind === 'disadvantage');
-  const closeCombatDecidesMode = closeCombat.kind === 'unresolved' &&
-    rollModeWithCloseCombat(true).mode !== rollMode.mode;
+  // The roll mode under every outcome the facts admit: each unknown sight
+  // fact either way, and an unresolved close-combat verdict with or without
+  // its Disadvantage. Known facts admit one outcome, so a caller that knows
+  // them all (the engine) evaluates exactly one case.
+  const closeCombatOutcomes: readonly boolean[] = closeCombat.kind === 'unresolved'
+    ? [true, false]
+    : [closeCombat.kind === 'disadvantage'];
+  const sightRows = sightOutcomes(input.attackerCanSeeTarget).flatMap((attackerCanSeeTarget) =>
+    sightOutcomes(input.targetCanSeeAttacker).map((targetCanSeeAttacker) => {
+      const conditionSources = conditionAttackRollModeSources({
+        attackerId: input.attackerId,
+        targetId: input.targetId,
+        attackerConditions: input.attackerConditions,
+        targetConditions: input.targetConditions,
+        distanceFeet,
+        attackerCanSeeTarget,
+        targetCanSeeAttacker,
+      });
+      return {
+        conditionSources,
+        verdicts: closeCombatOutcomes.map((disadvantage) => combineAttackRollMode([
+          ...longRangeSources,
+          ...(disadvantage ? [{ mode: 'disadvantage', reason: 'ranged_close_combat_disadvantage' } as const] : []),
+          ...statedSources,
+          ...conditionSources,
+        ])),
+      };
+    }));
+  const verdicts = sightRows.flatMap((row) => row.verdicts);
+  const modes = new Set(verdicts.map((verdict) => verdict.mode));
+  // With one outcome, its verdict. Otherwise the sources every outcome has
+  // (an unknown fact's source is left out), and the mode when all outcomes
+  // agree on it; when they do not, the probability is unresolved below.
+  const rollMode: TacticalRollModeVerdict = verdicts.length === 1 && verdicts[0] !== undefined
+    ? verdicts[0]
+    : agreedRollMode(verdicts, modes);
+  const closeCombatDecidesMode = sightRows.some((row) =>
+    new Set(row.verdicts.map((verdict) => verdict.mode)).size > 1);
+  const sightReadUnknown = sightRows.length > 1 &&
+    new Set(sightRows.map((row) => sourcesKey(row.conditionSources))).size > 1;
+  const modeBlockingReason: 'close_combat_unresolved' | 'sight_unresolved' | null = modes.size === 1
+    ? null
+    : closeCombatDecidesMode ? 'close_combat_unresolved' : 'sight_unresolved';
   const criticalDistances = impliedTargetConditions(input.targetConditions)
     .flatMap((condition) => conditionMechanicalState([condition]).clauses)
     .flatMap((clause) => clause.kind === 'critical_if_hit_within' ? [Number(clause.feet)] : []);
@@ -801,8 +880,8 @@ export function evaluateTacticalAttack(
       };
   const blockingReason = firstBlockingReason(range, input.targetArmorClass);
   const probabilityBlockingReason = blockingReason ??
-    (closeCombatDecidesMode
-      ? 'close_combat_unresolved'
+    (modeBlockingReason !== null
+      ? modeBlockingReason
       : input.unresolvedReasons?.includes('random_attack_modifier_unresolved') === true
       ? 'random_attack_modifier_unresolved'
       : input.unresolvedReasons?.includes('target_has_total_cover') === true
@@ -812,6 +891,7 @@ export function evaluateTacticalAttack(
     ...(input.unresolvedReasons ?? []),
     ...(blockingReason === null ? [] : [blockingReason]),
     ...(closeCombat.kind === 'unresolved' ? ['close_combat_unresolved' as const] : []),
+    ...(sightReadUnknown ? ['sight_unresolved' as const] : []),
     ...(targetHitPointsKnown ? [] : ['target_hit_points_unresolved' as const]),
     ...(input.damageTerms === null ? ['damage_unresolved' as const] : []),
   ])];

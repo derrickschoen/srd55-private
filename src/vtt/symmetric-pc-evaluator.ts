@@ -32,6 +32,7 @@ import {
   projectedAttackFromStart,
   projectedCloseCombatEnemies,
   projectedMovementOptions,
+  projectedSightFacts,
   type EngineProjectedMovementRequest,
 } from './engine-query-port';
 import { canonicalJson } from '../commands/canonical-json';
@@ -342,8 +343,7 @@ function tacticalAssessment(
       damageTerms: damageTerms(command),
       attackerConditions: combatantConditions(state, attacker.profile.id),
       targetConditions: projectedConditions(target),
-      attackerCanSeeTarget: true,
-      targetCanSeeAttacker: true,
+      ...projectedSightFacts(state, projection, target, actorPosition(state, command.actor)),
       rollModeSources: rollModeSources(command),
       featureRollModeInput: null,
       closeCombatEnemies: projectedCloseCombatEnemies(state, projection, actorPosition(state, command.actor)),

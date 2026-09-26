@@ -20,6 +20,7 @@ import type { ConditionName } from '../../../src/combat/conditions';
 import {
   projectedCloseCombatEnemies,
   projectedMovementOptions,
+  projectedSightFacts,
   type EngineProjectedMovementRequest,
 } from '../../../src/vtt/engine-query-port';
 import { projectActorKnowledge } from '../../../src/vtt/intel/actor-knowledge';
@@ -705,5 +706,128 @@ describe('CC-UNRESOLVED-PRONE: an unknown close-combat fact that cannot change t
     expect(planned(candidateAt(evaluation, dark).after))
       .toEqual({ mode: 'disadvantage', closeCombat: false, unresolved: true, damage: 2.28 });
     expect(evaluation.start).toEqual(standing);
+  });
+});
+
+/*
+ * SIGHT-INVISIBLE-STEP (review r3 Q5). An Invisible attacker's "attack rolls
+ * have Advantage. If a creature can somehow see you, you don't gain this
+ * benefit against that creature" (docs/srd/full/srd-5.2.1.txt:11838-11850),
+ * and "When a creature can't see you, you have Advantage on attack rolls
+ * against it" (:884-891). Whether the target sees the PC is observed where
+ * the PC stands; at another square it turns on the target's senses, which
+ * actor-local knowledge does not hold.
+ *
+ * BOARD (8 x 3, bright light): the ranger, Invisible, at (1,1); the target, a
+ * Goblin Warrior (AC 15) given Blindsight 15 ft, at (4,1), 15 feet away. The
+ * goblin sees the ranger by Blindsight, so the ranger's knowledge records it
+ * as seeing it now; the ranger sees the goblin. Longbow +5, 1d8 + 3, 150/600.
+ * - From (1,1): seen by the target, so the Invisible Advantage does not apply
+ *   against it; no enemy within 5 feet: a straight roll. One d20 hits AC 15 on
+ *   faces 10-20 (11/20, critical 1/20): ED = 10/20 x 7.5 + 1/20 x 12 = 4.35.
+ * - From (0,1), 20 feet away, the goblin's sight of the ranger is unknown:
+ *   the roll is straight if it sees it and has Advantage if not, so the plan
+ *   states no number (sight_unresolved). The plan used to assert it was seen
+ *   there and state 4.35.
+ * - The reducer after the step to (0,1): 20 feet is beyond the Blindsight and
+ *   the goblin cannot otherwise see an Invisible creature, so the Longbow roll
+ *   has Advantage (two d20 faces at RNG 0.5).
+ * - A Frightened ranger whose source of fear is the goblin: Disadvantage "while
+ *   the source of fear is within line of sight" (:11740-11745). Where it stands
+ *   it sees the goblin, so Disadvantage: hit 121/400, critical 1/400,
+ *   ED = 120/400 x 7.5 + 1/400 x 12 = 2.28. At (0,1) its own sight of the goblin
+ *   from there is unknown to the plan: sight_unresolved.
+ */
+describe('SIGHT-INVISIBLE-STEP: who sees whom is observed only on the square the PC stands on', () => {
+  const board = (condition: 'Invisible' | 'Frightened') => {
+    const ranger = playerProfile(`sight-${condition}-ranger`, { initiativeBonus: 20 });
+    const goblinBase = monsterCombatantProfile(GOBLIN_WARRIOR, {
+      combatantId: `combatant:sight-${condition}-goblin`, tokenId: `token:sight-${condition}-goblin`,
+    });
+    const goblin = {
+      ...goblinBase,
+      rules: {
+        ...goblinBase.rules,
+        initiativeBonus: -20,
+        senses: [...goblinBase.rules.senses, { kind: 'blindsight', rangeFeet: 15 } as const],
+      },
+    };
+    const created = createEncounter({
+      bounds: { columns: 8, rows: 3 },
+      combatants: [ranger, goblin],
+      tokens: [placedToken(ranger, 1, 1), placedToken(goblin, 4, 1)],
+    });
+    const rolled = reduceEncounter(created, { type: 'roll_initiative' }, () => 0.5).state;
+    const state: EncounterState = {
+      ...rolled,
+      effects: [...rolled.effects, conditionEffect(`sight-${condition}`, ranger.id, goblin.id, condition)],
+    };
+    expect(state.activeCombatant).toBe(ranger.id);
+    return { state, ranger, goblin };
+  };
+  const standing = { column: 1, row: 1 } as const;
+  const away = { column: 0, row: 1 } as const;
+  const planned = (verdict: MovementEvaluation['candidates'][number]['after']) => {
+    if (verdict.status !== 'resolved') throw new Error('Expected an evaluated attack verdict.');
+    return {
+      mode: verdict.evaluation.rollMode.mode,
+      sightUnknown: verdict.evaluation.unresolved.includes('sight_unresolved'),
+      damage: verdict.evaluation.damage.status === 'resolved'
+        ? Math.round(verdict.evaluation.damage.expectedDamage * 1e9) / 1e9
+        : verdict.evaluation.damage.reason,
+    };
+  };
+
+  it('SIGHT-INVISIBLE-STEP: an Invisible ranger stepping out of the goblin\'s Blindsight is planned unresolved there, and the reducer then rolls Advantage', () => {
+    const { state, ranger, goblin } = board('Invisible');
+    const projection = projectActorKnowledge(state, ranger.id);
+    const target = projection.targets.find((entry) => entry.targetId === goblin.id);
+    if (target?.kind !== 'perceived') throw new Error('The ranger does not perceive the goblin.');
+    expect(target.reciprocalVisibility).toEqual({ kind: 'perceived', targetCanSeeActor: true });
+    expect(projectedSightFacts(state, projection, target, standing))
+      .toEqual({ attackerCanSeeTarget: true, targetCanSeeAttacker: true });
+    expect(projectedSightFacts(state, projection, target, away))
+      .toEqual({ attackerCanSeeTarget: { kind: 'unknown' }, targetCanSeeAttacker: { kind: 'unknown' } });
+
+    const request = longbowRequest(ranger.id, goblin.id);
+    const evaluation = projectedMovementOptions(state, projection, {
+      ...request, attack: { ...request.attack, attackerConditions: [{ name: 'Invisible' }] },
+    });
+    if (evaluation === null) throw new Error('Expected a projected movement evaluation.');
+    expect(evaluation.start).toEqual(standing);
+    expect(planned(candidateAt(evaluation, away).before)).toEqual({ mode: 'normal', sightUnknown: false, damage: 4.35 });
+    expect(planned(candidateAt(evaluation, away).after))
+      .toEqual({ mode: 'normal', sightUnknown: true, damage: 'sight_unresolved' });
+
+    const moved = reduceEncounter(state, {
+      type: 'move', actor: ranger.id, path: [{ ...away }], cause: 'voluntary',
+    }, () => 0.5).state;
+    const shot = reduceEncounter(moved, {
+      type: 'attack', actor: ranger.id, target: goblin.id, attackBonus: 5, criticalFloor: 20, rollMode: 'normal',
+      attackerCanSeeTarget: true, targetCanSeeAttacker: true,
+      tacticalRange: { kind: 'ranged', normalRangeFeet: feet(150), longRangeFeet: feet(600) },
+      damage: {
+        terms: [{ type: damageType('Piercing'), dice: { count: 1, sides: dieSides(8), modifier: 3 } }],
+        critical: false,
+        responses: [],
+      },
+    }, () => 0.5).events.find((event) => event.type === 'attack_resolved');
+    if (shot?.type !== 'attack_resolved') throw new Error('The Longbow shot emitted no attack roll.');
+    expect({ mode: shot.attack.roll.mode, faces: shot.attack.roll.faces.length }).toEqual({ mode: 'advantage', faces: 2 });
+  });
+
+  it('SIGHT-FRIGHTENED-STANDING: a ranger Frightened of the goblin plans its Disadvantage where it sees it, and no number where its sight is unknown', () => {
+    const { state, ranger, goblin } = board('Frightened');
+    const projection = projectActorKnowledge(state, ranger.id);
+    const request = longbowRequest(ranger.id, goblin.id);
+    const evaluation = projectedMovementOptions(state, projection, {
+      ...request,
+      attack: { ...request.attack, attackerConditions: [{ name: 'Frightened', source: goblin.id }] },
+    });
+    if (evaluation === null) throw new Error('Expected a projected movement evaluation.');
+    expect(planned(candidateAt(evaluation, away).before))
+      .toEqual({ mode: 'disadvantage', sightUnknown: false, damage: 2.28 });
+    expect(planned(candidateAt(evaluation, away).after))
+      .toEqual({ mode: 'normal', sightUnknown: true, damage: 'sight_unresolved' });
   });
 });

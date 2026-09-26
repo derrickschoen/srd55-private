@@ -48,6 +48,7 @@ import {
   type TacticalDamageTerm,
   type TacticalAttackEvaluation,
   type TacticalRangeBand,
+  type TacticalSightFact,
   type TacticalUnresolvedReason,
 } from '../combat/tactical-evaluator';
 import type { MonsterAction, MonsterAttackAction, MonsterBonusAction, MonsterSavingThrowAction, MonsterSpellReference } from '../combat/statblock';
@@ -1634,9 +1635,7 @@ export function projectedCloseCombatEnemies(
   position: GridCell,
 ): readonly CloseCombatEnemy[] {
   const actorSpace = queryCombatantSpaceAt(state, projection.actorId, position);
-  const standing = state.tokens.find((token) => token.combatantId === projection.actorId)?.position;
-  const atStandingSquare = standing !== undefined &&
-    standing.column === position.column && standing.row === position.row;
+  const atStandingSquare = isStandingSquare(state, projection.actorId, position);
   return projection.targets.flatMap((target): readonly CloseCombatEnemy[] => {
     if (target.kind !== 'perceived') return [];
     const distanceFeet = minimumSpaceDistance(actorSpace, decodeProjectedCreatureSpace(target));
@@ -1652,6 +1651,44 @@ export function projectedCloseCombatEnemies(
   });
 }
 
+/** Whether `position` is the square the actor's token stands on. */
+function isStandingSquare(state: EncounterState, actorId: CombatantId, position: GridCell): boolean {
+  const standing = state.tokens.find((token) => token.combatantId === actorId)?.position;
+  return standing !== undefined && standing.column === position.column && standing.row === position.row;
+}
+
+/**
+ * Who sees whom for the PC's attack on `target` from `position`, over
+ * actor-local knowledge, for the condition clauses that read it (a Frightened
+ * PC's source of fear in sight, an Invisible PC unseen; see
+ * conditionAttackRollModeSources). On the square the PC stands on both are
+ * observed: the target's sight of the PC is the projection's
+ * (reciprocalVisibility), and the PC's own sight of the target is the sense
+ * it perceives the target by there (detectCombatant, the rule
+ * projectActorKnowledge perceives it by: seen, or only located by tremorsense
+ * or web sense). At any other square both are unknown, for the reason
+ * projectedCloseCombatEnemies gives: they turn on senses, light and
+ * obscurement from that square. An unknown one that changes the roll mode
+ * leaves the verdict sight_unresolved; an Invisible PC that steps out of an
+ * enemy's blindsight is not planned as seen there.
+ */
+export function projectedSightFacts(
+  state: EncounterState,
+  projection: ActorKnowledgeProjection,
+  target: PerceivedTargetKnowledge,
+  position: GridCell,
+): { readonly attackerCanSeeTarget: TacticalSightFact; readonly targetCanSeeAttacker: TacticalSightFact } {
+  if (!isStandingSquare(state, projection.actorId, position)) {
+    return { attackerCanSeeTarget: { kind: 'unknown' }, targetCanSeeAttacker: { kind: 'unknown' } };
+  }
+  return {
+    attackerCanSeeTarget: detect(state, projection.actorId, target.targetId)?.kind === 'seen',
+    targetCanSeeAttacker: target.reciprocalVisibility.kind === 'perceived'
+      ? target.reciprocalVisibility.targetCanSeeActor
+      : { kind: 'unknown' },
+  };
+}
+
 interface ProjectedAttackPlanning {
   readonly actor: EncounterCombatantState;
   readonly start: GridCell;
@@ -1661,9 +1698,10 @@ interface ProjectedAttackPlanning {
 
 /**
  * One PC attack's verdict input from any square, over actor-local knowledge.
- * The full encounter is used only for the actor, public board geometry and ONE
- * opponent fact, the target's Armor Class; every other opponent fact comes
- * from the supplied projection.
+ * The full encounter is used only for the actor (its own sight of the target
+ * where it stands included, see projectedSightFacts), public board geometry
+ * and ONE opponent fact, the target's Armor Class; every other opponent fact
+ * comes from the supplied projection.
  */
 function projectedAttackPlanning(
   state: EncounterState,
@@ -1717,8 +1755,7 @@ function projectedAttackPlanning(
         damageTerms: request.attack.damageTerms,
         attackerConditions: request.attack.attackerConditions,
         targetConditions,
-        attackerCanSeeTarget: true,
-        targetCanSeeAttacker: true,
+        ...projectedSightFacts(state, projection, target, position),
         rollModeSources: request.attack.rollModeSources,
         featureRollModeInput: null,
         closeCombatEnemies: projectedCloseCombatEnemies(state, projection, position),

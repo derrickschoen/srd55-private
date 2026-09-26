@@ -650,6 +650,66 @@ describe('Ranged Attacks in Close Combat (docs/srd/full/srd-5.2.1.txt:911-917)',
     });
   });
 
+  /*
+   * SIGHT-UNKNOWN (review r3 Q5). The condition clauses read who sees whom:
+   * - Invisible: "your attack rolls have Advantage. If a creature can somehow
+   *   see you, you don't gain this benefit against that creature"
+   *   (docs/srd/full/srd-5.2.1.txt:11838-11850): the target's sight of the
+   *   attacker.
+   * - Frightened: "Disadvantage on ... attack rolls while the source of fear
+   *   is within line of sight" (:11740-11745): read, when the target is the
+   *   source, as the attacker's sight of the target.
+   * An actor-local planner may not know either fact. baseInput numbers:
+   * straight 0.5 / 3.475; Disadvantage 0.25 / 1.63625; Advantage: hit
+   * 1 - (1/2)^2 = 3/4, critical 1 - (19/20)^2 = 39/400:
+   * ED = (300 - 39)/400 x 6.5 + 39/400 x 11 = 4.24125 + 1.0725 = 5.31375.
+   */
+  it('SIGHT-UNKNOWN: an unknown sight fact that a condition clause reads, and that changes the roll mode, leaves no number', () => {
+    const invisible = [{ name: 'Invisible' }] as const;
+    const planned = (input: TacticalAttackInput) => {
+      const evaluation = evaluateTacticalAttack(input);
+      return {
+        mode: evaluation.rollMode.mode,
+        hit: evaluation.probabilities.status === 'resolved' ? evaluation.probabilities.hit : evaluation.probabilities.reason,
+        damage: evaluation.damage.status === 'resolved'
+          ? Math.round(evaluation.damage.expectedDamage * 1e9) / 1e9
+          : evaluation.damage.reason,
+        sightUnknown: evaluation.unresolved.includes('sight_unresolved'),
+      };
+    };
+    const unknown = { kind: 'unknown' } as const;
+    // The Invisible attacker: seen by the target, straight; unseen, Advantage; not known, no number.
+    expect(planned(baseInput({ attackerConditions: invisible, targetCanSeeAttacker: true })))
+      .toEqual({ mode: 'normal', hit: 0.5, damage: 3.475, sightUnknown: false });
+    expect(planned(baseInput({ attackerConditions: invisible, targetCanSeeAttacker: false })))
+      .toEqual({ mode: 'advantage', hit: 0.75, damage: 5.31375, sightUnknown: false });
+    expect(planned(baseInput({ attackerConditions: invisible, targetCanSeeAttacker: unknown })))
+      .toEqual({ mode: 'normal', hit: 'sight_unresolved', damage: 'sight_unresolved', sightUnknown: true });
+    // Frightened of the target: Disadvantage while the attacker sees it; not known, no number.
+    const frightened = [{ name: 'Frightened', source: combatantId('combatant:target') }] as const;
+    expect(planned(baseInput({ attackerConditions: frightened, attackerCanSeeTarget: true })))
+      .toEqual({ mode: 'disadvantage', hit: 0.25, damage: 1.63625, sightUnknown: false });
+    expect(planned(baseInput({ attackerConditions: frightened, attackerCanSeeTarget: unknown })))
+      .toEqual({ mode: 'normal', hit: 'sight_unresolved', damage: 'sight_unresolved', sightUnknown: true });
+    // Frightened and Prone: Disadvantage whatever the sight, so the number stands; the unknown stays listed.
+    expect(planned(baseInput({ attackerConditions: [...frightened, { name: 'Prone' }], attackerCanSeeTarget: unknown })))
+      .toEqual({ mode: 'disadvantage', hit: 0.25, damage: 1.63625, sightUnknown: true });
+    // No clause reads sight (no condition, or fear of another creature): unknown sight changes nothing.
+    expect(planned(baseInput({ attackerCanSeeTarget: unknown, targetCanSeeAttacker: unknown })))
+      .toEqual({ mode: 'normal', hit: 0.5, damage: 3.475, sightUnknown: false });
+    expect(planned(baseInput({
+      attackerConditions: [{ name: 'Frightened', source: combatantId('combatant:elsewhere') }],
+      attackerCanSeeTarget: unknown, targetCanSeeAttacker: unknown,
+    }))).toEqual({ mode: 'normal', hit: 0.5, damage: 3.475, sightUnknown: false });
+    // Close combat and sight both unknown: an Invisible archer beside an enemy of
+    // unknown sight whose target's sight is unknown too. The close-combat
+    // outcome alone changes the mode, so that is the reason given.
+    expect(planned(baseInput({
+      attackerConditions: invisible, targetCanSeeAttacker: unknown,
+      closeCombatEnemies: [enemy({ seesAttacker: unknown })],
+    }))).toMatchObject({ hit: 'close_combat_unresolved', sightUnknown: true });
+  });
+
   it('CC-REDUCER: the goblin archer rolls two d20s at a PC 15 feet away while a second PC stands next to it, and one when that PC is Paralyzed, Blinded, dying, Stable, 10 feet away, or a goblin ally', () => {
     const rolled = (board: ReturnType<typeof goblinArcherBoard>, target = board.target.id) =>
       rolledMode(board.state, monsterAttackCommand(board.shortbow, board.archer.id, target));

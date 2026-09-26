@@ -43,6 +43,7 @@ type AttackProbabilityShape = IntelResult<{
   | 'attack_out_of_range'
   | 'long_range_unresolved'
   | 'close_combat_unresolved'
+  | 'sight_unresolved'
   | 'target_armor_class_unresolved'
   | 'random_attack_modifier_unresolved'
   | 'target_has_total_cover'>;
