@@ -33,13 +33,21 @@ export interface SeedRange {
   readonly end: number;
 }
 
+/**
+ * What a run does with a batch manifest already stored at a batch's path (LUNA6, B2 review r2): by default it refuses
+ * to start; --resume continues the stored v2 manifest of this exact batch configuration; --overwrite replaces it and
+ * starts the batch over. No policy resumes or replaces a v1 batch or a manifest that does not parse. One run has one
+ * policy, so --resume and --overwrite together cannot be expressed.
+ */
+export type StoredManifestPolicy = 'refuse' | 'resume' | 'overwrite';
+
 export interface GenerateDataConfig {
   readonly combatModel: CombatModel;
   readonly initiativeProfile: RoomInitiativeProfile;
   readonly seedRanges: readonly SeedRange[];
   readonly reps: number;
   readonly targetDirectory: string;
-  readonly resume: boolean;
+  readonly storedManifestPolicy: StoredManifestPolicy;
   readonly cwd: string;
   readonly basis: ArenaBasis;
   readonly toolArgv: readonly string[];
@@ -106,7 +114,10 @@ export class HistoricalLunaBatchResumeError extends Error {
   }
 }
 
-/** LUNA6: a fresh v2 run never replaces a v1 batch's manifest, which is that batch's only provenance record. */
+/**
+ * LUNA6: a fresh v2 run never replaces a v1 batch's manifest, which is that batch's only provenance record; --overwrite
+ * included.
+ */
 export class HistoricalLunaBatchOverwriteError extends Error {
   override readonly name = 'HistoricalLunaBatchOverwriteError' as const;
 
@@ -115,6 +126,36 @@ export class HistoricalLunaBatchOverwriteError extends Error {
       `LUNA6: ${manifestPath} is an ${stored.format} ${stored.model} ${stored.effort} batch; a fresh ` +
       `${GENERATE_DATA_MANIFEST_FORMAT} ${LUNA_MODEL} ${GENERATE_DATA_EFFORT} run never overwrites it, which would ` +
       'lose its provenance. Start a new --target-dir.',
+    );
+  }
+}
+
+/** LUNA6 (B2 review r2): a run without --resume replaces a stored (non-v1) batch manifest only with --overwrite. */
+export class ExistingBatchManifestError extends Error {
+  override readonly name = 'ExistingBatchManifestError' as const;
+
+  constructor(readonly manifestPath: string, format: string) {
+    super(
+      `LUNA6: ${manifestPath} already holds a batch manifest of format ${format}; a run without --resume replaces ` +
+      'a stored batch manifest only with --overwrite. Pass --resume to continue it, --overwrite to replace it, or ' +
+      'start a new --target-dir.',
+    );
+  }
+}
+
+/**
+ * LUNA6 (B2 review r2): a stored manifest that does not parse (a write cut short, or not a manifest at all) cannot be
+ * shown not to be a v1 batch, so a run without --resume never replaces it, --overwrite included.
+ */
+export class UnreadableBatchManifestError extends Error {
+  override readonly name = 'UnreadableBatchManifestError' as const;
+
+  constructor(readonly manifestPath: string, cause: SyntaxError) {
+    super(
+      `LUNA6: ${manifestPath} holds a batch manifest that does not parse, so it cannot be shown not to be an ` +
+      `${HISTORICAL_MANIFEST_FORMAT} batch; a run without --resume never replaces it, --overwrite included. Start a ` +
+      'new --target-dir.',
+      { cause },
     );
   }
 }
@@ -157,12 +198,14 @@ export function parseGenerateDataArgs(
   let reps: number | null = null;
   let targetDirectory: string | null = null;
   let resume = false;
+  let overwrite = false;
   let basis: GenerateDataConfig['basis'] = 'standard';
   let combatModel: CombatModel = 'initiative_segments_v1';
   let initiativeProfile: RoomInitiativeProfile = 'derived_v1';
   for (let index = 0; index < args.length; index += 1) {
     const option = args[index];
     if (option === '--resume') { resume = true; continue; }
+    if (option === '--overwrite') { overwrite = true; continue; }
     if (option === '--timeout-ms') {
       // LUNA6 (plan r5 §1.2): removed. A gpt-6-luna low batch keeps only the arena's 30 min per-call hang guard.
       throw liftRefusal([GENERATE_DATA_EFFORT], `--timeout-ms ${args[index + 1] ?? '<missing>'}`);
@@ -199,6 +242,11 @@ export function parseGenerateDataArgs(
   if (ranges.length === 0) throw new TypeError('At least one --seed-range is required.');
   if (reps === null) throw new TypeError('--reps is required.');
   if (targetDirectory === null) throw new TypeError('--target-dir is required.');
+  if (resume && overwrite) {
+    throw new TypeError(
+      '--overwrite replaces a stored batch manifest and --resume continues one; pass at most one of them.',
+    );
+  }
   const seen = new Set<number>();
   for (const range of ranges) {
     for (let seed = range.start; seed <= range.end; seed += 1) {
@@ -212,7 +260,7 @@ export function parseGenerateDataArgs(
     seedRanges: ranges,
     reps,
     targetDirectory,
-    resume,
+    storedManifestPolicy: resume ? 'resume' : overwrite ? 'overwrite' : 'refuse',
     cwd: resolve(cwd),
     basis,
     toolArgv: [...args],
@@ -223,40 +271,89 @@ function manifestName(range: SeedRange): string {
   return `batch-${String(range.start)}-${String(range.end)}.manifest.json`;
 }
 
+/** What a batch's manifest path holds before the run starts. */
+type StoredManifest =
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'unparseable'; readonly error: SyntaxError }
+  | { readonly kind: 'historical'; readonly manifest: HistoricalGenerateDataManifest }
+  | {
+    readonly kind: 'current';
+    readonly format: typeof GENERATE_DATA_MANIFEST_FORMAT;
+    readonly manifest: GenerateDataManifest;
+  }
+  | { readonly kind: 'unknown_format'; readonly format: string };
+
+async function readStoredManifest(path: string): Promise<StoredManifest> {
+  let source: string;
+  try { source = await readFile(path, 'utf8'); }
+  catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return { kind: 'absent' };
+    throw error;
+  }
+  let parsed: unknown;
+  try { parsed = JSON.parse(source); }
+  catch (error) {
+    if (error instanceof SyntaxError) return { kind: 'unparseable', error };
+    throw error;
+  }
+  const format = typeof parsed === 'object' && parsed !== null && 'format' in parsed ? parsed.format : undefined;
+  if (format === HISTORICAL_MANIFEST_FORMAT) {
+    return { kind: 'historical', manifest: parsed as HistoricalGenerateDataManifest };
+  }
+  if (format === GENERATE_DATA_MANIFEST_FORMAT) {
+    return { kind: 'current', format, manifest: parsed as GenerateDataManifest };
+  }
+  return { kind: 'unknown_format', format: typeof format === 'string' ? format : '<none>' };
+}
+
 /**
- * The manifest a run continues from: with --resume, the stored v2 manifest of this exact batch configuration; without
- * it, none. Either way a stored manifest is read first, and a v1 manifest, or one that does not parse, stops the run
- * before anything is written over it (LUNA6: a v1 batch is never resumed into v2 and never overwritten by v2).
+ * The manifest a batch starts from (null: an empty one), decided from what its path holds and the run's policy. A v1
+ * batch is never resumed into v2 and never replaced (LUNA6). A manifest that does not parse stops the run. Without
+ * --resume, any other stored manifest stops the run unless --overwrite replaces it. With --resume, only the stored v2
+ * manifest of this exact batch configuration continues.
  */
-async function existingManifest(
+async function startingManifest(
   path: string,
   config: GenerateDataConfig,
   range: SeedRange,
   provenance: ManifestProvenance,
 ): Promise<GenerateDataManifest | null> {
-  let source: string;
-  try { source = await readFile(path, 'utf8'); }
-  catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null;
-    throw error;
+  const stored = await readStoredManifest(path);
+  const policy = config.storedManifestPolicy;
+  switch (stored.kind) {
+    case 'absent':
+      return null;
+    case 'unparseable':
+      // --resume stops on the parse error itself, as it always has.
+      if (policy === 'resume') throw stored.error;
+      throw new UnreadableBatchManifestError(path, stored.error);
+    case 'historical':
+      if (policy === 'resume') throw new HistoricalLunaBatchResumeError(path, stored.manifest);
+      throw new HistoricalLunaBatchOverwriteError(path, stored.manifest);
+    case 'current':
+    case 'unknown_format':
+      if (policy === 'overwrite') return null;
+      if (policy === 'refuse') throw new ExistingBatchManifestError(path, stored.format);
+      if (stored.kind === 'unknown_format' || !resumesThisBatch(stored.manifest, config, range, provenance)) {
+        throw new Error(`Resume manifest ${path} does not match this batch configuration.`);
+      }
+      return { ...stored.manifest, toolArgv: [...config.toolArgv] };
   }
-  const stored = JSON.parse(source) as GenerateDataManifest | HistoricalGenerateDataManifest;
-  if (!config.resume) {
-    if (stored.format === HISTORICAL_MANIFEST_FORMAT) throw new HistoricalLunaBatchOverwriteError(path, stored);
-    return null;
-  }
-  if (stored.format === HISTORICAL_MANIFEST_FORMAT) throw new HistoricalLunaBatchResumeError(path, stored);
-  if (stored.format !== GENERATE_DATA_MANIFEST_FORMAT || stored.range.start !== range.start ||
-    stored.range.end !== range.end || stored.reps !== config.reps || stored.basis !== config.basis ||
-    stored.combatModel !== config.combatModel ||
-    stored.initiativeProfile !== config.initiativeProfile ||
-    stored.model !== LUNA_MODEL || stored.effort !== GENERATE_DATA_EFFORT || stored.kbId !== 'K6' ||
-    stored.kbHash !== provenance.kbHash || stored.repoCommit !== provenance.repoCommit ||
-    stored.adapterCliName !== provenance.adapterCliName ||
-    stored.adapterCliVersion !== provenance.adapterCliVersion) {
-    throw new Error(`Resume manifest ${path} does not match this batch configuration.`);
-  }
-  return { ...stored, toolArgv: [...config.toolArgv] };
+}
+
+function resumesThisBatch(
+  stored: GenerateDataManifest,
+  config: GenerateDataConfig,
+  range: SeedRange,
+  provenance: ManifestProvenance,
+): boolean {
+  return stored.range.start === range.start && stored.range.end === range.end && stored.reps === config.reps &&
+    stored.basis === config.basis && stored.combatModel === config.combatModel &&
+    stored.initiativeProfile === config.initiativeProfile &&
+    stored.model === LUNA_MODEL && stored.effort === GENERATE_DATA_EFFORT && stored.kbId === 'K6' &&
+    stored.kbHash === provenance.kbHash && stored.repoCommit === provenance.repoCommit &&
+    stored.adapterCliName === provenance.adapterCliName &&
+    stored.adapterCliVersion === provenance.adapterCliVersion;
 }
 
 interface ManifestProvenance {
@@ -366,7 +463,7 @@ export async function generateData(
     const batchDirectory = join(config.targetDirectory, `batch-${String(range.start)}-${String(range.end)}`);
     await mkdir(batchDirectory, { recursive: true });
     const manifestPath = join(config.targetDirectory, manifestName(range));
-    let manifest = await existingManifest(manifestPath, config, range, provenance) ??
+    let manifest = await startingManifest(manifestPath, config, range, provenance) ??
       emptyManifest(config, range, provenance);
     const alreadyComplete = new Set(manifest.seeds
       .filter((entry) => entry.status === 'complete')
@@ -440,7 +537,7 @@ async function main(): Promise<void> {
 }
 
 const GENERATE_DATA_USAGE =
-  'Usage: rl:generate-data --seed-range START-END [--seed-range START-END ...] --reps N --target-dir PATH [--basis standard|hard|brutal] [--combat-model monster_block_v1|initiative_segments_v1] [--initiative-profile legacy|derived_v1] [--resume]';
+  'Usage: rl:generate-data --seed-range START-END [--seed-range START-END ...] --reps N --target-dir PATH [--basis standard|hard|brutal] [--combat-model monster_block_v1|initiative_segments_v1] [--initiative-profile legacy|derived_v1] [--resume | --overwrite]';
 
 async function runCli(): Promise<void> {
   try { await main(); }

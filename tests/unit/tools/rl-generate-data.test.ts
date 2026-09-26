@@ -62,14 +62,41 @@ async function storedBatch(targetDirectory: string, format: string, model: strin
 }
 
 /**
+ * The refusals over a stored manifest, typed by hand from the rule (B2 review r1 P3 and review r2 P2): a v1 batch is
+ * never resumed and never replaced; without --resume, any other stored manifest is replaced only with --overwrite; one
+ * that does not parse is never replaced.
+ */
+const V1_OVERWRITE_REFUSAL = 'HistoricalLunaBatchOverwriteError: LUNA6: <manifest> is an arena-rl-batch-v1 ' +
+  'gpt-5.6-luna low batch; a fresh arena-rl-batch-v2 gpt-6-luna low run never overwrites it, which would lose its ' +
+  'provenance. Start a new --target-dir.';
+const UNREADABLE_MANIFEST_REFUSAL = 'UnreadableBatchManifestError: LUNA6: <manifest> holds a batch manifest that ' +
+  'does not parse, so it cannot be shown not to be an arena-rl-batch-v1 batch; a run without --resume never ' +
+  'replaces it, --overwrite included. Start a new --target-dir.';
+function storedManifestRefusal(format: string): string {
+  return `ExistingBatchManifestError: LUNA6: <manifest> already holds a batch manifest of format ${format}; a run ` +
+    'without --resume replaces a stored batch manifest only with --overwrite. Pass --resume to continue it, ' +
+    '--overwrite to replace it, or start a new --target-dir.';
+}
+
+/** A refused run as data: '<name>: <message>', with the manifest path it names replaced by '<manifest>'. */
+function outcomeError(error: unknown, manifestPath: string) {
+  return {
+    error: error instanceof Error
+      ? `${error.name}: ${error.message.replace(manifestPath, '<manifest>')}`
+      : String(error),
+  };
+}
+
+/**
  * Runs the batch into a target directory whose manifest path already holds `storedBatch` (or the `bytes` of it given),
- * and records the outcome as { ok } or { error }, the seeds the arena was called for, and whether the stored bytes
- * survived.
+ * and records the outcome as { ok } or { error } (a refused argv included), the seeds the arena was called for, and
+ * whether the stored bytes survived.
  */
 async function generateOverStoredBatch(stored: {
   readonly format: string;
   readonly model: string;
   readonly resume: boolean;
+  readonly overwrite?: boolean;
   readonly bytes?: (manifest: string) => string;
 }) {
   const targetDirectory = mkdtempSync(join(tmpdir(), 'luna6-generate-over-'));
@@ -78,27 +105,21 @@ async function generateOverStoredBatch(stored: {
   const bytes = stored.bytes === undefined ? manifest : stored.bytes(manifest);
   writeFileSync(manifestPath, bytes, 'utf8');
   const calls: number[] = [];
-  const outcome = await generateData(parseGenerateDataArgs([
+  const outcome = await Promise.resolve().then(() => generateData(parseGenerateDataArgs([
     '--seed-range', '3943001-3943003', '--reps', '2', '--target-dir', targetDirectory,
     ...(stored.resume ? ['--resume'] : []),
+    ...(stored.overwrite === true ? ['--overwrite'] : []),
   ]), {
     arenaRunner: async (config) => {
       calls.push(config.seed);
       return [{ outcome: 'authorized', serviceNull: false, flapRetries: 0 }];
     },
     heartbeat: () => undefined,
-  }).then(
+  })).then(
     (manifests) => ({
       ok: manifests.map((written) => ({ format: written.format, model: written.model, effort: written.effort })),
     }),
-    (error: unknown) => ({
-      // A JSON parse error's wording is V8's, not ours; its name is the contract.
-      error: error instanceof SyntaxError
-        ? error.name
-        : error instanceof Error
-          ? `${error.name}: ${error.message.replace(manifestPath, '<manifest>')}`
-          : String(error),
-    }),
+    (error: unknown) => outcomeError(error, manifestPath),
   );
   return { outcome, calls, storedBytesKept: readFileSync(manifestPath, 'utf8') === bytes };
 }
@@ -230,12 +251,14 @@ describe('RL arena batch generator', () => {
   });
 
   it('refuses a fresh run over a v1 gpt-5.6-luna batch manifest and keeps its bytes', async () => {
-    // LUNA6 (B2 review r1 P3): a run without --resume used to replace whatever manifest its batch path held, so a fresh
-    // v2 run over a v1 batch erased the v1 batch's provenance. A v1 manifest is now refused and left byte for byte;
-    // so is a manifest that does not parse (a write cut short). A v2 manifest is still replaced (the control).
+    // LUNA6 (B2 review r1 P3, review r2 P2): a run without --resume used to replace whatever manifest its batch path
+    // held, so a fresh v2 run over a v1 batch erased the v1 batch's provenance. Without --overwrite, a fresh run now
+    // refuses every stored manifest and leaves it byte for byte: a v1 batch (with its own error), a v2 batch, a
+    // manifest of a format this generator does not know, and one that does not parse (a write cut short).
     expect([
       await generateOverStoredBatch({ format: 'arena-rl-batch-v1', model: 'gpt-5.6-luna', resume: false }),
       await generateOverStoredBatch({ format: 'arena-rl-batch-v2', model: 'gpt-6-luna', resume: false }),
+      await generateOverStoredBatch({ format: 'arena-rl-batch-v3', model: 'gpt-6-luna', resume: false }),
       await generateOverStoredBatch({
         format: 'arena-rl-batch-v2', model: 'gpt-6-luna', resume: false, bytes: (manifest) => manifest.slice(0, 100),
       }),
@@ -249,12 +272,49 @@ describe('RL arena batch generator', () => {
         calls: [],
         storedBytesKept: true,
       },
+      { outcome: { error: storedManifestRefusal('arena-rl-batch-v2') }, calls: [], storedBytesKept: true },
+      { outcome: { error: storedManifestRefusal('arena-rl-batch-v3') }, calls: [], storedBytesKept: true },
+      { outcome: { error: UNREADABLE_MANIFEST_REFUSAL }, calls: [], storedBytesKept: true },
+    ]);
+  });
+
+  it('replaces a stored v2 or unknown-format batch manifest only with --overwrite, never a v1 or unparseable one', async () => {
+    // LUNA6 (B2 review r2 P2): --overwrite is the explicit capability to replace a stored batch manifest, and it starts
+    // the batch over (every seed runs). It still never replaces a v1 gpt-5.6-luna batch, whose manifest is that batch's
+    // only provenance record, nor a manifest that does not parse, which cannot be shown not to be one. It continues
+    // nothing, so it is refused together with --resume.
+    expect([
+      await generateOverStoredBatch({
+        format: 'arena-rl-batch-v1', model: 'gpt-5.6-luna', resume: false, overwrite: true,
+      }),
+      await generateOverStoredBatch({ format: 'arena-rl-batch-v2', model: 'gpt-6-luna', resume: false, overwrite: true }),
+      await generateOverStoredBatch({ format: 'arena-rl-batch-v3', model: 'gpt-6-luna', resume: false, overwrite: true }),
+      await generateOverStoredBatch({
+        format: 'arena-rl-batch-v2', model: 'gpt-6-luna', resume: false, overwrite: true,
+        bytes: (manifest) => manifest.slice(0, 100),
+      }),
+      await generateOverStoredBatch({ format: 'arena-rl-batch-v2', model: 'gpt-6-luna', resume: true, overwrite: true }),
+    ]).toEqual([
+      { outcome: { error: V1_OVERWRITE_REFUSAL }, calls: [], storedBytesKept: true },
       {
         outcome: { ok: [{ format: 'arena-rl-batch-v2', model: 'gpt-6-luna', effort: 'low' }] },
         calls: [3_943_001, 3_943_002, 3_943_003],
         storedBytesKept: false,
       },
-      { outcome: { error: 'SyntaxError' }, calls: [], storedBytesKept: true },
+      {
+        outcome: { ok: [{ format: 'arena-rl-batch-v2', model: 'gpt-6-luna', effort: 'low' }] },
+        calls: [3_943_001, 3_943_002, 3_943_003],
+        storedBytesKept: false,
+      },
+      { outcome: { error: UNREADABLE_MANIFEST_REFUSAL }, calls: [], storedBytesKept: true },
+      {
+        outcome: {
+          error: 'TypeError: --overwrite replaces a stored batch manifest and --resume continues one; pass at most ' +
+            'one of them.',
+        },
+        calls: [],
+        storedBytesKept: true,
+      },
     ]);
   });
 
