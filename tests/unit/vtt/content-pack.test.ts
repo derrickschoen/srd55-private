@@ -454,17 +454,24 @@ describe('content-pack v1', () => {
   });
 
   /*
-   * CC-TRUE-STRIKE-IMPORTED (review r3 P1). A homebrew spell with True
-   * Strike's operation makes "one attack with the weapon used in the spell's
-   * casting" (docs/srd/source/spell-descriptions.txt:8079-8087), so the attack
-   * is at the weapon's range, whatever targeting the pack states. A pack
-   * written before the weapon_attack targeting existed states a 30-foot single
-   * target; it still loads, and the weapon still decides: a Longsword (melee,
-   * 5-foot reach, docs/srd/source/weapons-table.txt:34) cannot attack a target
-   * 10 feet away, though the spell's 30 feet would allow it. A pack stating
-   * weapon_attack loads too, and its Longbow (150/600, :50) shot at a target
-   * 20 feet away with a monster beside the caster has close-combat
-   * Disadvantage (docs/srd/full/srd-5.2.1.txt:911-917): two d20 faces at RNG 0.5.
+   * CC-TRUE-STRIKE-IMPORTED (review r3 P1, review r4 P2). A homebrew spell with
+   * True Strike's operation makes "one attack with the weapon used in the
+   * spell's casting" (docs/srd/source/spell-descriptions.txt:8079-8087), so the
+   * attack is at the weapon's range, whatever targeting the pack states: the
+   * loader gives every such spell weapon_attack targeting. A pack written
+   * before the weapon_attack targeting existed states a 30-foot single target,
+   * and another could state Self; both load, as weapon_attack, and the weapon
+   * decides:
+   * - a Longbow (150/600, docs/srd/source/weapons-table.txt:50) attacks a target
+   *   100 feet away, though the pack's 30 feet would not reach it;
+   * - a Longsword (melee, 5-foot reach, :34) cannot attack a target 10 feet
+   *   away, though the pack's 30 feet would allow it;
+   * - the Self shape attacks the creature it names, not the caster.
+   * BOARD (24 x 2, bright light): the caster at (0,0), the target in row 0 at
+   * the stated column (5 feet per column), and a monster guard at (0,1),
+   * beside the caster. A Longbow shot within its normal range has close-combat
+   * Disadvantage from the guard (docs/srd/full/srd-5.2.1.txt:911-917): two d20
+   * faces at RNG 0.5. A Longsword attack is melee: one face.
    */
   it('CC-TRUE-STRIKE-IMPORTED: an imported True Strike shape attacks at its weapon\'s range whatever the pack\'s targeting', () => {
     const source = fixture() as { spells: Array<Record<string, unknown>> };
@@ -483,24 +490,27 @@ describe('content-pack v1', () => {
       spells: [
         { ...template, recordId: 'older-strike', name: 'Older Strike', level: 0,
           targeting: { kind: 'single', rangeFeet: 30, willing: false }, operation },
+        { ...template, recordId: 'self-strike', name: 'Self Strike', level: 0,
+          targeting: { kind: 'self' }, operation },
         { ...template, recordId: 'weapon-strike', name: 'Weapon Strike', level: 0,
           targeting: { kind: 'weapon_attack' }, operation },
       ],
     }));
     expect(content.spells.map((spell) => spell.definition.targeting)).toEqual([
-      { kind: 'single', rangeFeet: 30, willing: false },
+      { kind: 'weapon_attack' },
+      { kind: 'weapon_attack' },
       { kind: 'weapon_attack' },
     ]);
     const caster = playerProfile('imported-strike-caster', { initiativeBonus: 20 });
     const target = monsterProfile('imported-strike-target', { initiativeBonus: -20, hitPoints: 200 });
     const guard = monsterProfile('imported-strike-guard', { initiativeBonus: -30, hitPoints: 200 });
     const strike = (
-      spell: 'older-strike' | 'weapon-strike',
+      spell: 'older-strike' | 'self-strike' | 'weapon-strike',
       targetColumn: number,
       tacticalRange: NonNullable<Extract<EncounterCommand, { readonly type: 'cast_spell' }>['weaponAttack']>['tacticalRange'],
     ) => {
       let state = createEncounter({
-        bounds: { columns: 8, rows: 2 },
+        bounds: { columns: 24, rows: 2 },
         combatants: [caster, target, guard],
         tokens: [placedToken(caster, 0, 0), placedToken(target, targetColumn, 0), placedToken(guard, 0, 1)],
         contentPacks: [content],
@@ -517,15 +527,19 @@ describe('content-pack v1', () => {
           tacticalRange,
         },
       }, () => 0.5).events.flatMap((event) => event.type === 'attack_resolved'
-        ? [`${event.attack.roll.mode}:${String(event.attack.roll.faces.length)}`]
+        ? [`${event.target}:${event.attack.roll.mode}:${String(event.attack.roll.faces.length)}`]
         : []);
     };
     const longsword = { kind: 'melee', reachFeet: feet(5) } as const;
     const longbow = { kind: 'ranged', normalRangeFeet: feet(150), longRangeFeet: feet(600) } as const;
     expect(() => strike('weapon-strike', 4, longbow), 'a Longbow reaches a target 20 feet away').not.toThrow();
+    expect(strike('weapon-strike', 4, longbow)).toEqual([`${target.id}:disadvantage:2`]);
+    expect(() => strike('older-strike', 20, longbow), 'the Longbow, not the pack\'s 30 feet, reaches 100 feet').not.toThrow();
+    expect(strike('older-strike', 20, longbow)).toEqual([`${target.id}:disadvantage:2`]);
     expect(() => strike('older-strike', 2, longsword)).toThrow('The target is out of Older Strike weapon range.');
-    expect(strike('older-strike', 1, longsword)).toEqual(['normal:1']);
-    expect(strike('weapon-strike', 4, longbow)).toEqual(['disadvantage:2']);
+    expect(strike('older-strike', 1, longsword)).toEqual([`${target.id}:normal:1`]);
+    expect(() => strike('self-strike', 4, longbow), 'the Self shape attacks the creature it names').not.toThrow();
+    expect(strike('self-strike', 4, longbow)).toEqual([`${target.id}:disadvantage:2`]);
   });
 
   /*

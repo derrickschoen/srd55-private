@@ -623,6 +623,27 @@ function loadFeature(feature: ContentPackV1['features'][number]): LoadedContentF
   };
 }
 
+/**
+ * A spell whose operation is one attack with the weapon used in its casting
+ * (True Strike's shape: weapon_attack_augmentation, during_cast) targets what
+ * that weapon can attack, so its targeting is weapon_attack whatever targeting
+ * the pack states. True Strike's range is Self and "you make one attack with
+ * the weapon used in the spell's casting" (docs/srd/source/spell-descriptions.txt:
+ * 8079-8087): the weapon's range decides, never a range the pack gives the
+ * spell. A pack written before weapon_attack existed states a single target at
+ * a spell range; it still loads, and its weapon decides (review r4 P2). Only
+ * the spell's whole operation is read: a weapon attack nested in another
+ * operation keeps the pack's targeting for that operation, and the reducer
+ * checks the weapon's legality again when the attack is made.
+ */
+function importedSpellTargeting(spell: ContentPackV1['spells'][number]): SpellDefinition['targeting'] {
+  const operation: SpellOperation = spell.operation;
+  if (operation.kind === 'weapon_attack_augmentation' && operation.timing === 'during_cast') {
+    return { kind: 'weapon_attack' };
+  }
+  return spell.targeting as SpellDefinition['targeting'];
+}
+
 function loadSpell(spell: ContentPackV1['spells'][number], provenance: ContentPackProvenance): LoadedContentSpell {
   const id = importedContentId(spell.sourceId, spell.recordId);
   return {
@@ -642,7 +663,7 @@ function loadSpell(spell: ContentPackV1['spells'][number], provenance: ContentPa
       castingTime: spell.castingTime,
       ...(spell.ritual === undefined ? {} : { ritual: spell.ritual }),
       components: spell.components,
-      targeting: spell.targeting as SpellDefinition['targeting'],
+      targeting: importedSpellTargeting(spell),
       operation: spell.operation,
     },
   };
