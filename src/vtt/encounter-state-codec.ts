@@ -9,6 +9,7 @@ import {
   type CombatantId,
 } from '../combat/values';
 import type { EncounterEnvironment } from '../combat/world-objects';
+import { assertTokenAnchorsOnGrid } from '../combat/grid';
 import { assertSupportedGrid } from '../combat/grid-size';
 import {
   creatureSpace,
@@ -402,6 +403,7 @@ export function decodeEncounterStateV1(value: unknown, mode: EncounterStateDecod
   if (combatants.length === 0) throw new TypeError('Encounter state requires at least one combatant.');
   const profiles = decodeProfiles(combatants);
   const tokens = decodeTokens(array(state['tokens'], 'state.tokens'), profiles);
+  assertTokenAnchorsOnGrid(decodedBounds, tokens, 'state.tokens');
   decodeEnvironment(state['environment']);
   const cells = (key: 'blockedCells' | 'foggedCells') => array(state[key], `state.${key}`).map((entry, index) =>
     decodeCell(entry, `state.${key}[${String(index)}]`));

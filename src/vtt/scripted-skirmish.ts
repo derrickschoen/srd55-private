@@ -8,7 +8,7 @@ import {
 import type { EffectApplication } from '../combat/effects';
 import type { EncounterCommand } from '../combat/events';
 import { encounterMovementWorld } from '../combat/encounter-movement-world';
-import { boardCell, type GridCell } from '../combat/grid';
+import { boardCell, requireBoardCell, type GridCell } from '../combat/grid';
 import { mulberry32, type SerializableRng } from '../combat/random';
 import { feetPoint } from '../combat/templates';
 import {
@@ -153,8 +153,7 @@ function concentrationCondition(source: CombatantId, target: CombatantId): Encou
 function adjacentOpenCell(state: EncounterState, actor: CombatantId): GridCell | null {
   const token = state.tokens.find((candidate) => candidate.combatantId === actor);
   if (token === undefined) return null;
-  const origin = boardCell(state.bounds, token.position);
-  if (origin === null) return null;
+  const origin = requireBoardCell(state.bounds, token.position, `Combatant ${actor} anchor`);
   const world = encounterMovementWorld(state);
   for (const delta of [[1, 0], [0, 1], [-1, 0], [0, -1]] as const) {
     const cell = boardCell(state.bounds, { column: token.position.column + delta[0], row: token.position.row + delta[1] });

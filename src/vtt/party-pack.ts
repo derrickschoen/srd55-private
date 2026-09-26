@@ -17,7 +17,7 @@ import {
 import type { EncounterCommand } from '../combat/events';
 import type { EncounterCombatantState } from '../combat/encounter';
 import { combatantSpace } from '../combat/combat-rules';
-import { adjacentCells, boardCell } from '../combat/grid';
+import { adjacentCells, requireBoardCell } from '../combat/grid';
 import { minimumSpaceDistance } from '../combat/creature-space';
 import { encounterMovementWorld } from '../combat/encounter-movement-world';
 import { terrainWallCells } from '../combat/terrain';
@@ -2754,10 +2754,9 @@ function loadedPartyMovementActions(
 ): readonly Extract<EncounterCommand, { readonly type: 'move' }>[] {
   const acting = encounterCombatantIndex(state).at(actor);
   if (acting.turn.movement.remaining < 5) return [];
-  const origin = boardCell(state.bounds, loadedMemberPosition(state, actor));
-  if (origin === null) return [];
+  const origin = requireBoardCell(state.bounds, loadedMemberPosition(state, actor), `Combatant ${actor} anchor`);
   const world = encounterMovementWorld(state);
-  return adjacentCells(state.bounds, loadedMemberPosition(state, actor))
+  return adjacentCells(state.bounds, origin)
     .filter((cell) => {
       if (!world.canTraverseStep(actor, origin, cell)) return false;
       const traversal = world.traversal(actor, origin, cell);

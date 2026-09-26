@@ -7,7 +7,7 @@ import {
 } from '../combat/encounter';
 import type { EncounterCommand } from '../combat/events';
 import { encounterMovementWorld } from '../combat/encounter-movement-world';
-import { boardCell, type GridCell } from '../combat/grid';
+import { boardCell, requireBoardCell, type GridCell } from '../combat/grid';
 import type { CombatantId } from '../combat/values';
 import {
   loadedPartyTurnLegalActions,
@@ -56,8 +56,7 @@ function movementActions(state: EncounterState, actor: CombatantId): readonly En
   const subject = state.combatants.find((candidate) => candidate.profile.id === actor);
   if (subject === undefined || subject.turn.movement.remaining < 5) return [];
   const current = position(state, actor);
-  const origin = boardCell(state.bounds, current);
-  if (origin === null) return [];
+  const origin = requireBoardCell(state.bounds, current, `Combatant ${actor} anchor`);
   const world = encounterMovementWorld(state);
   const commands: EncounterCommand[] = [];
   for (let columnDelta = -1; columnDelta <= 1; columnDelta += 1) {

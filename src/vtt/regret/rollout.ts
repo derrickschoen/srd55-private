@@ -12,7 +12,7 @@ import {
 } from '../../combat/encounter';
 import { TurnCoordinator, type DurableCoordinatorTransition } from '../../combat/coordinator';
 import type { EncounterCommand } from '../../combat/events';
-import { gridDistance } from '../../combat/grid';
+import { assertTokenAnchorsOnGrid, gridDistance } from '../../combat/grid';
 import { assertSupportedGrid } from '../../combat/grid-size';
 import { decodeProjectedCreatureSpace, minimumSpaceDistance } from '../../combat/creature-space';
 import { mulberry32 } from '../../combat/random';
@@ -82,7 +82,9 @@ export function reconstructEncounterState(capture: RolloutInputCapture): Encount
     );
   }
   if (!isRecord(parsed.bounds)) throw new TypeError(`Rollout capture ${capture.logicalCallId} has malformed encounter bounds.`);
-  assertSupportedGrid({ columns: parsed.bounds.columns, rows: parsed.bounds.rows });
+  const grid = { columns: parsed.bounds.columns, rows: parsed.bounds.rows };
+  assertSupportedGrid(grid);
+  assertTokenAnchorsOnGrid(grid, parsed.tokens, `Rollout capture ${capture.logicalCallId} tokens`);
   return parsed as unknown as EncounterState;
 }
 

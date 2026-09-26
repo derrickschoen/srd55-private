@@ -89,6 +89,7 @@ import {
   adjacentCells,
   gridDistance,
   isCellInside,
+  requireBoardCell,
   type GridBounds,
   type GridCell,
 } from './grid';
@@ -1200,9 +1201,7 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
     if (profile?.tokenId !== token.id) {
       throw new EncounterRuleError('validation', 'A token must match its profile token identity.');
     }
-    if (!isCellInside(setup.bounds, token.position)) {
-      throw new EncounterRuleError('validation', `Token ${token.id} is outside the encounter grid.`);
-    }
+    requireBoardCell(setup.bounds, token.position, `Token ${token.id} anchor`);
     const size = profile.rules.sizeCategory;
     if (size === undefined) throw new CreatureSizeRuleError('mechanical_size_required', profile.id);
     if (token.placementMode.actual !== size) {

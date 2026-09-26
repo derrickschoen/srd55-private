@@ -40,6 +40,7 @@ import {
 } from '../combat/values';
 import { sha256 } from '../crypto/sha256';
 import type { DatabaseContext } from '../db/database';
+import { assertTokenAnchorsOnGrid } from '../combat/grid';
 import { assertSupportedGrid } from '../combat/grid-size';
 import { decodeWildShapeOverlay, decodeWildShapeUseState } from '../combat/wild-shape';
 import {
@@ -973,7 +974,9 @@ function decodeRevision(value: unknown): SessionRevision {
   }
   const bounds = value.encounterState.bounds;
   if (!isRecord(bounds)) throw new TypeError('Persisted encounter bounds are malformed.');
-  assertSupportedGrid({ columns: bounds.columns, rows: bounds.rows });
+  const grid = { columns: bounds.columns, rows: bounds.rows };
+  assertSupportedGrid(grid);
+  assertTokenAnchorsOnGrid(grid, value.encounterState.tokens, 'Persisted encounter tokens');
   const transition = decodeTransition(value.transition);
   const partyState = value.partyState === null
     ? null

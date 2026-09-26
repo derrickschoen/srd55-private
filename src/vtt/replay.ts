@@ -5,6 +5,7 @@ import {
   type EncounterConfig,
   type EncounterState,
 } from '../combat/encounter';
+import { assertTokenAnchorsOnGrid } from '../combat/grid';
 import { assertSupportedGrid } from '../combat/grid-size';
 import { restoreMulberry32, type SerializableRngState } from '../combat/random';
 import {
@@ -786,6 +787,7 @@ export function replayBundle(
   for (const [index, replayRecord] of bundle.revisions.entries()) {
     const revision = replayRecord.revision;
     assertSupportedGrid(revision.encounterState.bounds);
+    assertTokenAnchorsOnGrid(revision.encounterState.bounds, revision.encounterState.tokens, `Replay revision ${String(index + 1)} tokens`);
     assertEqual(
       'bundle', index, 'encounterConfig', bundle.encounterConfig, revision.encounterState.config,
     );

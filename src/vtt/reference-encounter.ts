@@ -3,7 +3,7 @@ import type { LegalActionSummary } from '../combat/controllers';
 import { combatantSpace, type EncounterState } from '../combat/encounter';
 import { minimumSpaceDistance, minimumSpaceDistanceToCells } from '../combat/creature-space';
 import type { EncounterCommand } from '../combat/events';
-import { boardCell, gridDistance, type GridCell } from '../combat/grid';
+import { boardCell, gridDistance, requireBoardCell, type GridCell } from '../combat/grid';
 import { encounterMovementWorld } from '../combat/encounter-movement-world';
 import { terrainWallCells } from '../combat/terrain';
 import { feetPoint, previewAffectedCells } from '../combat/templates';
@@ -148,8 +148,7 @@ function position(state: EncounterState, id: CombatantId): GridCell {
 function movementActions(state: EncounterState, actor: CombatantId): readonly EncounterCommand[] {
   const current = position(state, actor);
   if (subject(state, actor).turn.movement.remaining < 5) return [];
-  const origin = boardCell(state.bounds, current);
-  if (origin === null) return [];
+  const origin = requireBoardCell(state.bounds, current, `Combatant ${actor} anchor`);
   const world = encounterMovementWorld(state);
   const actions: EncounterCommand[] = [];
   for (let columnDelta = -1; columnDelta <= 1; columnDelta += 1) {
