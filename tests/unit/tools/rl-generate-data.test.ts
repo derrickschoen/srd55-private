@@ -9,7 +9,8 @@ import {
   parseGenerateDataArgs,
   type ArenaBatchRunner,
 } from '../../../tools/rl/generate-data';
-import { mkdtempSync, readFileSync } from '../../helpers/test-filesystem';
+import { readRepoCommit } from '../../../tools/rl/repo-commit';
+import { mkdtempSync, readFileSync, writeFileSync } from '../../helpers/test-filesystem';
 
 describe('RL arena batch generator', () => {
   it('writes per-batch manifests and resumes only incomplete or flapped seeds', async () => {
@@ -36,9 +37,16 @@ describe('RL arena batch generator', () => {
     });
 
     expect(firstCalls.map((config) => config.seed)).toEqual([3_943_001, 3_943_002, 3_943_003]);
+    // LUNA6 (plan r5 §4.3, B2): the corpus is an effort study, so D887 (b) keeps it at low on gpt-6-luna; D890 (a)
+    // and the owner's 2026-09-24 18:58 answer lift its 180 s round wall and leave only the 30 min per-call guard.
+    expect(firstCalls.map(({ model, effort, timeoutMs, experimentPolicy }) =>
+      ({ model, effort, timeoutMs, roundWallMs: experimentPolicy.roundWallMs }))).toEqual([
+      { model: 'gpt-6-luna', effort: 'low', timeoutMs: 1800000, roundWallMs: null },
+      { model: 'gpt-6-luna', effort: 'low', timeoutMs: 1800000, roundWallMs: null },
+      { model: 'gpt-6-luna', effort: 'low', timeoutMs: 1800000, roundWallMs: null },
+    ]);
     expect(firstCalls.every((config) =>
-      config.model === 'gpt-5.6-luna' && config.effort === 'low' && config.reps === 2 &&
-      config.captureRlData && config.instructionSource === 'kb' &&
+      config.reps === 2 && config.captureRlData && config.instructionSource === 'kb' &&
       config.kbPath.endsWith('/tests/fixtures/ai-dm-kb/k6.txt'),
     )).toBe(true);
     expect(firstCalls.every((config) => config.generateMissingRooms)).toBe(true);
@@ -56,6 +64,9 @@ describe('RL arena batch generator', () => {
       { seed: 3_943_003, status: 'complete', flapRetries: 0 },
     ]);
     expect(firstManifest).toMatchObject({
+      format: 'arena-rl-batch-v2',
+      model: 'gpt-6-luna',
+      effort: 'low',
       adapterCliName: 'codex',
       adapterCliVersion: null,
       kbId: 'K6',
@@ -98,6 +109,106 @@ describe('RL arena batch generator', () => {
       join(targetDirectory, 'batch-3943001-3943003.manifest.json'),
       'utf8',
     ))).toEqual(resumedManifest);
+    // The generator's own --timeout-ms is removed: a gpt-6-luna low batch keeps only the hang guard (plan r5 §1.2).
+    expect(() => parseGenerateDataArgs([...args, '--timeout-ms', '120000'])).toThrow(
+      'LUNA6: gpt-6-luna low runs uncensored (owner 2026-09-24); --timeout-ms 120000 is refused (hang guard 1800000)',
+    );
+  });
+
+  it('refuses to resume a v1 gpt-5.6-luna batch manifest into a v2 gpt-6-luna batch', async () => {
+    // A batch written before LUNA6, typed by hand in the pre-LUNA6 schema (tools/rl/generate-data.ts at 71940c8f:
+    // arena-rl-batch-v1 on gpt-5.6-luna low), beside the same batch in the v2 schema as the control. Only the format
+    // and the model differ, so the refusal is the route's and not a configuration mismatch.
+    const kbHash = createHash('sha256').update(readFileSync(
+      join(process.cwd(), 'tests/fixtures/ai-dm-kb/k6.txt'),
+    )).digest('hex');
+    const repoCommit = await readRepoCommit(process.cwd());
+    const storedBatch = (targetDirectory: string, format: string, model: string) => {
+      const outputPath = (seed: number): string =>
+        join(targetDirectory, 'batch-3943001-3943003', `seed-${String(seed)}.jsonl`);
+      return {
+        format,
+        range: { start: 3_943_001, end: 3_943_003 },
+        reps: 2,
+        model,
+        effort: 'low',
+        adapterCliName: 'codex',
+        adapterCliVersion: null,
+        kbId: 'K6',
+        kbHash,
+        repoCommit,
+        toolArgv: ['--seed-range', '3943001-3943003', '--reps', '2', '--target-dir', targetDirectory],
+        flapPolicy: 'arena-retry-then-resume-seed',
+        basis: 'standard',
+        combatModel: 'initiative_segments_v1',
+        initiativeProfile: 'derived_v1',
+        seeds: [
+          {
+            seed: 3_943_001, outputPath: outputPath(3_943_001), status: 'complete',
+            rows: 1, flapRetries: 0, serviceNullRows: 0, error: null,
+          },
+          {
+            seed: 3_943_002, outputPath: outputPath(3_943_002), status: 'flapped',
+            rows: 1, flapRetries: 2, serviceNullRows: 1, error: null,
+          },
+          {
+            seed: 3_943_003, outputPath: outputPath(3_943_003), status: 'complete',
+            rows: 1, flapRetries: 0, serviceNullRows: 0, error: null,
+          },
+        ],
+        totals: {
+          seeds: 3, completeSeeds: 2, flappedSeeds: 1, failedSeeds: 0,
+          rows: 3, flapRetries: 2, serviceNullRows: 1,
+        },
+      };
+    };
+    const resumeInto = async (format: string, model: string) => {
+      const targetDirectory = mkdtempSync(join(tmpdir(), 'luna6-generate-resume-'));
+      const manifestPath = join(targetDirectory, 'batch-3943001-3943003.manifest.json');
+      const stored = `${JSON.stringify(storedBatch(targetDirectory, format, model))}\n`;
+      writeFileSync(manifestPath, stored, 'utf8');
+      const calls: number[] = [];
+      const outcome = await generateData(parseGenerateDataArgs([
+        '--seed-range', '3943001-3943003', '--reps', '2', '--target-dir', targetDirectory, '--resume',
+      ]), {
+        arenaRunner: async (config) => {
+          calls.push(config.seed);
+          return [{ outcome: 'authorized', serviceNull: false, flapRetries: 0 }];
+        },
+        heartbeat: () => undefined,
+      }).then(
+        (manifests) => ({
+          ok: manifests.map((manifest) =>
+            ({ format: manifest.format, model: manifest.model, effort: manifest.effort })),
+        }),
+        (error: unknown) => ({
+          error: error instanceof Error
+            ? `${error.name}: ${error.message.replace(manifestPath, '<manifest>')}`
+            : String(error),
+        }),
+      );
+      return { outcome, calls, storedBytesKept: readFileSync(manifestPath, 'utf8') === stored };
+    };
+
+    expect([
+      await resumeInto('arena-rl-batch-v1', 'gpt-5.6-luna'),
+      await resumeInto('arena-rl-batch-v2', 'gpt-6-luna'),
+    ]).toEqual([
+      {
+        outcome: {
+          error: 'HistoricalLunaBatchResumeError: LUNA6: <manifest> is an arena-rl-batch-v1 gpt-5.6-luna low batch; ' +
+            'this generator writes arena-rl-batch-v2 gpt-6-luna low batches (D887 b) and never resumes a v1 batch ' +
+            'into v2, which would mix the two routes in one batch. Start a new --target-dir.',
+        },
+        calls: [],
+        storedBytesKept: true,
+      },
+      {
+        outcome: { ok: [{ format: 'arena-rl-batch-v2', model: 'gpt-6-luna', effort: 'low' }] },
+        calls: [3_943_002],
+        storedBytesKept: false,
+      },
+    ]);
   });
 
   it('records combat model propagation and hard-errors on a resume mismatch', async () => {
@@ -291,6 +402,9 @@ describe('RL arena batch generator', () => {
     )) as Readonly<Record<string, unknown>>;
     expect(row['seed']).toBe(6_000_001);
     expect(row['outcome']).toBe('authorized');
+    // LUNA6 (plan r5 §2.3): a lifted row records the gpt-6-luna low route and no round-wall budget.
+    expect({ model: row['model'], effort: row['effort'], roundWallBudgetMs: row['roundWallBudgetMs'] })
+      .toEqual({ model: 'gpt-6-luna', effort: 'low', roundWallBudgetMs: null });
     expect(row['combatModel']).toBe('initiative_segments_v1');
     expect(row['initiativeOrder']).toEqual(expect.any(Array));
     expect(manifest?.initiativeProfile).toBe('derived_v1');

@@ -15,7 +15,18 @@ import {
   ROOM_INITIATIVE_PROFILES,
   type RoomInitiativeProfile,
 } from '../../src/vtt/room-generator';
+import { HISTORICAL_LUNA_MODEL, LUNA_MODEL, liftRefusal, type LunaEffort } from '../model-routes';
 import { readRepoCommit } from './repo-commit';
+
+/** The batch manifest schema: v2 batches run on gpt-6-luna (LUNA6); v1 batches ran on the historical Luna route. */
+const GENERATE_DATA_MANIFEST_FORMAT = 'arena-rl-batch-v2';
+const HISTORICAL_MANIFEST_FORMAT = 'arena-rl-batch-v1';
+/**
+ * D887 (b): the RL corpus is an effort study, so it moves to gpt-6-luna at its stated low effort. D890 (a) and the
+ * owner's 2026-09-24 18:58 answer lift its round wall: the arena argv carries no --timeout-ms, and the arena gives
+ * every call the 30 min per-call hang guard.
+ */
+const GENERATE_DATA_EFFORT = 'low' satisfies LunaEffort;
 
 export interface SeedRange {
   readonly start: number;
@@ -30,7 +41,6 @@ export interface GenerateDataConfig {
   readonly targetDirectory: string;
   readonly resume: boolean;
   readonly cwd: string;
-  readonly timeoutMs: number;
   readonly basis: ArenaBasis;
   readonly toolArgv: readonly string[];
 }
@@ -45,12 +55,9 @@ interface SeedManifestEntry {
   readonly error: string | null;
 }
 
-export interface GenerateDataManifest {
-  readonly format: 'arena-rl-batch-v1';
+interface GenerateDataManifestBody {
   readonly range: SeedRange;
   readonly reps: number;
-  readonly model: 'gpt-5.6-luna';
-  readonly effort: 'low';
   readonly adapterCliName: 'codex';
   readonly adapterCliVersion: string | null;
   readonly kbId: 'K6';
@@ -71,6 +78,32 @@ export interface GenerateDataManifest {
     readonly flapRetries: number;
     readonly serviceNullRows: number;
   };
+}
+
+export interface GenerateDataManifest extends GenerateDataManifestBody {
+  readonly format: typeof GENERATE_DATA_MANIFEST_FORMAT;
+  readonly model: typeof LUNA_MODEL;
+  readonly effort: typeof GENERATE_DATA_EFFORT;
+}
+
+/** A batch written before LUNA6, on the historical Luna route. Resume refuses it and never rewrites its file. */
+export interface HistoricalGenerateDataManifest extends GenerateDataManifestBody {
+  readonly format: typeof HISTORICAL_MANIFEST_FORMAT;
+  readonly model: typeof HISTORICAL_LUNA_MODEL;
+  readonly effort: 'low';
+}
+
+/** LUNA6 (plan r5 §1.2): a v1 batch is never resumed into a v2 batch, which would mix two routes in one batch. */
+export class HistoricalLunaBatchResumeError extends Error {
+  override readonly name = 'HistoricalLunaBatchResumeError' as const;
+
+  constructor(readonly manifestPath: string, stored: HistoricalGenerateDataManifest) {
+    super(
+      `LUNA6: ${manifestPath} is an ${stored.format} ${stored.model} ${stored.effort} batch; this generator ` +
+      `writes ${GENERATE_DATA_MANIFEST_FORMAT} ${LUNA_MODEL} ${GENERATE_DATA_EFFORT} batches (D887 b) and never ` +
+      'resumes a v1 batch into v2, which would mix the two routes in one batch. Start a new --target-dir.',
+    );
+  }
 }
 
 export type ArenaBatchRunner = (config: ArenaConfig) => Promise<readonly Pick<
@@ -110,7 +143,6 @@ export function parseGenerateDataArgs(
   const ranges: SeedRange[] = [];
   let reps: number | null = null;
   let targetDirectory: string | null = null;
-  let timeoutMs = 120_000;
   let resume = false;
   let basis: GenerateDataConfig['basis'] = 'standard';
   let combatModel: CombatModel = 'initiative_segments_v1';
@@ -118,8 +150,12 @@ export function parseGenerateDataArgs(
   for (let index = 0; index < args.length; index += 1) {
     const option = args[index];
     if (option === '--resume') { resume = true; continue; }
+    if (option === '--timeout-ms') {
+      // LUNA6 (plan r5 §1.2): removed. A gpt-6-luna low batch keeps only the arena's 30 min per-call hang guard.
+      throw liftRefusal([GENERATE_DATA_EFFORT], `--timeout-ms ${args[index + 1] ?? '<missing>'}`);
+    }
     if (![
-      '--seed-range', '--reps', '--target-dir', '--timeout-ms', '--basis', '--combat-model',
+      '--seed-range', '--reps', '--target-dir', '--basis', '--combat-model',
       '--initiative-profile',
     ].includes(option ?? '')) {
       throw new TypeError(`Unknown generate-data option ${option ?? '<missing>'}.`);
@@ -129,7 +165,6 @@ export function parseGenerateDataArgs(
     if (option === '--seed-range') ranges.push(seedRange(value));
     else if (option === '--reps') reps = positiveInteger(value, '--reps');
     else if (option === '--target-dir') targetDirectory = resolve(value);
-    else if (option === '--timeout-ms') timeoutMs = positiveInteger(value, '--timeout-ms');
     else if (option === '--basis') {
       if (!ARENA_BASES.includes(value as ArenaBasis)) {
         throw new TypeError('--basis must be standard, hard, or brutal.');
@@ -166,7 +201,6 @@ export function parseGenerateDataArgs(
     targetDirectory,
     resume,
     cwd: resolve(cwd),
-    timeoutMs,
     basis,
     toolArgv: [...args],
   };
@@ -189,18 +223,19 @@ async function existingManifest(
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null;
     throw error;
   }
-  const decoded = JSON.parse(source) as GenerateDataManifest;
-  if (decoded.format !== 'arena-rl-batch-v1' || decoded.range.start !== range.start ||
-    decoded.range.end !== range.end || decoded.reps !== config.reps || decoded.basis !== config.basis ||
-    decoded.combatModel !== config.combatModel ||
-    decoded.initiativeProfile !== config.initiativeProfile ||
-    decoded.model !== 'gpt-5.6-luna' || decoded.effort !== 'low' || decoded.kbId !== 'K6' ||
-    decoded.kbHash !== provenance.kbHash || decoded.repoCommit !== provenance.repoCommit ||
-    decoded.adapterCliName !== provenance.adapterCliName ||
-    decoded.adapterCliVersion !== provenance.adapterCliVersion) {
+  const stored = JSON.parse(source) as GenerateDataManifest | HistoricalGenerateDataManifest;
+  if (stored.format === HISTORICAL_MANIFEST_FORMAT) throw new HistoricalLunaBatchResumeError(path, stored);
+  if (stored.format !== GENERATE_DATA_MANIFEST_FORMAT || stored.range.start !== range.start ||
+    stored.range.end !== range.end || stored.reps !== config.reps || stored.basis !== config.basis ||
+    stored.combatModel !== config.combatModel ||
+    stored.initiativeProfile !== config.initiativeProfile ||
+    stored.model !== LUNA_MODEL || stored.effort !== GENERATE_DATA_EFFORT || stored.kbId !== 'K6' ||
+    stored.kbHash !== provenance.kbHash || stored.repoCommit !== provenance.repoCommit ||
+    stored.adapterCliName !== provenance.adapterCliName ||
+    stored.adapterCliVersion !== provenance.adapterCliVersion) {
     throw new Error(`Resume manifest ${path} does not match this batch configuration.`);
   }
-  return { ...decoded, toolArgv: [...config.toolArgv] };
+  return { ...stored, toolArgv: [...config.toolArgv] };
 }
 
 interface ManifestProvenance {
@@ -226,11 +261,11 @@ function emptyManifest(
   provenance: ManifestProvenance,
 ): GenerateDataManifest {
   return {
-    format: 'arena-rl-batch-v1',
+    format: GENERATE_DATA_MANIFEST_FORMAT,
     range,
     reps: config.reps,
-    model: 'gpt-5.6-luna',
-    effort: 'low',
+    model: LUNA_MODEL,
+    effort: GENERATE_DATA_EFFORT,
     adapterCliName: provenance.adapterCliName,
     adapterCliVersion: provenance.adapterCliVersion,
     kbId: 'K6',
@@ -280,10 +315,9 @@ function arenaConfig(config: GenerateDataConfig, seed: number, outPath: string):
     '--reps', String(config.reps),
     '--seed', String(seed),
     '--cli', 'codex',
-    '--model', 'gpt-5.6-luna',
-    '--effort', 'low',
+    '--model', LUNA_MODEL,
+    '--effort', GENERATE_DATA_EFFORT,
     '--out', outPath,
-    '--timeout-ms', String(config.timeoutMs),
     '--kb', resolve(config.cwd, 'tests/fixtures/ai-dm-kb/k6.txt'),
     '--basis', config.basis,
     '--combat-model', config.combatModel,
@@ -322,9 +356,11 @@ export async function generateData(
         continue;
       }
       const outputPath = join(batchDirectory, `seed-${String(seed)}.jsonl`);
+      // A refused arena argv is a configuration error of the whole batch, not a seed failure: it stops the batch.
+      const arena = arenaConfig(config, seed, outputPath);
       heartbeat(`seed=${String(seed)} status=start`);
       try {
-        const rows = await arenaRunner(arenaConfig(config, seed, outputPath));
+        const rows = await arenaRunner(arena);
         const serviceNullRows = rows.filter((row) => row.serviceNull || row.outcome === 'service_null').length;
         manifest = replaceSeed(manifest, {
           seed,
@@ -383,7 +419,7 @@ async function main(): Promise<void> {
 }
 
 const GENERATE_DATA_USAGE =
-  'Usage: rl:generate-data --seed-range START-END [--seed-range START-END ...] --reps N --target-dir PATH [--basis standard|hard|brutal] [--combat-model monster_block_v1|initiative_segments_v1] [--initiative-profile legacy|derived_v1] [--timeout-ms N] [--resume]';
+  'Usage: rl:generate-data --seed-range START-END [--seed-range START-END ...] --reps N --target-dir PATH [--basis standard|hard|brutal] [--combat-model monster_block_v1|initiative_segments_v1] [--initiative-profile legacy|derived_v1] [--resume]';
 
 async function runCli(): Promise<void> {
   try { await main(); }

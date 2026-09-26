@@ -60,7 +60,8 @@ const MIXED_ROUTE_REFUSAL =
   'LUNA6: a run mixing gpt-6-luna and other routes cannot give each route its own bound ' +
   '(owner 2026-09-24: only gpt-6-luna calls lose the 180 s wall); split it';
 
-function liftRefusal(efforts: readonly string[], flag: string): TypeError {
+/** The refusal of a flag that would censor a gpt-6-luna run (plan §2.2); generate-data reuses it. */
+export function liftRefusal(efforts: readonly string[], flag: string): TypeError {
   return new TypeError(
     `LUNA6: gpt-6-luna ${[...new Set(efforts)].join('/')} runs uncensored (owner 2026-09-24); ` +
     `${flag} is refused (hang guard ${String(LUNA_HANG_GUARD_MS)})`,
