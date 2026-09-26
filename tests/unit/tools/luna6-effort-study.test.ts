@@ -39,7 +39,7 @@ import {
 
 // Every expectation below is typed from the preregistration S-PREREG (D898, 2026-09-26; R1-R11 supersede plan r5 §3
 // for option (b)) or derived by hand from plan r5 §4.5 as adapted to D898's counts (the arithmetic is in
-// .tmp/runs/luna6/b6/derivations.md). None is read from the module under test.
+// .tmp/runs/luna6/b6/derivations.txt). None is read from the module under test.
 
 type Outcome<Value> = { readonly ok: Value } | { readonly error: readonly string[] | string };
 

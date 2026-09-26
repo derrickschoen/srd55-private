@@ -356,15 +356,18 @@ export function runLuna6EffortStudyCli(
   }
 }
 
+// vite-node drops the script path from process.argv ([node, vite-node.mjs, ...arguments]), so a vite-node run is
+// recognised by its first argument being a subcommand with --root present (the arena's guard pattern,
+// ai-dm-arena.ts:1076-1081). Never under Vitest.
 const invokedPath = process.argv[1];
+const firstArgument = process.argv[2];
 const isStudyPath = (path: string): boolean =>
-  path.endsWith('/luna6-effort-study.ts') || path.endsWith('\\luna6-effort-study.ts') || path === 'luna6-effort-study.ts';
+  path.endsWith('/luna6-effort-study.ts') || path.endsWith('\\luna6-effort-study.ts');
+const viaViteNode = invokedPath !== undefined && /[\\/]vite-node(?:\.mjs)?$/u.test(invokedPath);
 if (process.env['VITEST'] !== 'true' && invokedPath !== undefined && (
   isStudyPath(invokedPath) ||
-  ((invokedPath.endsWith('/vite-node') || invokedPath.endsWith('\\vite-node') ||
-    invokedPath.endsWith('/vite-node.mjs') || invokedPath.endsWith('\\vite-node.mjs')) &&
-    process.argv.some(isStudyPath))
+  (viaViteNode && firstArgument !== undefined && Object.prototype.hasOwnProperty.call(SUBCOMMANDS, firstArgument) &&
+    process.argv.includes('--root'))
 )) {
-  const scriptIndex = process.argv.findIndex(isStudyPath);
-  process.exitCode = runLuna6EffortStudyCli(process.argv.slice(scriptIndex + 1));
+  process.exitCode = runLuna6EffortStudyCli(process.argv.slice(2));
 }
