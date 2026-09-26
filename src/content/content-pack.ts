@@ -188,6 +188,7 @@ const targetingSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('all_in_range'), rangeFeet: nonNegativeInteger }),
   z.strictObject({ kind: z.literal('remote'), range: z.literal('unlimited') }),
   z.strictObject({ kind: z.literal('utility'), rangeFeet: nonNegativeInteger }),
+  z.strictObject({ kind: z.literal('weapon_attack') }),
 ]);
 
 /*

@@ -29,6 +29,7 @@ import type {
   ScaledDice,
   SpellLevel,
 } from '../../../src/combat/spells/types';
+import type { TacticalAttackRange } from '../../../src/combat/tactical-evaluator';
 import { monsterProfile, placedToken, playerProfile } from './fixtures';
 import { onBoard } from '../../helpers/board-cell';
 
@@ -81,7 +82,8 @@ const VALUE_PINS: readonly ValuePin[] = [
   { id: 'shocking-grasp', level: 0, operation: 'attack_damage', rangeFeet: 5, baseDice: [1, 8], perSlotCount: 0, source: 'spell-descriptions.txt:7006' },
   { id: 'spare-the-dying', level: 0, operation: 'stabilize', rangeFeet: 30, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:7181 (level-5 range upgrade)' },
   { id: 'thaumaturgy', level: 0, operation: 'utility', rangeFeet: 30, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:7842' },
-  { id: 'true-strike', level: 0, operation: 'weapon_attack_augmentation', rangeFeet: 5, baseDice: [0, 6], perSlotCount: 0, source: 'spell-descriptions.txt:8079-8094' },
+  // "Range: Self" (spell-descriptions.txt:8082): the attack's reach is the weapon's, which the cast states.
+  { id: 'true-strike', level: 0, operation: 'weapon_attack_augmentation', rangeFeet: 0, baseDice: [0, 6], perSlotCount: 0, source: 'spell-descriptions.txt:8079-8094' },
   { id: 'bane', level: 1, operation: 'save_effect', rangeFeet: 30, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:670' },
   { id: 'bless', level: 1, operation: 'effect', rangeFeet: 30, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:824' },
   { id: 'burning-hands', level: 1, operation: 'save_damage', rangeFeet: 0, baseDice: [3, 6], perSlotCount: 1, source: 'spell-descriptions.txt:924' },
@@ -387,7 +389,8 @@ const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
   },
   {
     id: 'true-strike', source: 'spell-descriptions.txt:8079',
-    targeting: { kind: 'single', rangeFeet: 5, willing: false },
+    // "Range: Self ... you make one attack with the weapon used in the spell's casting" (:8082-8087).
+    targeting: { kind: 'weapon_attack' },
     operation: {
       kind: 'weapon_attack_augmentation',
       timing: 'during_cast',
@@ -679,7 +682,8 @@ const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
 ];
 
 function definitionRange(definition: SpellDefinition): number {
-  return definition.targeting.kind === 'self' || definition.targeting.kind === 'remote'
+  return definition.targeting.kind === 'self' || definition.targeting.kind === 'remote' ||
+    definition.targeting.kind === 'weapon_attack'
     ? 0
     : definition.targeting.rangeFeet;
 }
@@ -900,7 +904,9 @@ function castCommand(
   slotLevel: number | null = definition.level === 0 ? null : definition.level,
 ): SpellCastCommand {
   const operation = definition.operation;
-  let targets = definition.targeting.kind === 'single' ? [target.id] : [];
+  let targets = definition.targeting.kind === 'single' || definition.targeting.kind === 'weapon_attack'
+    ? [target.id]
+    : [];
   if (definition.targeting.kind === 'multiple') {
     const count = operation.kind === 'magic_missiles'
       ? operation.baseDarts + operation.additionalPerSlot * ((slotLevel as number) - definition.level)
@@ -924,7 +930,10 @@ function castCommand(
     targets,
     area: areaFor(definition, slotLevel),
     weaponAttack: definition.id === 'true-strike'
-      ? { attackBonus: 100, damageType: damageType('Slashing'), damageCount: 1, damageSides: 8, damageModifier: 3 }
+      ? {
+          attackBonus: 100, damageType: damageType('Slashing'), damageCount: 1, damageSides: 8, damageModifier: 3,
+          tacticalRange: { kind: 'melee', reachFeet: feet(5) },
+        }
       : null,
     selectedOption: definition.id === 'resistance' || definition.id === 'chromatic-orb'
       ? 'Fire'
@@ -1259,6 +1268,7 @@ describe('spell foundations and implemented value pins', () => {
           damageCount: 1,
           damageSides: 8,
           damageModifier: -4,
+          tacticalRange: { kind: 'melee', reachFeet: feet(5) },
         },
       }, () => 0);
       const attack = result.events.find((event) => event.type === 'attack_resolved');
@@ -1279,6 +1289,7 @@ describe('spell foundations and implemented value pins', () => {
           damageCount: 1,
           damageSides: 8,
           damageModifier: -4,
+          tacticalRange: { kind: 'melee', reachFeet: feet(5) },
         },
       }, () => draw++ === 0 ? 0.5 : 0);
       expect(hitResult.events.find((event) => event.type === 'attack_resolved')).toMatchObject({
@@ -1552,5 +1563,93 @@ describe('Ranged Attacks in Close Combat for spell attack rolls (docs/srd/full/s
     expect(attackRolls('vampiric-touch', 'adjacent')).toEqual(['normal:1']);
     expect(attackRolls('spiritual-weapon', 'adjacent')).toEqual(['normal:1']);
     expect(attackRolls('shocking-grasp', 'adjacent', 'enemy')).toEqual(['normal:1']);
+  });
+});
+
+/*
+ * CC-TRUE-STRIKE (review r3 P1). True Strike's range is Self and "you make one
+ * attack with the weapon used in the spell's casting"
+ * (docs/srd/source/spell-descriptions.txt:8079-8087), so the attack is that
+ * weapon's: its target must be within the weapon's range, beyond the normal
+ * range the roll has Disadvantage (Range property, docs/srd/full/srd-5.2.1.txt:
+ * 5434-5439), and a ranged attack roll within 5 feet of an alert enemy that
+ * sees the caster has Disadvantage (:911-917). Weapon ranges from the SRD
+ * weapons table (docs/srd/source/weapons-table.txt): Longbow 150/600 (:50),
+ * Dart 20/60 (:21, a Simple Ranged Weapon), Dagger Thrown 20/60 (:11, a Simple
+ * Melee Weapon: melee within its 5-foot reach, a ranged attack when thrown
+ * beyond it), Longsword melee (:34, reach 5 feet).
+ *
+ * BOARD (14 x 6, bright light): the caster at (0,1); the target monster in
+ * row 1 at the stated column (5 feet per column); the neighbour, when present,
+ * a second monster (an enemy) or a second player (an ally) at (0,2), 5 feet
+ * from the caster and off the line to the target. The RNG is fixed at 0.5; a
+ * Disadvantage roll shows two d20 faces, a straight roll one.
+ */
+describe('CC-TRUE-STRIKE: True Strike attacks with the weapon used in its casting', () => {
+  const LONGBOW: TacticalAttackRange = { kind: 'ranged', normalRangeFeet: feet(150), longRangeFeet: feet(600) };
+  const DART: TacticalAttackRange = { kind: 'ranged', normalRangeFeet: feet(20), longRangeFeet: feet(60) };
+  const DAGGER: TacticalAttackRange = {
+    kind: 'melee_or_ranged', reachFeet: feet(5), normalRangeFeet: feet(20), longRangeFeet: feet(60),
+  };
+  const LONGSWORD: TacticalAttackRange = { kind: 'melee', reachFeet: feet(5) };
+  const trueStrike = (weapon: TacticalAttackRange, targetColumn: number, neighbour: 'enemy' | 'ally' | 'none') => {
+    const definition = spellDefinition('true-strike');
+    if (definition === null) throw new Error('True Strike definition missing.');
+    const caster = playerProfile('cc-true-strike-caster', { hitPoints: 200, initiativeBonus: 20 });
+    const target = monsterProfile('cc-true-strike-target', { hitPoints: 200, initiativeBonus: 0 });
+    const other = neighbour === 'enemy'
+      ? monsterProfile('cc-true-strike-neighbour', { hitPoints: 200, initiativeBonus: -10 })
+      : neighbour === 'ally'
+        ? playerProfile('cc-true-strike-ally', { hitPoints: 200, initiativeBonus: -10 })
+        : null;
+    const created = createEncounter({
+      bounds: { columns: 14, rows: 6 },
+      combatants: [caster, target, ...(other === null ? [] : [other])],
+      tokens: [
+        placedToken(caster, 0, 1),
+        placedToken(target, targetColumn, 1),
+        ...(other === null ? [] : [placedToken(other, 0, 2)]),
+      ],
+    });
+    const state = reduceEncounter(created, { type: 'roll_initiative' }, () => 0.5).state;
+    expect(state.activeCombatant).toBe(caster.id);
+    const base = castCommand(definition, caster, target);
+    if (base.weaponAttack === null) throw new Error('The True Strike fixture names no weapon.');
+    const result = reduceEncounter(state, {
+      ...base,
+      weaponAttack: { ...base.weaponAttack, tacticalRange: weapon },
+    }, () => 0.5);
+    return result.events.flatMap((event) =>
+      event.type === 'attack_resolved' ? [`${event.attack.roll.mode}:${String(event.attack.roll.faces.length)}`] : []);
+  };
+
+  it('CC-TRUE-STRIKE-RANGED: with a Longbow, an alert enemy beside the caster gives the shot Disadvantage; a melee weapon never has it', () => {
+    // Longbow at a target 30 feet away (normal range): the enemy at (0,2) is
+    // within 5 feet of the caster and sees it. An ally there, or nobody: a
+    // straight roll. At an adjacent target, the target itself is that enemy.
+    expect(trueStrike(LONGBOW, 6, 'enemy')).toEqual(['disadvantage:2']);
+    expect(trueStrike(LONGBOW, 6, 'ally')).toEqual(['normal:1']);
+    expect(trueStrike(LONGBOW, 6, 'none')).toEqual(['normal:1']);
+    expect(trueStrike(LONGBOW, 1, 'none')).toEqual(['disadvantage:2']);
+    // A Longsword against the adjacent target with the enemy beside the
+    // caster: a melee attack roll, never close-combat Disadvantage.
+    expect(trueStrike(LONGSWORD, 1, 'enemy')).toEqual(['normal:1']);
+    // A thrown Dagger: melee within its reach, a ranged attack beyond it.
+    expect(trueStrike(DAGGER, 1, 'enemy')).toEqual(['normal:1']);
+    expect(trueStrike(DAGGER, 3, 'enemy')).toEqual(['disadvantage:2']);
+    expect(trueStrike(DAGGER, 3, 'none')).toEqual(['normal:1']);
+  });
+
+  it('CC-TRUE-STRIKE-RANGE: the legal targets and the long range band are the weapon\'s', () => {
+    // Dart 20/60: 20 feet is normal range, 25 feet long range (Disadvantage),
+    // 65 feet beyond its long range (no attack).
+    expect(trueStrike(DART, 4, 'none')).toEqual(['normal:1']);
+    expect(trueStrike(DART, 5, 'none')).toEqual(['disadvantage:2']);
+    expect(() => trueStrike(DART, 13, 'none')).toThrow('The target is out of True Strike weapon range.');
+    // A Longsword reaches 5 feet: a target 10 feet away cannot be attacked.
+    expect(() => trueStrike(LONGSWORD, 2, 'none')).toThrow('The target is out of True Strike weapon range.');
+    // A weapon without a stated long range is unresolved beyond its normal range.
+    expect(() => trueStrike({ kind: 'ranged', normalRangeFeet: feet(20), longRangeFeet: null }, 5, 'none'))
+      .toThrow('The True Strike weapon long range is unresolved.');
   });
 });

@@ -1342,7 +1342,8 @@ describe('external party-pack boundary', () => {
     expect(command).toMatchObject({
       attackBonus: 9,
       spellcastingModifier: 5,
-      weaponAttack: { attackBonus: 5, damageModifier: -1 },
+      // The named attack's own reach (memberBase: melee, 5 feet), as its attack commands carry it.
+      weaponAttack: { attackBonus: 5, damageModifier: -1, tacticalRange: { kind: 'melee', reachFeet: 5 } },
     });
     let state = createEncounter({
       bounds: { columns: 3, rows: 1 },
@@ -1359,6 +1360,58 @@ describe('external party-pack boundary', () => {
       attack: { total: 20, outcome: 'hit' },
       damage: { total: 7 },
     });
+  });
+
+  it('CC-TRUE-STRIKE-PACK: True Strike with a pack Longbow carries its 150/600 range, so a shot beside an alert enemy has Disadvantage', () => {
+    // SRD Longbow: Ammunition (Range 150/600) (docs/srd/source/weapons-table.txt:50).
+    // True Strike makes one attack with that weapon (spell-descriptions.txt:8079-8087),
+    // so a target 30 feet away is in its normal range, and a monster within
+    // 5 feet of the caster that sees it gives the ranged attack roll
+    // Disadvantage (docs/srd/full/srd-5.2.1.txt:911-917). The RNG is fixed at
+    // 0.5: Disadvantage shows two d20 faces, a straight roll one.
+    const candidate = structuredClone(pack());
+    const casterInput = candidate.members[0]!;
+    casterInput.attacks[0] = {
+      ...casterInput.attacks[0]!,
+      kind: 'ranged',
+      rangeFeet: 150,
+      longRangeFeet: 600,
+      damage: [{ damageTypeId: 'Piercing', count: 1, sides: 8, modifier: 3 }],
+    };
+    const source = objectSpellcasting(casterInput);
+    source.knownSpellIds = ['true-strike'];
+    source.preparedSpellIds = [];
+    const loaded = loadExternalPartyPack(candidate);
+    if (loaded.status !== 'loaded') throw new Error('True Strike Longbow party pack was refused.');
+    const caster = loaded.party.members[0]!;
+    const target = monsterProfile('cc-true-strike-pack-target', { hitPoints: 200, initiativeBonus: -10 });
+    const command = loadedPartySpellCastCommand(caster, 'true-strike', {
+      slotLevel: null,
+      castAsRitual: false,
+      targets: [target.id],
+      area: null,
+      weaponAttack: { attackId: caster.attacks[0]!.attackId, damageTermIndex: 0 },
+      selectedOption: null,
+    });
+    expect(command.weaponAttack?.tacticalRange).toEqual({ kind: 'ranged', normalRangeFeet: 150, longRangeFeet: 600 });
+    const rolls = (neighbour: boolean) => {
+      const guard = monsterProfile('cc-true-strike-pack-guard', { hitPoints: 200, initiativeBonus: -20 });
+      let state = createEncounter({
+        bounds: { columns: 8, rows: 2 },
+        combatants: [caster.profile, target, ...(neighbour ? [guard] : [])],
+        tokens: [
+          combatToken(caster.profile, { column: 0, row: 0 }),
+          placedToken(target, 6, 0),
+          ...(neighbour ? [placedToken(guard, 0, 1)] : []),
+        ],
+      });
+      state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+      expect(state.activeCombatant).toBe(caster.profile.id);
+      return reduceEncounter(state, command, () => 0.5).events.flatMap((event) =>
+        event.type === 'attack_resolved' ? [`${event.attack.roll.mode}:${String(event.attack.roll.faces.length)}`] : []);
+    };
+    expect(rolls(true)).toEqual(['disadvantage:2']);
+    expect(rolls(false)).toEqual(['normal:1']);
   });
 
   it('validates grant spell ids through the manifest refusal boundary', () => {

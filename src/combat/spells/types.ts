@@ -16,6 +16,7 @@ import type { GridCell } from '../grid';
 import type { SizeStepOperation } from '../creature-space';
 import type { LightLevel, WorldObjectChanges, WorldObjectInput } from '../world-objects';
 import type { CombatSense, MonsterAction } from '../statblock';
+import type { TacticalAttackRange } from '../tactical-evaluator';
 
 export type SpellLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 export type SpellCastingTime = 'action' | 'bonus_action' | 'reaction' | 'minute' | 'ten_minutes' | 'hour';
@@ -124,7 +125,15 @@ export type SpellTargeting =
   | {
       readonly kind: 'utility';
       readonly rangeFeet: number;
-    };
+    }
+  /**
+   * One creature, attacked with the weapon used in the casting, so within that
+   * weapon's range: the command states it (SpellCastCommand.weaponAttack's
+   * tacticalRange), not the spell. True Strike's range is Self and "you make
+   * one attack with the weapon used in the spell's casting"
+   * (docs/srd/source/spell-descriptions.txt:8079-8087).
+   */
+  | { readonly kind: 'weapon_attack' };
 
 export interface EffectData {
   readonly payload: EffectPayload;
@@ -1259,6 +1268,14 @@ export interface SpellCastCommand {
     readonly damageCount: number;
     readonly damageSides: number;
     readonly damageModifier: number;
+    /**
+     * The weapon's own range, as a weapon attack command states it: a melee
+     * weapon's reach, a ranged weapon's normal and long range, or both for a
+     * thrown weapon. The attack made with it is that weapon's attack, so its
+     * range band, Ranged Attacks in Close Combat and the legal targets follow
+     * this range, never the spell's.
+     */
+    readonly tacticalRange: TacticalAttackRange;
   };
   readonly selectedOption: string | SizeStepOperation | null;
   /** Per-Humanoid Calm Emotions choice, supplied at activation. */

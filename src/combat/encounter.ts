@@ -232,6 +232,7 @@ import {
   tacticalRangeVerdictAtDistance,
   type AttackRollDelivery,
   type AttackRollModeSource,
+  type TacticalAttackRange,
   type MonsterRollModeCombatantFacts,
   type MonsterRollModeFeatureInput,
   type TacticalAttackRollModifier,
@@ -2395,6 +2396,60 @@ function coverAdjustedArmorClass(
   return armorClass(effectiveArmorClass(state, target, attacker) + coverDefenseBonus(tier));
 }
 
+/**
+ * The roll-mode sources a weapon's range gives an attack roll made with that
+ * weapon: Disadvantage in its long range band (Range property,
+ * docs/srd/full/srd-5.2.1.txt:5434-5439) and Ranged Attacks in Close Combat
+ * (:911-917, the planner's closeCombatVerdict on the full state). Every weapon
+ * attack roll takes them from here: an attack command's, and the one a spell
+ * makes with the weapon used in its casting (True Strike).
+ */
+function weaponRangeRollModeSources(
+  state: EncounterState,
+  attacker: CombatantId,
+  target: CombatantId,
+  range: TacticalAttackRange,
+): readonly AttackRollModeSource[] {
+  const distance = minimumSpaceDistance(combatantSpace(state, attacker), combatantSpace(state, target));
+  const sources: AttackRollModeSource[] = [];
+  const verdict = tacticalRangeVerdictAtDistance(distance, range);
+  if (verdict.status === 'resolved' && verdict.band === 'long') {
+    sources.push({ mode: 'disadvantage', reason: 'long_range_disadvantage' });
+  }
+  if (closeCombatVerdict(
+    attackRollDelivery(range, distance),
+    closeCombatEnemies(state, attacker),
+  ).kind === 'disadvantage') {
+    sources.push({ mode: 'disadvantage', reason: 'ranged_close_combat_disadvantage' });
+  }
+  return sources;
+}
+
+/**
+ * A weapon attack's target must be within the weapon's range: its reach, or
+ * its long range (a long range the weapon does not state is unresolved, never
+ * the normal range). The attack command's rule, shared with the attack a
+ * spell makes with the weapon used in its casting.
+ */
+function assertWithinWeaponRange(
+  state: EncounterState,
+  attacker: CombatantId,
+  target: CombatantId,
+  range: TacticalAttackRange,
+  subject: string,
+): void {
+  const verdict = tacticalRangeVerdictAtDistance(
+    minimumSpaceDistance(combatantSpace(state, attacker), combatantSpace(state, target)),
+    range,
+  );
+  if (verdict.status === 'unresolved') {
+    throw new EncounterRuleError('validation', `The ${subject} long range is unresolved.`);
+  }
+  if (!verdict.legal) {
+    throw new EncounterRuleError('validation', `The target is out of ${subject} range.`);
+  }
+}
+
 function attackRollModeSources(
   state: EncounterState,
   command: Extract<
@@ -2466,17 +2521,7 @@ function attackRollModeSources(
     combatantSpace(state, command.target),
   );
   if (includeRangeSource && command.tacticalRange !== undefined) {
-    const range = tacticalRangeVerdictAtDistance(distance, command.tacticalRange);
-    if (range.status === 'resolved' && range.band === 'long') {
-      sources.push({ mode: 'disadvantage', reason: 'long_range_disadvantage' });
-    }
-    // Ranged Attacks in Close Combat: the planner's rule, on the full state.
-    if (closeCombatVerdict(
-      attackRollDelivery(command.tacticalRange, distance),
-      closeCombatEnemies(state, command.actor),
-    ).kind === 'disadvantage') {
-      sources.push({ mode: 'disadvantage', reason: 'ranged_close_combat_disadvantage' });
-    }
+    sources.push(...weaponRangeRollModeSources(state, command.actor, command.target, command.tacticalRange));
   }
   if (includeConditionSources) {
     sources.push(...conditionAttackRollModeSources({
@@ -7149,19 +7194,7 @@ function processAttack(
   }
   const attackLine = combatantLineVerdict(context.state, command.actor, command.target);
   if (opportunityTrigger === null && command.tacticalRange !== undefined) {
-    const range = tacticalRangeVerdictAtDistance(
-      minimumSpaceDistance(
-        combatantSpace(context.state, command.actor),
-        combatantSpace(context.state, command.target),
-      ),
-      command.tacticalRange,
-    );
-    if (range.status === 'unresolved') {
-      throw new EncounterRuleError('validation', 'The attack long range is unresolved.');
-    }
-    if (!range.legal) {
-      throw new EncounterRuleError('validation', 'The target is out of attack range.');
-    }
+    assertWithinWeaponRange(context.state, command.actor, command.target, command.tacticalRange, 'attack');
   }
   if (
     opportunityTrigger === null &&
@@ -7832,12 +7865,11 @@ function areaTargets(
   );
 }
 
-function validateTargetRange(
+function validateTargetPresence(
   state: EncounterState,
   actor: CombatantId,
   target: CombatantId,
-  rangeFeet: number,
-  allowDead = false,
+  allowDead: boolean,
 ): void {
   if (!isCombatantOnBoard(state, actor) || !isCombatantOnBoard(state, target)) {
     throw new EncounterRuleError('validation', 'Spell caster and target must be present on the board.');
@@ -7845,6 +7877,16 @@ function validateTargetRange(
   if (!allowDead && combatant(state, target).life === 'dead') {
     throw new EncounterRuleError('validation', 'A dead combatant is not a legal spell target.');
   }
+}
+
+function validateTargetRange(
+  state: EncounterState,
+  actor: CombatantId,
+  target: CombatantId,
+  rangeFeet: number,
+  allowDead = false,
+): void {
+  validateTargetPresence(state, actor, target, allowDead);
   if (minimumSpaceDistance(combatantSpace(state, actor), combatantSpace(state, target)) > rangeFeet) {
     throw new EncounterRuleError('validation', `Spell target ${target} is out of range.`);
   }
@@ -7919,6 +7961,16 @@ function selectedSpellTargets(
     case 'utility':
       if (command.targets.length !== 0) throw new EncounterRuleError('validation', 'This utility spell does not target a combatant.');
       return [command.actor];
+    case 'weapon_attack': {
+      if (command.targets.length !== 1) throw new EncounterRuleError('validation', `${definition.name} requires one target.`);
+      if (command.weaponAttack === null) {
+        throw new EncounterRuleError('validation', `${definition.name} requires the weapon used in its casting.`);
+      }
+      const target = command.targets[0] as CombatantId;
+      validateTargetPresence(state, command.actor, target, false);
+      assertWithinWeaponRange(state, command.actor, target, command.weaponAttack.tacticalRange, `${definition.name} weapon`);
+      return command.targets;
+    }
   }
 }
 
@@ -9035,6 +9087,7 @@ function heatMetalRange(definition: SpellDefinition): number {
     case 'area_selected':
     case 'all_in_range':
     case 'remote':
+    case 'weapon_attack':
       throw new EncounterRuleError('validation', `${definition.name} has incompatible item targeting.`);
   }
 }
@@ -9486,6 +9539,7 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
     definition.targeting.kind !== 'all_in_range' &&
     definition.targeting.kind !== 'remote' &&
     definition.targeting.kind !== 'utility' &&
+    definition.targeting.kind !== 'weapon_attack' &&
     definition.targeting.requiresSight === true
   ) {
     const unseen = targets.find((target) => !canCombatantSee(context.state, command.actor, target));
@@ -11255,6 +11309,11 @@ function executeSpellOperation(
           throw new EncounterRuleError('validation', 'True Strike damage must use the weapon type or Radiant.');
         }
         const target = targets[0] as CombatantId;
+        // The attack is the weapon's: it must reach the target, and its range
+        // band and Ranged Attacks in Close Combat come from the weapon's range,
+        // exactly as for an attack command with that weapon.
+        const weaponRange = command.weaponAttack.tacticalRange;
+        assertWithinWeaponRange(context.state, command.actor, target, weaponRange, `${definition.name} weapon`);
         const advantageEffects = context.state.effects.filter((effect) => {
           if (effect.payload.kind !== 'attack_roll_mode_modifier') return false;
           const appliesTo = effect.payload.appliesTo;
@@ -11266,8 +11325,13 @@ function executeSpellOperation(
           attackBonus: command.attackBonus +
             effectDiceModifier(context.state, command.actor, 'attack_roll', context.rng),
           targetArmorClass: coverAdjustedArmorClass(context.state, command.actor, target),
-          rollMode: combineRollModes(['normal', ...advantageEffects.map((effect) =>
-            effect.payload.kind === 'attack_roll_mode_modifier' ? effect.payload.mode : 'normal')]),
+          rollMode: combineRollModes([
+            'normal',
+            ...advantageEffects.map((effect) =>
+              effect.payload.kind === 'attack_roll_mode_modifier' ? effect.payload.mode : 'normal'),
+            ...weaponRangeRollModeSources(context.state, command.actor, target, weaponRange)
+              .map((source) => source.mode),
+          ]),
           criticalFloor: 20,
         }, context.rng, {
           kind: 'attack_roll', source: `spell:${definition.id}:weapon-attack`, actor: command.actor, target,

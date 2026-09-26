@@ -342,7 +342,9 @@ function standardSpellSelection(
     case 'area':
     case 'area_selected':
     case 'remote':
-    case 'utility': return null;
+    case 'utility':
+    // The cast use names no weapon, so it cannot state the weapon's range.
+    case 'weapon_attack': return null;
   }
 }
 

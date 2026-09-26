@@ -239,6 +239,9 @@ function targetConstraints(
         const definition = spellDefinition(use.spellId);
         const targetIds = useTargets(state, actorId, use, queries);
         if (definition === null || targetIds === null) return null;
+        // A cast use names no weapon, so a spell whose target is within the
+        // range of the weapon used in its casting has no range to check here.
+        if (definition.targeting.kind === 'weapon_attack') return null;
         const rangeFeet = 'rangeFeet' in definition.targeting ? definition.targeting.rangeFeet : 0;
         for (const targetId of targetIds) {
           const targeting = definition.targeting;

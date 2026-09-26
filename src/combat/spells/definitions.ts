@@ -230,7 +230,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'true-strike', name: 'True Strike', level: 0,
     source: 'docs/srd/source/spell-descriptions.txt:8079-8094',
     castingTime: 'action', components: S_M_WEAPON,
-    targeting: { kind: 'single', rangeFeet: 5, willing: false },
+    targeting: { kind: 'weapon_attack' },
     operation: {
       kind: 'weapon_attack_augmentation',
       timing: 'during_cast',

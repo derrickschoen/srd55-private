@@ -1016,6 +1016,19 @@
                   "rangeFeet"
                 ],
                 "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "weapon_attack"
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "additionalProperties": false
               }
             ]
           },

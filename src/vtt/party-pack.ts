@@ -3583,6 +3583,8 @@ export function loadedPartySpellCastCommand(
       damageCount: term.count,
       damageSides: term.sides,
       damageModifier: term.modifier,
+      // The same range an attack command built from this attack carries.
+      tacticalRange: attack.delivery,
     };
   }
   return {
