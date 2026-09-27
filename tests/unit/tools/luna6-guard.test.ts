@@ -35,9 +35,6 @@ const SCANNED_ROOTS = ['src/', 'tools/'] as const;
  * - tools/d569-blind-experiment.ts 23: the D569 v5 player models, arms and comparisons (§1.4, 22 lines).
  * - tools/d569-v5/analyze-primary-pair.ts 4 and tools/d569-v5/validate-first-arm.ts 1: v5 analysis (§1.4).
  * - tools/model-routes.ts 1: HISTORICAL_LUNA_MODEL, added by B1 (§4.1: B1 +1).
- * - tools/rl/generate-data.ts 4: NOT history. It is the RL corpus route that B2 moves to gpt-6-luna low (§1.2);
- *   §4.1 removes these 4 with B2. B2 was not on this batch's base, so the entry stays until B2 lands, and the
- *   landing that combines B2 with this guard deletes the line (the stale-allowance check then fails until it does).
  */
 const HISTORICAL_LUNA_ALLOWLIST: Readonly<Record<string, number>> = Object.freeze({
   'tools/ai-dm-rerun-packet.ts': 2,
@@ -45,7 +42,6 @@ const HISTORICAL_LUNA_ALLOWLIST: Readonly<Record<string, number>> = Object.freez
   'tools/d569-v5/analyze-primary-pair.ts': 4,
   'tools/d569-v5/validate-first-arm.ts': 1,
   'tools/model-routes.ts': 1,
-  'tools/rl/generate-data.ts': 4,
 });
 
 interface HistoricalLunaLiteralReport {
