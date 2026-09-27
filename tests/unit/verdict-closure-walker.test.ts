@@ -97,7 +97,8 @@ const FIXTURES: Readonly<Record<string, readonly string[]>> = {
   'glob-linked-base.ts': ["export const modules = import.meta.glob('./linked-base/*.ts');"],
   // The digest witnesses change these bytes, so they share nothing with the forms above.
   'witness-glob/entry.ts': ["export const modules = import.meta.glob('./handlers/*.ts', { eager: true });"],
-  'witness-glob/handlers/move.ts': ["export const move = 'move';"],
+  'witness-glob/handlers/move.ts': ["import { TABLE } from '../table';", 'export const move = TABLE;'],
+  'witness-glob/table.ts': ["export const TABLE = 'move';"],
   'witness-inline/entry.ts': ["import { CLIENT } from './client';", 'export const client = CLIENT;'],
   'witness-inline/client.ts': ["import { type Contract } from './contracts';", "export const CLIENT: Contract['name'] = 'client';"],
   'witness-inline/contracts.ts': ["export type Contract = { readonly name: string };", 'export const CONTRACT_VERSION = 1;'],
@@ -289,6 +290,14 @@ describe('a stored green is not reused once a module the test loads changes', ()
   it('glob: a file an eager import.meta.glob loads', () => {
     storeGreen('witness-glob/entry.ts');
     changeBytes('witness-glob/handlers/move.ts', () => {
+      expect(cachedVerdict(probePath('witness-glob/entry.ts'), SALT, cacheRoot)).toBeUndefined();
+    });
+    expect(cachedVerdict(probePath('witness-glob/entry.ts'), SALT, cacheRoot)?.testCount).toBe(1);
+  });
+
+  it('glob: a module that a file an eager import.meta.glob loads imports', () => {
+    storeGreen('witness-glob/entry.ts');
+    changeBytes('witness-glob/table.ts', () => {
       expect(cachedVerdict(probePath('witness-glob/entry.ts'), SALT, cacheRoot)).toBeUndefined();
     });
     expect(cachedVerdict(probePath('witness-glob/entry.ts'), SALT, cacheRoot)?.testCount).toBe(1);
