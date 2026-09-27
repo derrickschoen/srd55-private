@@ -49,7 +49,11 @@ import {
   type EncounterEffectId,
 } from '../combat/values';
 import type { WorldOperation } from '../combat/world-objects';
-import type { CombatSense } from '../combat/statblock';
+import {
+  sourcedNotExecutedSenseFeature,
+  type SenseFeatureName,
+  type SourcedNotExecutedSenseFeature,
+} from '../rules/character-senses';
 import {
   sourcedNotExecutedMastery,
   type ExecutedWeaponMastery,
@@ -1145,12 +1149,17 @@ const passivesSchema = z.strictObject({
 });
 
 /**
- * PC-EXPORT-TRUTH (D918): a member may STATE all eighteen skill check
- * modifiers and its standing senses. A stored-character export always states
- * both, from the sheet (skills-table.txt; sheet-math.txt Passive Perception)
- * and the sourced species/feature senses. Both stay optional on the wire so a
- * pack written before them loads unchanged; the loaded member records which
- * reading it got (`LoadedPartySkills`, `LoadedPartySenses`).
+ * PC-EXPORT-TRUTH (D918): EVERY member STATES all eighteen skill check
+ * modifiers, its standing senses and the sense features the engine does not
+ * run. A stored-character export takes them from the sheet (skills-table.txt;
+ * sheet-math.txt Passive Perception) and the sourced species/feature senses.
+ *
+ * They are REQUIRED, in both schema versions. A pack written before them used
+ * to load with Passive Perception 10 plus its passives and `normal_sight`
+ * alone — a guess that reached combat looking sourced. Such a pack is now
+ * refused as a whole with `unstated_skills_or_senses`, whatever its
+ * `allowPartial`: the remedy is to export the party again, not to drop the
+ * members that predate the fields (fix 1, codex r1 P1).
  */
 const skillBonusRecordShape = Object.fromEntries(
   skills.map((skill) => [skill, modifierSchema]),
@@ -1174,10 +1183,23 @@ const SENSES_RULES = [
 ] as const satisfies readonly PartyPackRule<readonly SenseWireInput[]>[];
 const sensesSchema = z.array(senseSchema).min(1).max(RANGED_SENSE_KINDS.length + 1)
   .superRefine(refinementFromRules(SENSES_RULES));
+const SENSE_FEATURE_WIRE_NAMES = exactValues<SenseFeatureName>()('Stonecunning', "Devil's Sight");
+const SENSE_FEATURE_RULES = [
+  (features: readonly SenseFeatureName[]): readonly PartyPackValidationIssue[] => issueWhen(
+    new Set(features).size !== features.length,
+    'Sense features must be unique.',
+  ),
+] as const satisfies readonly PartyPackRule<readonly SenseFeatureName[]>[];
+const senseFeaturesSchema = z.array(z.enum(SENSE_FEATURE_WIRE_NAMES)).max(SENSE_FEATURE_WIRE_NAMES.length)
+  .superRefine(refinementFromRules(SENSE_FEATURE_RULES));
 const statedMemberShape = {
-  skillBonuses: z.strictObject(skillBonusRecordShape).optional(),
-  senses: sensesSchema.optional(),
+  skillBonuses: z.strictObject(skillBonusRecordShape),
+  senses: sensesSchema,
+  senseFeatures: senseFeaturesSchema,
 } as const;
+/** The member fields a pack must state (`statedMemberShape`); their absence refuses the pack. */
+const STATED_MEMBER_FIELDS = ['skillBonuses', 'senses', 'senseFeatures'] as const satisfies
+  readonly (keyof typeof statedMemberShape)[];
 
 const manifestSpellIdSchema = z.custom<SpellManifestId>(
   isSpellManifestId,
@@ -1206,11 +1228,13 @@ const memberSharedShape = {
 const v1MemberCoreSchema = z.strictObject({
   ...memberBaseShape,
   spellSlots: z.array(spellSlotSchema).max(9),
+  ...statedMemberShape,
 });
 
 const v1MemberSchema = z.strictObject({
   ...memberBaseShape,
   spellSlots: z.array(spellSlotSchema).max(9),
+  ...statedMemberShape,
   ...memberSharedShape,
   spellSelections: z.array(manifestSpellIdSchema).max(SPELL_MANIFEST.length),
 });
@@ -1358,21 +1382,6 @@ export interface LoadedPartyAttack {
 
 export type LoadedPartyAttackMastery = ExecutedWeaponMastery | SourcedNotExecutedWeaponMastery;
 
-/**
- * What the pack STATED about a member's skills (PC-EXPORT-TRUTH). A stored-
- * character export states all eighteen; a pack that states none is read as the
- * wire always read it — its only skill modifiers are its passives — and the
- * member says so rather than passing that reading off as sourced.
- */
-export type LoadedPartySkills =
-  | { readonly kind: 'stated'; readonly bonuses: Readonly<Record<Skill, number>> }
-  | { readonly kind: 'unstated_by_pack' };
-
-/** What the pack STATED about a member's standing senses; see `LoadedPartySkills`. */
-export type LoadedPartySenses =
-  | { readonly kind: 'stated'; readonly senses: readonly CombatSense[] }
-  | { readonly kind: 'unstated_by_pack' };
-
 export interface LoadedPartyCondition {
   readonly effectId: EncounterEffectId;
   readonly condition: ConditionName;
@@ -1402,8 +1411,12 @@ export interface LoadedPartySpellcastingSource {
 export interface LoadedPartyMember {
   readonly source: ExternalPartyPackMember;
   readonly profile: Extract<CombatantProfile, { readonly kind: 'player_character' }>;
-  readonly skills: LoadedPartySkills;
-  readonly senses: LoadedPartySenses;
+  /**
+   * The member's stated sense features, carried as "sourced, not executed,
+   * awaiting perception_filters" (owner D923 Q13); the profile's senses do not
+   * include them, and nothing drops them.
+   */
+  readonly senseFeatures: readonly SourcedNotExecutedSenseFeature[];
   readonly attacks: readonly LoadedPartyAttack[];
   readonly spells: readonly SpellManifestEntry[];
   readonly spellcasting: readonly LoadedPartySpellcastingSource[];
@@ -1438,6 +1451,12 @@ export interface LoadedExternalPartyPack {
 export type PartyPackRefusalReason =
   | 'invalid_json'
   | 'invalid_structure'
+  /**
+   * A member does not state its skills, senses and sense features (a pack
+   * written before PC-EXPORT-TRUTH). The gaps name each missing field; the
+   * remedy is to export the party again.
+   */
+  | 'unstated_skills_or_senses'
   | 'unknown_spell_id'
   | 'too_many_spellcasting_sources'
   | 'unsupported_effect_shape'
@@ -1545,6 +1564,9 @@ const V1_MEMBER_FIELDS = {
   startingConditions: true,
   spellSlots: true,
   spellSelections: true,
+  skillBonuses: true,
+  senses: true,
+  senseFeatures: true,
 } as const satisfies ExactFields<ExternalPartyPackV1['members'][number]>;
 const V2_MEMBER_FIELDS = {
   combatantId: true,
@@ -1571,6 +1593,7 @@ const V2_MEMBER_FIELDS = {
   worldOperations: true,
   skillBonuses: true,
   senses: true,
+  senseFeatures: true,
 } as const satisfies ExactFields<ExternalPartyPackV2['members'][number]>;
 const SKILL_FIELDS = Object.fromEntries(
   skills.map((skill) => [skill, true]),
@@ -1830,6 +1853,32 @@ function parsedBase(
   };
 }
 
+/** The stated fields every member carries (`statedMemberShape`), in either schema version. */
+function parsedStated(
+  value: Readonly<Record<string, unknown>>,
+  partyEntry: string,
+  memberIndex: number,
+  gaps: PartyPackGapAccumulator,
+): unknown {
+  return {
+    skillBonuses: sanitizedRecord(
+      value.skillBonuses,
+      SKILL_FIELDS,
+      partyEntry,
+      ['members', memberIndex, 'skillBonuses'],
+      gaps,
+    ),
+    senses: sanitizedArrayRecords(
+      value.senses,
+      SENSE_FIELDS,
+      partyEntry,
+      ['members', memberIndex, 'senses'],
+      gaps,
+    ),
+    senseFeatures: value.senseFeatures,
+  };
+}
+
 function parsedV1Core(
   value: Readonly<Record<string, unknown>>,
   partyEntry: string,
@@ -1845,6 +1894,7 @@ function parsedV1Core(
       partyPath('members', memberIndex, 'spellSlots'),
       gaps,
     ),
+    ...parsedStated(value, partyEntry, memberIndex, gaps) as Readonly<Record<string, unknown>>,
   };
 }
 
@@ -1868,28 +1918,7 @@ function parsedV2Core(
           ),
         }
       : {}),
-    ...(hasV2MemberField(value, 'skillBonuses')
-      ? {
-          skillBonuses: sanitizedRecord(
-            value.skillBonuses,
-            SKILL_FIELDS,
-            partyEntry,
-            ['members', memberIndex, 'skillBonuses'],
-            gaps,
-          ),
-        }
-      : {}),
-    ...(hasV2MemberField(value, 'senses')
-      ? {
-          senses: sanitizedArrayRecords(
-            value.senses,
-            SENSE_FIELDS,
-            partyEntry,
-            ['members', memberIndex, 'senses'],
-            gaps,
-          ),
-        }
-      : {}),
+    ...parsedStated(value, partyEntry, memberIndex, gaps) as Readonly<Record<string, unknown>>,
   };
 }
 
@@ -2621,73 +2650,31 @@ function v2MemberExtensions(member: ExternalPartyPackMember): {
 /** SRD sheet-math.txt: "Passive Perception = 10 + Wisdom (Perception) check modifier". */
 const PASSIVE_PERCEPTION_BASE = 10;
 
-function statedSkills(member: ExternalPartyPackMember): LoadedPartySkills {
-  const stated = hasV2MemberField(member, 'skillBonuses')
-    ? (member as ExternalPartyPackV2Member).skillBonuses
-    : undefined;
-  return stated === undefined ? { kind: 'unstated_by_pack' } : { kind: 'stated', bonuses: stated };
-}
-
-function statedSenses(member: ExternalPartyPackMember): LoadedPartySenses {
-  const stated = hasV2MemberField(member, 'senses')
-    ? (member as ExternalPartyPackV2Member).senses
-    : undefined;
-  return stated === undefined ? { kind: 'unstated_by_pack' } : { kind: 'stated', senses: stated };
-}
-
 /**
- * The skill rules the engine reads. `passives.skillBonuses` is an ADDITIVE list
- * that names only the skills it adjusts, so every skill it does not name is
- * adjusted by exactly zero — the same reading as every other passive.
- *
- * A pack that STATES its skills gets exactly those, plus its passives, and
- * Passive Perception from the SRD formula. A pack that states none keeps the
- * one reading the wire has always given it — its passives are its only skill
- * modifiers — made here, once, and recorded on the member as
- * `unstated_by_pack`, so no consumer mistakes it for a sourced value. Packs
- * written before PC-EXPORT-TRUTH therefore load byte-identically.
+ * The skill rules the engine reads: the member's STATED check modifiers plus
+ * its passives' `skillBonuses`, an ADDITIVE list naming only the skills it
+ * adjusts (so every skill it does not name is adjusted by exactly zero, the
+ * same reading as every other passive), and Passive Perception from the SRD
+ * formula over the result. There is no unstated reading: a member that does
+ * not state its skills never loads (`unstated_skills_or_senses`).
  */
 function loadedSkillRules(
-  statement: LoadedPartySkills,
+  stated: Readonly<Record<Skill, number>>,
   passive: z.infer<typeof passivesSchema> | null,
 ): {
-  readonly skillBonuses: Readonly<Partial<Record<Skill, number>>> | null;
+  readonly skillBonuses: Readonly<Record<Skill, number>>;
   readonly passivePerception: number;
 } {
-  const listed = passive?.skillBonuses;
   const adjustments = Object.fromEntries(skills.map((skill) => [skill, 0])) as Record<Skill, number>;
-  for (const entry of listed ?? []) adjustments[entry.skillId] = entry.bonus;
-  switch (statement.kind) {
-    case 'stated': {
-      const totals = Object.fromEntries(skills.map((skill) => [
-        skill,
-        statement.bonuses[skill] + adjustments[skill],
-      ])) as Record<Skill, number>;
-      return {
-        skillBonuses: totals,
-        passivePerception: PASSIVE_PERCEPTION_BASE + totals.perception,
-      };
-    }
-    case 'unstated_by_pack':
-      return {
-        skillBonuses: listed === undefined
-          ? null
-          : Object.fromEntries(listed.map((entry) => [entry.skillId, entry.bonus])) as Partial<Record<Skill, number>>,
-        passivePerception: PASSIVE_PERCEPTION_BASE + adjustments.perception,
-      };
-  }
-}
-
-/** The one reading of a pack that states no senses; see `loadedSkillRules`. */
-const UNSTATED_PACK_SENSES: readonly CombatSense[] = [{ kind: 'normal_sight' }];
-
-function loadedSenseRules(senses: LoadedPartySenses): readonly CombatSense[] {
-  switch (senses.kind) {
-    case 'stated':
-      return senses.senses;
-    case 'unstated_by_pack':
-      return UNSTATED_PACK_SENSES;
-  }
+  for (const entry of passive?.skillBonuses ?? []) adjustments[entry.skillId] = entry.bonus;
+  const totals = Object.fromEntries(skills.map((skill) => [
+    skill,
+    stated[skill] + adjustments[skill],
+  ])) as Record<Skill, number>;
+  return {
+    skillBonuses: totals,
+    passivePerception: PASSIVE_PERCEPTION_BASE + totals.perception,
+  };
 }
 
 function loadedMember(
@@ -2707,13 +2694,10 @@ function loadedMember(
   ) as Record<Ability, number>;
   const totalLevel = member.classes.reduce((sum, heldClass) => sum + heldClass.level, 0);
   const effects = extensions.effects.map((effect) => loadedFeatureEffect(effect, totalLevel));
-  const skillStatement = statedSkills(member);
-  const senseStatement = statedSenses(member);
-  const skillRules = loadedSkillRules(skillStatement, passive);
+  const skillRules = loadedSkillRules(member.skillBonuses, passive);
   return {
     source: member,
-    skills: skillStatement,
-    senses: senseStatement,
+    senseFeatures: member.senseFeatures.map(sourcedNotExecutedSenseFeature),
     profile: {
       kind: 'player_character',
       id: combatantId(member.combatantId),
@@ -2737,7 +2721,7 @@ function loadedMember(
         })),
         conditionImmunities: [...(passive?.conditionImmunities ?? [])],
         usesDeathSaves: true,
-        senses: [...loadedSenseRules(senseStatement)],
+        senses: member.senses.map((sense) => ({ ...sense })),
         passivePerception: skillRules.passivePerception,
         detectionTraits: [],
         contactMedium: 'surface',
@@ -2763,7 +2747,7 @@ function loadedMember(
             }
           : {}),
         ...(hasV2MemberField(member, 'effects') ? { featureEffects: effects } : {}),
-        ...(skillRules.skillBonuses === null ? {} : { skillBonuses: skillRules.skillBonuses }),
+        skillBonuses: skillRules.skillBonuses,
       },
     },
     attacks: member.attacks.map(loadedAttack),
@@ -3860,6 +3844,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
   }
 
   let gaps = new PartyPackGapAccumulator(rootGaps);
+  let unstatedSkillsOrSenses = false;
   let unknownSpellId = false;
   let tooManySpellcastingSources = false;
   let unsupportedEffectShape: string | null = null;
@@ -3889,6 +3874,12 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
       : entryFallback;
     const memberFields = header.data.schemaVersion === 1 ? V1_MEMBER_FIELDS : V2_MEMBER_FIELDS;
     gaps = gaps.append(...unexpectedFieldGaps(memberInput, memberFields, entry, ['members', index]));
+    const unstatedFields = STATED_MEMBER_FIELDS.filter((field) => !Object.hasOwn(memberInput, field));
+    if (unstatedFields.length > 0) {
+      unstatedSkillsOrSenses = true;
+      gaps = gaps.append(...unstatedFields.map((field) => issueGap(entry, ['members', index, field])));
+      continue;
+    }
     const core = header.data.schemaVersion === 1
       ? v1MemberCoreSchema.safeParse(parsedV1Core(memberInput, entry, index, gaps))
       : v2MemberCoreSchema.safeParse(parsedV2Core(memberInput, entry, index, gaps));
@@ -4645,6 +4636,9 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
   }
 
   const allGaps = deduplicateGapReports(gaps.values());
+  // Before every other verdict and whatever `allowPartial` says: a pack that
+  // predates stated skills and senses is not a smaller party.
+  if (unstatedSkillsOrSenses) return refusal('unstated_skills_or_senses', allGaps);
   if (unknownSpellId) return refusal('unknown_spell_id', allGaps);
   if (tooManySpellcastingSources) return refusal('too_many_spellcasting_sources', allGaps);
   if (unsupportedEffectShape !== null) {

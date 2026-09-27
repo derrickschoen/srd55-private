@@ -23,6 +23,7 @@ import {
 } from '../../../src/vtt/party-pack';
 import { StoredCharacterPartyPackExporter } from '../../../src/vtt/stored-character-party-member';
 import { expectOkOutcome } from '../../helpers/outcome';
+import { statedPlainMemberFields } from '../../helpers/party-pack-stated';
 import { createSeededRpcHarness, type RpcHarness } from '../../helpers/rpc-harness';
 import { monsterProfile, placedToken } from '../../unit/combat/fixtures';
 
@@ -123,11 +124,15 @@ function revision(db: DatabaseContext, characterId: number): number {
 }
 
 function builtFighter(db: DatabaseContext, name: string, species: string): number {
-  const fighter = listGuidedClassOptions(db).find((option) => option.name === 'Fighter');
-  if (fighter === undefined) throw new Error('The bundled Fighter is missing.');
+  return builtCharacter(db, name, species, 'Fighter');
+}
+
+function builtCharacter(db: DatabaseContext, name: string, species: string, className: string): number {
+  const option = listGuidedClassOptions(db).find((candidate) => candidate.name === className);
+  if (option === undefined) throw new Error(`The bundled ${className} is missing.`);
   const characterId = createGuidedCharacter(
     db,
-    { name, class_content_key: fighter.content_key },
+    { name, class_content_key: option.content_key },
     integrity,
   ).id;
   expectOkOutcome(new AllocateAbilitiesCommand(db, {
@@ -135,9 +140,9 @@ function builtFighter(db: DatabaseContext, name: string, species: string): numbe
     method: 'standard_array',
     scores: SCORES,
   }).apply(characterId));
-  const option = listGuidedOriginOptions(db, 'species').find((candidate) => candidate.name === species);
-  if (option === undefined) throw new Error(`The bundled ${species} is missing.`);
-  applyGuidedOrigin(db, { character_id: characterId, kind: 'species', content_key: option.content_key });
+  const speciesOption = listGuidedOriginOptions(db, 'species').find((candidate) => candidate.name === species);
+  if (speciesOption === undefined) throw new Error(`The bundled ${species} is missing.`);
+  applyGuidedOrigin(db, { character_id: characterId, kind: 'species', content_key: speciesOption.content_key });
   return characterId;
 }
 
@@ -463,6 +468,7 @@ describe('PC-EXPORT-TRUTH: a built character reaches combat with its sheet', () 
         masteryProperty,
       })),
       startingConditions: [],
+      ...statedPlainMemberFields(),
     });
     const loaded = loadExternalPartyPack({
       schemaVersion: 2,
@@ -479,5 +485,143 @@ describe('PC-EXPORT-TRUTH: a built character reaches combat with its sheet', () 
         awaiting: 'weapon_mastery_execution',
       })),
     );
+  });
+
+  // "a Constitution saving throw (DC 8 plus the ability modifier used to make
+  // the attack roll and your Proficiency Bonus)", docs/srd/full/srd-5.2.1.txt:
+  // 5468-5474 (right column). Str 15 is +2 and the level-1 Proficiency Bonus
+  // is +2, so the DC is 12 in both cases below whatever the attack bonus is.
+  it('topple_dc_magic_weapon: a +1 weapon raises the attack bonus, not Topple\'s DC', async () => {
+    harness = await createSeededRpcHarness([]);
+    const db = harness.context.db;
+    const magic = builtFighter(db, 'Plus One Fighter', 'Human');
+    await addWeapon(db, magic, BATTLEAXE, true);
+    const weaponId = db.scalar<number>(
+      'SELECT id FROM character_weapons WHERE character_id = ? AND name = ?',
+      [magic, 'Battleaxe'],
+    );
+    if (weaponId === null) throw new Error('The battleaxe was not added.');
+    // A +1 Battleaxe: +1 to attack rolls with this one weapon (the same
+    // bonded-weapon effect row tests/integration/rules/attack-profiles uses).
+    db.exec(
+      `INSERT INTO character_effects
+         (character_id, sort_order, effect_kind, amount, weapon_scope, character_weapon_id, label)
+       VALUES (?, 1, 'weapon_attack_bonus', 1, 'one_bonded_weapon', ?, '+1 Battleaxe')`,
+      [magic, weaponId],
+    );
+    const fillerOne = builtFighter(db, 'Filler One', 'Human');
+    const fillerTwo = builtFighter(db, 'Filler Two', 'Human');
+
+    const member = exportedMember(db, magic);
+    const attack = member.attacks[0];
+    // Attack: Str +2, Proficiency +2, weapon +1 = +5. DC: 8 + 2 + 2 = 12, not 8 + 5.
+    expect({ attackBonus: attack?.attackBonus, masterySaveDc: attack?.masterySaveDc })
+      .toEqual({ attackBonus: 5, masterySaveDc: 12 });
+    const [loaded] = loadedParty(member, exportedMember(db, fillerOne), exportedMember(db, fillerTwo));
+    expect(loaded?.attacks[0]?.mastery).toEqual({ property: 'Topple', saveDc: 12 });
+  });
+
+  it('topple_dc_unproficient: an unproficient weapon still adds the Proficiency Bonus to Topple\'s DC', async () => {
+    harness = await createSeededRpcHarness([]);
+    const db = harness.context.db;
+    // A Rogue is proficient with Martial weapons only when they have the
+    // Finesse or Light property; a Battleaxe has neither, so its attack bonus
+    // is Str +2 alone. The DC is still 8 + 2 + 2 = 12, not 8 + 2.
+    const rogue = builtCharacter(db, 'Unproficient Rogue', 'Human', 'Rogue');
+    await addWeapon(db, rogue, BATTLEAXE, true);
+    const attack = exportedMember(db, rogue).attacks[0];
+    expect({ attackBonus: attack?.attackBonus, masterySaveDc: attack?.masterySaveDc })
+      .toEqual({ attackBonus: 2, masterySaveDc: 12 });
+  });
+
+  it('older_pack_refused: a pack that does not state skills and senses is refused by type, never given passive Perception 10 and normal sight', () => {
+    const unstated = (index: number) => ({
+      combatantId: `combatant:older-${String(index)}`,
+      tokenId: `token:older-${String(index)}`,
+      characterId: index,
+      classes: [{ classId: 'Fighter', level: 1 }],
+      abilities: SCORES,
+      armorClass: 11,
+      hitPointMaximum: 11,
+      walkingSpeedFeet: 30,
+      initiativeBonus: 1,
+      savingThrowBonuses: { strength: 4, dexterity: 1, constitution: 3, intelligence: 0, wisdom: 2, charisma: -1 },
+      attacksPerAction: 1,
+      sizeCategory: 'Medium',
+      attacks: [],
+      startingConditions: [],
+    });
+    const expectRefused = (value: unknown) => {
+      const result = loadExternalPartyPack(value);
+      expect(result).toMatchObject({
+        status: 'refused',
+        refusal: { kind: 'external_party_pack_refusal', reason: 'unstated_skills_or_senses' },
+      });
+      return result.gaps.map((gap) => gap.featurePath);
+    };
+    // Written before PC-EXPORT-TRUTH: no member states either.
+    const older = { schemaVersion: 2, partyId: 'party:older', allowPartial: false, members: [unstated(1), unstated(2), unstated(3)] };
+    expect(expectRefused(older)).toEqual(expect.arrayContaining([
+      'members.0.skillBonuses', 'members.0.senses', 'members.0.senseFeatures',
+      'members.2.skillBonuses', 'members.2.senses', 'members.2.senseFeatures',
+    ]));
+    // allowPartial does not turn the refusal into a smaller party.
+    expectRefused({ ...older, allowPartial: true });
+    // One member stating everything does not carry the two that do not.
+    const stating = {
+      ...unstated(4),
+      skillBonuses: UNTRAINED_SKILLS,
+      senses: [{ kind: 'normal_sight' }],
+      senseFeatures: [],
+    };
+    expect(expectRefused({ ...older, allowPartial: true, members: [stating, unstated(5), unstated(6)] }))
+      .not.toContain('members.0.skillBonuses');
+    // A schema-1 pack cannot state them at all.
+    expectRefused({
+      schemaVersion: 1,
+      partyId: 'party:older-v1',
+      allowPartial: true,
+      members: [1, 2, 3].map((index) => {
+        const { sizeCategory: _size, ...member } = unstated(10 + index);
+        return { ...member, spellSlots: [], spellSelections: [] };
+      }),
+    });
+  });
+
+  it('stonecunning_carried: a Dwarf\'s activated Tremorsense reaches the loaded member as sourced, not executed, never dropped', async () => {
+    harness = await createSeededRpcHarness([]);
+    const db = harness.context.db;
+    const dwarf = builtFighter(db, 'Stone Dwarf', 'Dwarf');
+    const human = builtFighter(db, 'Plain Human', 'Human');
+    const filler = builtFighter(db, 'Filler', 'Human');
+
+    // "Stonecunning. As a Bonus Action, you gain Tremorsense with a range of
+    // 60 feet for 10 minutes. You must be on a stone surface or touching a
+    // stone surface ..." (docs/srd/full/srd-5.2.1.txt:5060-5072, right
+    // column). ACTIVATED, so not a standing sense: owner D923 Q13 types it
+    // "sourced, not executed, awaiting perception_filters".
+    const dwarfMember = exportedMember(db, dwarf);
+    expect(statedField(dwarfMember, 'senseFeatures')).toEqual(['Stonecunning']);
+    expect(statedField(dwarfMember, 'senses')).toEqual([
+      { kind: 'normal_sight' },
+      { kind: 'darkvision', rangeFeet: 120 },
+    ]);
+    expect(statedField(exportedMember(db, human), 'senseFeatures')).toEqual([]);
+
+    const [loadedDwarf, loadedHuman] = loadedParty(dwarfMember, exportedMember(db, human), exportedMember(db, filler));
+    expect(loadedDwarf?.senseFeatures).toEqual([{
+      feature: 'Stonecunning',
+      sense: { kind: 'tremorsense', rangeFeet: 60 },
+      // "As a Bonus Action ... for 10 minutes ... on a stone surface".
+      activation: { kind: 'bonus_action', durationMinutes: 10, surface: 'stone' },
+      status: 'sourced_not_executed',
+      awaiting: 'perception_filters',
+    }]);
+    // Not executed: the engine's standing senses do not gain Tremorsense.
+    expect(loadedDwarf?.profile.rules.senses).toEqual([
+      { kind: 'normal_sight' },
+      { kind: 'darkvision', rangeFeet: 120 },
+    ]);
+    expect(loadedHuman?.senseFeatures).toEqual([]);
   });
 });

@@ -4,6 +4,7 @@ import { combatToken } from '../../../src/combat/combatant';
 import { createEncounter, reduceEncounter } from '../../../src/combat/encounter';
 import type { ExternalPartyPackV2 } from '../../../src/vtt/party-pack';
 import { monsterProfile } from '../combat/fixtures';
+import { statedPlainMemberFields } from '../../helpers/party-pack-stated';
 
 const FIXTURE_PATH = 'tests/fixtures/content-pack-v1-tiered-range.json';
 
@@ -37,6 +38,7 @@ function member(index: number, level: number): ExternalPartyPackV2['members'][nu
     attacksPerAction: 1,
     attacks: [],
     startingConditions: [],
+    ...statedPlainMemberFields(),
     ...(index === 1
       ? {
           spellcasting: {

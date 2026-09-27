@@ -44,6 +44,7 @@ import {
 } from '../../../src/vtt/session-persistence';
 import { monsterProfile, placedToken } from '../combat/fixtures';
 import { onBoard } from '../../helpers/board-cell';
+import { statedPlainMemberFields } from '../../helpers/party-pack-stated';
 
 function jsonObject(value: unknown, path: string): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -146,6 +147,7 @@ function memberBase(index: number): Omit<ExternalPartyPackV2['members'][number],
       damage: [{ damageTypeId: 'Slashing', count: 1, sides: 8, modifier: 3 }],
     }],
     startingConditions: [],
+    ...statedPlainMemberFields(),
   };
 }
 
@@ -4775,7 +4777,12 @@ describe('external party-pack batch 2b mutation boundaries', () => {
     });
     expect(member.profile.rules.conditionImmunities).toEqual([]);
     expect(member.profile.rules.senses).toEqual([{ kind: 'normal_sight' }]);
-    expect(member.profile.rules.skillBonuses).toEqual({ perception: 4 });
+    // The member states +0 in every skill (statedPlainMemberFields); the
+    // passive's +4 is ADDED to its stated Perception and to nothing else.
+    expect(member.profile.rules.skillBonuses).toEqual({
+      ...statedPlainMemberFields().skillBonuses,
+      perception: 4,
+    });
   });
 
   it('preserves effect dice options, false critical flags, persistence, and exact level selection', () => {
@@ -6079,12 +6086,52 @@ describe('external party-pack batch 2b mutation boundaries', () => {
     };
     const loaded = loadedV2(candidate).party.members[0]!;
     expect(loaded.profile.rules.initiativeBonus).toBe(5);
-    expect(loaded.profile.rules.skillBonuses).toEqual({ perception: 4 });
+    expect(loaded.profile.rules.skillBonuses).toEqual({
+      ...statedPlainMemberFields().skillBonuses,
+      perception: 4,
+    });
     expect(loaded.profile.rules.passivePerception).toBe(14);
 
-    const withoutSkills = loadedV2(pack()).party.members[0]!.profile.rules;
-    expect(Object.hasOwn(withoutSkills, 'skillBonuses')).toBe(false);
-    expect(withoutSkills.passivePerception).toBe(10);
+    // With no passives, the stated modifiers ARE the rules, exactly, and
+    // Passive Perception is 10 + the stated Perception (sheet-math.txt): a
+    // stated +3 is 13, never the 10 an unstated member used to get.
+    const stating = structuredClone(pack());
+    stating.members[0]!.skillBonuses = { ...stating.members[0]!.skillBonuses, perception: 3, stealth: 5 };
+    const statedRules = loadedV2(stating).party.members[0]!.profile.rules;
+    expect(statedRules.skillBonuses).toEqual({
+      ...statedPlainMemberFields().skillBonuses,
+      perception: 3,
+      stealth: 5,
+    });
+    expect(statedRules.passivePerception).toBe(13);
+  });
+
+  it('loads stated sense features typed and refuses a repeated or unknown one (D923 Q13)', () => {
+    const stating = structuredClone(pack());
+    stating.members[1]!.senseFeatures = ['Stonecunning'];
+    const loaded = loadedV2(stating).party.members;
+    expect(loaded[0]!.senseFeatures).toEqual([]);
+    expect(loaded[1]!.senseFeatures).toEqual([{
+      feature: 'Stonecunning',
+      sense: { kind: 'tremorsense', rangeFeet: 60 },
+      activation: { kind: 'bonus_action', durationMinutes: 10, surface: 'stone' },
+      status: 'sourced_not_executed',
+      awaiting: 'perception_filters',
+    }]);
+    // Carried, not executed: the member's standing senses are what it stated.
+    expect(loaded[1]!.profile.rules.senses).toEqual([{ kind: 'normal_sight' }]);
+
+    const repeated = structuredClone(pack());
+    repeated.members[0]!.senseFeatures = ['Stonecunning', 'Stonecunning'];
+    const unknown = structuredClone(pack()) as unknown as { members: Record<string, unknown>[] };
+    unknown.members[0]!.senseFeatures = ['Witch Sight'];
+    for (const candidate of [repeated, unknown]) {
+      const result = loadExternalPartyPack(candidate);
+      expect(result.status).toBe('refused');
+      expect(result.gaps.map((gap) => gap.featurePath)).toEqual(
+        expect.arrayContaining([expect.stringMatching(/^members\.0\.senseFeatures/u)]),
+      );
+    }
   });
 
   it('retains distinct slot levels and deduplicates every spell role by its exact identity', () => {

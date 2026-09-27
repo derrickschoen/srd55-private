@@ -94,6 +94,31 @@ export const EXECUTED_MASTERIES_MATCH_ENGINE: Equal<
   ExecutedWeaponMastery['property']
 > = true;
 
+/**
+ * TOPPLE'S SAVE DC, AS A FORMULA RATHER THAN A NUMBER READ OFF THE ATTACK.
+ *
+ * "If you hit a creature with this weapon, you can force the creature to make
+ * a Constitution saving throw (DC 8 plus the ability modifier used to make the
+ * attack roll and your Proficiency Bonus)" — docs/srd/full/srd-5.2.1.txt:
+ * 5468-5474, right column. The export used 8 + the attack bonus, which is the
+ * same number only for a proficient attack with no other bonus: a magic
+ * weapon's +1 raised the DC (owner D923 Q12), and a weapon the character is
+ * not proficient with lowered it by the Proficiency Bonus the rule still adds.
+ * The inputs are named for what the rule names, so an attack bonus cannot be
+ * passed where the ability modifier belongs without a visible lie.
+ */
+export interface ToppleSaveDcInputs {
+  /** The modifier of the ability the attack roll uses, and nothing else. */
+  readonly attackAbilityModifier: number;
+  readonly proficiencyBonus: number;
+}
+
+export const TOPPLE_SAVE_DC_BASE = 8;
+
+export function toppleSaveDc(inputs: ToppleSaveDcInputs): number {
+  return TOPPLE_SAVE_DC_BASE + inputs.attackAbilityModifier + inputs.proficiencyBonus;
+}
+
 export function sourcedNotExecutedMastery(
   property: SourcedNotExecutedWeaponMasteryProperty,
 ): SourcedNotExecutedWeaponMastery {

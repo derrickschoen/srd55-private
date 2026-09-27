@@ -40,6 +40,7 @@ import {
   exportSavedSession,
   importSavedSession,
 } from '../../../src/vtt/session-persistence';
+import { statedPlainMemberFields } from '../../helpers/party-pack-stated';
 
 function member(
   index: number,
@@ -81,6 +82,7 @@ function member(
       damage: [{ damageTypeId: 'Bludgeoning', count: 1, sides: 6, modifier: 2 }],
     }],
     startingConditions: [],
+    ...statedPlainMemberFields(),
     ...(caster
       ? {
           spellcasting: [{

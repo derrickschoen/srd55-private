@@ -36,6 +36,7 @@ import {
 } from '../../../src/vtt/vane-warren';
 import { playerProfile } from '../combat/fixtures';
 import { onBoard } from '../../helpers/board-cell';
+import { statedPlainMemberFields } from '../../helpers/party-pack-stated';
 
 function faceOne(): number {
   return 0;
@@ -82,6 +83,7 @@ function loadedMutationParty() {
       damage: [{ damageTypeId: 'Slashing', count: 1, sides: 8, modifier: 3 }],
     }],
     startingConditions: [],
+    ...statedPlainMemberFields(),
   }));
   const loaded = loadExternalPartyPack({
     schemaVersion: 2,

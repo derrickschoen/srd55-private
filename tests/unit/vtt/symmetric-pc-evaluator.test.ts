@@ -35,6 +35,7 @@ import {
 } from '../../../src/vtt/symmetric-pc-evaluator';
 import { declareTestInputs } from '../../helpers/test-inputs';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
+import { statedPlainMemberFields } from '../../helpers/party-pack-stated';
 
 declareTestInputs({});
 
@@ -1136,6 +1137,7 @@ describe('PCAC approach: with no legal attack the scripted PC plans its moves wi
         criticalGate: 'crit_confirmed', damageTypeId: 'Radiant', baseCount: 1, countPerSlotLevel: 1, sides: 8, modifier: 0,
       }],
       startingConditions: [],
+      ...statedPlainMemberFields(),
     };
     // A pack holds three to five members; the other two only fill the party.
     const companion = (index: number) => ({
@@ -1279,7 +1281,7 @@ function rangerPack(key: string) {
     abilities: { strength: 12, dexterity: 16, constitution: 14, intelligence: 10, wisdom: 14, charisma: 8 },
     armorClass: 15, hitPointMaximum: 36, sizeCategory: 'Medium', walkingSpeedFeet: 30, initiativeBonus: 3,
     savingThrowBonuses: { strength: 3, dexterity: 5, constitution: 2, intelligence: 0, wisdom: 2, charisma: -1 },
-    attacksPerAction: 1, attacks, startingConditions: [],
+    attacksPerAction: 1, attacks, startingConditions: [], ...statedPlainMemberFields(),
   });
   const loaded = loadExternalPartyPack(externalPartyPackSchema.parse({
     schemaVersion: 2, partyId: `party:${key}`, allowPartial: false,
@@ -1305,7 +1307,7 @@ function fighterPack(key: string) {
     abilities: { strength: 18, dexterity: 14, constitution: 14, intelligence: 10, wisdom: 12, charisma: 8 },
     armorClass: 18, hitPointMaximum: 40, sizeCategory: 'Medium', walkingSpeedFeet: 30, initiativeBonus: 2,
     savingThrowBonuses: { strength: 6, dexterity: 2, constitution: 4, intelligence: 0, wisdom: 1, charisma: -1 },
-    attacksPerAction: 1, attacks, startingConditions: [],
+    attacksPerAction: 1, attacks, startingConditions: [], ...statedPlainMemberFields(),
   });
   const loaded = loadExternalPartyPack(externalPartyPackSchema.parse({
     schemaVersion: 2, partyId: `party:${key}`, allowPartial: false,

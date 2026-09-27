@@ -25,9 +25,14 @@
  *
  * A species with no SRD provenance (renamed, authored or imported content)
  * has no structured senses at all, and the answer is `undetermined`, never a
- * guessed `normal_sight`. Activated senses — the Dwarf's Stonecunning
- * Tremorsense, a Bonus Action for 10 minutes on stone — are not standing
- * senses and are not listed here.
+ * guessed `normal_sight`.
+ *
+ * SENSE FEATURES THE ENGINE CANNOT RUN ARE CARRIED, NOT DROPPED (owner D923
+ * Q13). The Dwarf's Stonecunning Tremorsense is ACTIVATED (a Bonus Action,
+ * 10 minutes, on stone), so it is not a standing sense; Devil's Sight sees
+ * through magical Darkness, which no `CombatSense` kind expresses. Both are
+ * typed "sourced, not executed, awaiting perception_filters" (the PERCEPTION
+ * unit) in `SENSE_FEATURES`, and a character holding one states it.
  */
 import type { CombatSense } from '../combat/statblock';
 import { SRD_SPECIES_SENSES, type SrdSpeciesName } from './generated/species-srd-tables';
@@ -91,8 +96,114 @@ export const FEATURE_SENSE_GRANTS = [
   },
 ] as const satisfies readonly FeatureSenseGrant[];
 
+/** The capability every sense feature awaits, and the unit that owns it (D920, D923 Q13). */
+export type SenseFeatureCapability = 'perception_filters';
+
+export const SENSE_FEATURE_CAPABILITY_OWNER = {
+  perception_filters: 'PERCEPTION',
+} as const satisfies Readonly<Record<SenseFeatureCapability, string>>;
+
+/** What a sense feature grants, in terms the engine's senses cannot state. */
+export type SenseFeatureSense =
+  | { readonly kind: 'tremorsense'; readonly rangeFeet: number }
+  | {
+      readonly kind: 'sees_normally_in_darkness';
+      readonly rangeFeet: number;
+      readonly includesMagicalDarkness: true;
+    };
+
+export type SenseFeatureActivation =
+  | { readonly kind: 'standing' }
+  | {
+      readonly kind: 'bonus_action';
+      readonly durationMinutes: number;
+      readonly surface: 'stone';
+    };
+
+export interface SenseFeatureRule {
+  readonly grantedBy:
+    | { readonly kind: 'srd_species'; readonly species: SrdSpeciesName }
+    /**
+     * An Eldritch Invocation. This application offers no invocation choice,
+     * so no character can hold one; the row keeps the rule represented.
+     */
+    | { readonly kind: 'eldritch_invocation'; readonly selectableInThisApplication: false };
+  readonly sense: SenseFeatureSense;
+  readonly activation: SenseFeatureActivation;
+  readonly status: 'sourced_not_executed';
+  readonly awaiting: SenseFeatureCapability;
+  readonly span: SrdFullSpan;
+}
+
+/**
+ * Hand-typed from the cited spans (production rule H; the span text is hash
+ * pinned by tests/unit/rules/character-senses.test.ts).
+ */
+export const SENSE_FEATURES = {
+  // "Stonecunning. As a Bonus Action, you gain Tremorsense with a range of 60
+  // feet for 10 minutes. You must be on a stone surface or touching a stone
+  // surface to use this Tremorsense." (right column)
+  Stonecunning: {
+    grantedBy: { kind: 'srd_species', species: 'Dwarf' },
+    sense: { kind: 'tremorsense', rangeFeet: 60 },
+    activation: { kind: 'bonus_action', durationMinutes: 10, surface: 'stone' },
+    status: 'sourced_not_executed',
+    awaiting: 'perception_filters',
+    span: 'docs/srd/full/srd-5.2.1.txt:5060-5072',
+  },
+  // "Devil's Sight. Prerequisite: Level 2+ Warlock. You can see normally in
+  // Dim Light and Darkness—both magical and nonmagical—within 120 feet of
+  // yourself." (right column)
+  "Devil's Sight": {
+    grantedBy: { kind: 'eldritch_invocation', selectableInThisApplication: false },
+    sense: { kind: 'sees_normally_in_darkness', rangeFeet: 120, includesMagicalDarkness: true },
+    activation: { kind: 'standing' },
+    status: 'sourced_not_executed',
+    awaiting: 'perception_filters',
+    span: 'docs/srd/full/srd-5.2.1.txt:4354-4358',
+  },
+} as const satisfies Readonly<Record<string, SenseFeatureRule>>;
+
+export type SenseFeatureName = keyof typeof SENSE_FEATURES;
+
+export const SENSE_FEATURE_NAMES = Object.keys(SENSE_FEATURES) as readonly SenseFeatureName[];
+
+/** A held sense feature as combat carries it: typed, not executed, never dropped. */
+export interface SourcedNotExecutedSenseFeature {
+  readonly feature: SenseFeatureName;
+  readonly sense: SenseFeatureSense;
+  readonly activation: SenseFeatureActivation;
+  readonly status: 'sourced_not_executed';
+  readonly awaiting: SenseFeatureCapability;
+}
+
+export function sourcedNotExecutedSenseFeature(feature: SenseFeatureName): SourcedNotExecutedSenseFeature {
+  const rule: SenseFeatureRule = SENSE_FEATURES[feature];
+  return {
+    feature,
+    sense: rule.sense,
+    activation: rule.activation,
+    status: rule.status,
+    awaiting: rule.awaiting,
+  };
+}
+
+function holdsSenseFeature(rule: SenseFeatureRule, species: SrdSpeciesName): boolean {
+  switch (rule.grantedBy.kind) {
+    case 'srd_species':
+      return rule.grantedBy.species === species;
+    case 'eldritch_invocation':
+      return rule.grantedBy.selectableInThisApplication;
+  }
+}
+
 export type CharacterSenses =
-  | { readonly status: 'sourced'; readonly senses: readonly CombatSense[] }
+  | {
+      readonly status: 'sourced';
+      readonly senses: readonly CombatSense[];
+      /** Held sense features the engine does not run (`SENSE_FEATURES`), by name. */
+      readonly senseFeatures: readonly SenseFeatureName[];
+    }
   | {
       readonly status: 'undetermined';
       readonly field: 'senses.species' | 'senses.darkvision' | 'senses.duplicate';
@@ -101,7 +212,9 @@ export type CharacterSenses =
 
 function speciesSenses(
   source: Extract<SpeciesSenseSource, { readonly kind: 'srd_species' }>,
-): CharacterSenses {
+):
+  | { readonly status: 'sourced'; readonly senses: readonly CombatSense[] }
+  | Extract<CharacterSenses, { readonly status: 'undetermined' }> {
   const printed: readonly { readonly kind: 'darkvision'; readonly rangeFeet: number }[] =
     SRD_SPECIES_SENSES[source.species];
   const lineage = source.lineageDarkvision;
@@ -132,10 +245,10 @@ export function characterSenses(inputs: CharacterSenseInputs): CharacterSenses {
   if (inputs.species.kind === 'unsourced') {
     return { status: 'undetermined', field: 'senses.species', detail: inputs.species.detail };
   }
-  const species = speciesSenses(inputs.species);
-  if (species.status === 'undetermined') return species;
+  const printed = speciesSenses(inputs.species);
+  if (printed.status === 'undetermined') return printed;
   const ranged = [
-    ...species.senses,
+    ...printed.senses,
     ...FEATURE_SENSE_GRANTS
       .filter((grant) => granted(grant, inputs))
       .map((grant): CombatSense => ({ ...grant.sense })),
@@ -150,5 +263,10 @@ export function characterSenses(inputs: CharacterSenseInputs): CharacterSenses {
       detail: `Two sources grant ${repeated}, and no rule says which range applies.`,
     };
   }
-  return { status: 'sourced', senses: [{ kind: 'normal_sight' }, ...ranged] };
+  const { species } = inputs.species;
+  return {
+    status: 'sourced',
+    senses: [{ kind: 'normal_sight' }, ...ranged],
+    senseFeatures: SENSE_FEATURE_NAMES.filter((name) => holdsSenseFeature(SENSE_FEATURES[name], species)),
+  };
 }

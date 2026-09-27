@@ -10,6 +10,7 @@ import {
   recoveryCapabilityBeforeBoundary,
   RECOVERY_CAPABILITY_POLICY,
 } from '../../../src/vtt/intel/recovery-capability';
+import { statedPlainMemberFields } from '../../helpers/party-pack-stated';
 
 function loadedParty(spells: readonly string[]): readonly LoadedPartyMember[] {
   const loaded = loadExternalPartyPack({
@@ -36,6 +37,7 @@ function loadedParty(spells: readonly string[]): readonly LoadedPartyMember[] {
           damage: [{ damageTypeId: 'Bludgeoning', count: 1, sides: 6, modifier: 2 }],
         }],
         startingConditions: [],
+        ...statedPlainMemberFields(),
         spellcasting: [{
           ability: 'wisdom', spellSaveDc: 13, spellAttackBonus: 5,
           preparedSpellIds: spells,
@@ -65,6 +67,7 @@ function loadedParty(spells: readonly string[]): readonly LoadedPartyMember[] {
           damage: [{ damageTypeId: 'Slashing', count: 1, sides: 8, modifier: 3 }],
         }],
         startingConditions: [],
+        ...statedPlainMemberFields(),
       },
       {
         combatantId: 'combatant:recovery-observer',
@@ -85,6 +88,7 @@ function loadedParty(spells: readonly string[]): readonly LoadedPartyMember[] {
           damage: [{ damageTypeId: 'Piercing', count: 1, sides: 6, modifier: 3 }],
         }],
         startingConditions: [],
+        ...statedPlainMemberFields(),
       },
     ],
   });

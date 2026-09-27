@@ -37,6 +37,7 @@ import {
 } from '../../../src/vtt/session-persistence';
 import { declareTestInputs } from '../../helpers/test-inputs';
 import { onBoard } from '../../helpers/board-cell';
+import { statedPlainMemberFields } from '../../helpers/party-pack-stated';
 
 // PERF-02 board3 fix 1 (codex r1 P1; owner D895: a malformed position is unconstructible through an
 // in-bounds type checked at decode). Every decoder that turns stored or transmitted bytes into an
@@ -422,6 +423,7 @@ function fighterMember(index: number): ExternalPartyPackV2['members'][number] {
       damage: [{ damageTypeId: 'Slashing', count: 1, sides: 8, modifier: 2 }],
     }],
     startingConditions: [],
+    ...statedPlainMemberFields(),
   };
 }
 

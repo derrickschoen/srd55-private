@@ -5,6 +5,8 @@ import { bundledSrdSpeciesContentKey } from '../../../src/queries/character-sens
 import {
   characterSenses,
   FEATURE_SENSE_GRANTS,
+  SENSE_FEATURE_CAPABILITY_OWNER,
+  SENSE_FEATURES,
   type CharacterSenseInputs,
 } from '../../../src/rules/character-senses';
 import { SRD_SPECIES_SENSES, type SrdSpeciesName } from '../../../src/rules/generated/species-srd-tables';
@@ -26,8 +28,10 @@ describe('a character\'s standing senses', () => {
     }))).toEqual({
       status: 'sourced',
       senses: [{ kind: 'normal_sight' }, { kind: 'darkvision', rangeFeet: 120 }],
+      senseFeatures: [],
     });
-    expect(characterSenses(inputs())).toEqual({ status: 'sourced', senses: [{ kind: 'normal_sight' }] });
+    expect(characterSenses(inputs()))
+      .toEqual({ status: 'sourced', senses: [{ kind: 'normal_sight' }], senseFeatures: [] });
   });
 
   it('lets a species choice that owns the range replace it, and refuses while it is unmade', () => {
@@ -37,6 +41,7 @@ describe('a character\'s standing senses', () => {
     }))).toEqual({
       status: 'sourced',
       senses: [{ kind: 'normal_sight' }, { kind: 'darkvision', rangeFeet: 120 }],
+      senseFeatures: [],
     });
     expect(characterSenses(inputs({
       species: {
@@ -63,13 +68,14 @@ describe('a character\'s standing senses', () => {
 
   it('adds Feral Senses at Ranger 18, not at 17 (docs/srd/full/srd-5.2.1.txt:3577-3580)', () => {
     expect(characterSenses(inputs({ classLevels: [{ className: 'Ranger', level: 17 }] })))
-      .toEqual({ status: 'sourced', senses: [{ kind: 'normal_sight' }] });
+      .toEqual({ status: 'sourced', senses: [{ kind: 'normal_sight' }], senseFeatures: [] });
     expect(characterSenses(inputs({ classLevels: [{ className: 'Ranger', level: 18 }] }))).toEqual({
       status: 'sourced',
       senses: [{ kind: 'normal_sight' }, { kind: 'blindsight', rangeFeet: 30 }],
+      senseFeatures: [],
     });
     expect(characterSenses(inputs({ classLevels: [{ className: 'Fighter', level: 20 }] })))
-      .toEqual({ status: 'sourced', senses: [{ kind: 'normal_sight' }] });
+      .toEqual({ status: 'sourced', senses: [{ kind: 'normal_sight' }], senseFeatures: [] });
   });
 
   it('adds the Boon of Truesight\'s 60 feet (docs/srd/full/srd-5.2.1.txt:5354-5360)', () => {
@@ -83,7 +89,65 @@ describe('a character\'s standing senses', () => {
         { kind: 'darkvision', rangeFeet: 120 },
         { kind: 'truesight', rangeFeet: 60 },
       ],
+      // The Dwarf's Stonecunning, carried beside the standing senses (D923 Q13).
+      senseFeatures: ['Stonecunning'],
     });
+  });
+
+  it('carries the Dwarf\'s Stonecunning as a sense feature, not a standing Tremorsense', () => {
+    // docs/srd/full/srd-5.2.1.txt:5060-5072: "As a Bonus Action, you gain
+    // Tremorsense with a range of 60 feet for 10 minutes" — activated.
+    expect(characterSenses(inputs({
+      species: { kind: 'srd_species', species: 'Dwarf', lineageDarkvision: null },
+    }))).toEqual({
+      status: 'sourced',
+      senses: [{ kind: 'normal_sight' }, { kind: 'darkvision', rangeFeet: 120 }],
+      senseFeatures: ['Stonecunning'],
+    });
+    for (const species of Object.keys(SRD_SPECIES_SENSES) as SrdSpeciesName[]) {
+      const senses = characterSenses(inputs({
+        species: { kind: 'srd_species', species, lineageDarkvision: null },
+      }));
+      expect(senses.status === 'sourced' ? senses.senseFeatures : null)
+        .toEqual(species === 'Dwarf' ? ['Stonecunning'] : []);
+    }
+  });
+
+  it('types every sense feature sourced, not executed, awaiting the PERCEPTION unit (D923 Q13)', () => {
+    expect(SENSE_FEATURES).toEqual({
+      Stonecunning: {
+        grantedBy: { kind: 'srd_species', species: 'Dwarf' },
+        sense: { kind: 'tremorsense', rangeFeet: 60 },
+        activation: { kind: 'bonus_action', durationMinutes: 10, surface: 'stone' },
+        status: 'sourced_not_executed',
+        awaiting: 'perception_filters',
+        span: 'docs/srd/full/srd-5.2.1.txt:5060-5072',
+      },
+      // "You can see normally in Dim Light and Darkness—both magical and
+      // nonmagical—within 120 feet of yourself." No invocation is selectable here.
+      "Devil's Sight": {
+        grantedBy: { kind: 'eldritch_invocation', selectableInThisApplication: false },
+        sense: { kind: 'sees_normally_in_darkness', rangeFeet: 120, includesMagicalDarkness: true },
+        activation: { kind: 'standing' },
+        status: 'sourced_not_executed',
+        awaiting: 'perception_filters',
+        span: 'docs/srd/full/srd-5.2.1.txt:4354-4358',
+      },
+    });
+    expect(SENSE_FEATURE_CAPABILITY_OWNER).toEqual({ perception_filters: 'PERCEPTION' });
+    const lines = srdFullText.split('\n');
+    const spanText = (span: string) => {
+      const match = /:(\d+)-(\d+)$/u.exec(span);
+      if (match === null) throw new Error(`Bad span ${span}`);
+      return lines.slice(Number(match[1]) - 1, Number(match[2])).join('\n');
+    };
+    // Hashes computed independently (Python hashlib over the same lines).
+    expect(sha256(spanText(SENSE_FEATURES.Stonecunning.span)))
+      .toBe('1432c739cce3a8c2d46dcafb8ef5b158fc3b9a25a4bf8492816b6b6e1b243b79');
+    expect(sha256(spanText(SENSE_FEATURES["Devil's Sight"].span)))
+      .toBe('5a4d0a64acd87d3811282a73427f63e783d932d5d623ac8dd77b2f6d1dcafb12');
+    expect(spanText(SENSE_FEATURES.Stonecunning.span)).toContain('Stonecunning. As a Bonus Action, you gain Trem-');
+    expect(spanText(SENSE_FEATURES["Devil's Sight"].span)).toContain('You can see normally in Dim Light and Darkness—');
   });
 
   it('pins the feature spans it was hand-typed from', () => {

@@ -17,7 +17,10 @@
       "savingThrowBonuses": { "strength": 7, "dexterity": 1, "constitution": 6, "intelligence": 0, "wisdom": 1, "charisma": -1 },
       "attacksPerAction": 2,
       "attacks": [{ "attackId": "attack:longsword", "kind": "melee", "attackBonus": 7, "criticalFloor": 20, "reachFeet": 5, "rangeFeet": 5, "damage": [{ "damageTypeId": "Slashing", "count": 1, "sides": 8, "modifier": 4 }] }],
-      "startingConditions": []
+      "startingConditions": [],
+      "skillBonuses": { "acrobatics": 1, "animal_handling": 1, "arcana": 0, "athletics": 4, "deception": -1, "history": 0, "insight": 1, "intimidation": -1, "investigation": 0, "medicine": 1, "nature": 0, "perception": 1, "performance": -1, "persuasion": -1, "religion": 0, "sleight_of_hand": 1, "stealth": 1, "survival": 1 },
+      "senses": [{ "kind": "normal_sight" }],
+      "senseFeatures": []
     },
     {
       "combatantId": "combatant:pack-cleric",
@@ -41,7 +44,10 @@
         "knownSpellIds": [],
         "spellSlots": [{ "level": 1, "count": 4, "recharge": "long_rest" }, { "level": 2, "count": 3, "recharge": "long_rest" }, { "level": 3, "count": 3, "recharge": "long_rest" }, { "level": 4, "count": 1, "recharge": "long_rest" }]
       },
-      "startingConditions": []
+      "startingConditions": [],
+      "skillBonuses": { "acrobatics": 0, "animal_handling": 4, "arcana": 0, "athletics": 1, "deception": 1, "history": 0, "insight": 4, "intimidation": 1, "investigation": 0, "medicine": 4, "nature": 0, "perception": 4, "performance": 1, "persuasion": 1, "religion": 0, "sleight_of_hand": 0, "stealth": 0, "survival": 4 },
+      "senses": [{ "kind": "normal_sight" }],
+      "senseFeatures": []
     },
     {
       "combatantId": "combatant:pack-wizard",
@@ -65,7 +71,10 @@
         "knownSpellIds": ["fire-bolt"],
         "spellSlots": [{ "level": 1, "count": 4, "recharge": "long_rest" }, { "level": 2, "count": 3, "recharge": "long_rest" }, { "level": 3, "count": 3, "recharge": "long_rest" }, { "level": 4, "count": 1, "recharge": "long_rest" }]
       },
-      "startingConditions": []
+      "startingConditions": [],
+      "skillBonuses": { "acrobatics": 2, "animal_handling": 1, "arcana": 4, "athletics": -1, "deception": 0, "history": 4, "insight": 1, "intimidation": 0, "investigation": 4, "medicine": 1, "nature": 4, "perception": 1, "performance": 0, "persuasion": 0, "religion": 4, "sleight_of_hand": 2, "stealth": 2, "survival": 1 },
+      "senses": [{ "kind": "normal_sight" }],
+      "senseFeatures": []
     }
   ]
 }

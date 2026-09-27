@@ -20,6 +20,7 @@ import {
 } from '../../../src/vtt/party-pack';
 import { composeStoredCharacterEncounter } from '../../../src/vtt/stored-character-encounter';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { statedPlainMemberFields } from '../../helpers/party-pack-stated';
 
 const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
@@ -310,6 +311,7 @@ function boundaryPartyMembers(): readonly LoadedPartyMember[] {
       damage: [{ damageTypeId: 'Slashing', count: 1, sides: 8, modifier: 3 }],
     }],
     startingConditions: [],
+    ...statedPlainMemberFields(),
   });
   const loaded = loadExternalPartyPack({
     schemaVersion: 2,

@@ -22,6 +22,7 @@ import {
 import { readCharacterSenses } from '../queries/character-senses';
 import { WeaponQueries } from '../queries/weapons';
 import type { CharacterSenses } from '../rules/character-senses';
+import { toppleSaveDc } from '../rules/weapon-mastery-status';
 import { SPELL_MANIFEST, type SpellManifestId } from '../combat/spells/manifest';
 import type {
   ExternalPartyPackAttack,
@@ -30,13 +31,6 @@ import type {
 } from './party-pack';
 
 type ExternalPartyPackV2Member = ExternalPartyPackV2['members'][number];
-/**
- * What this exporter emits: a v2 member that ALWAYS states its skills and
- * senses (PC-EXPORT-TRUTH). The wire keeps both optional for packs written
- * before them; an export that forgot either would not compile.
- */
-type StoredCharacterPartyPackMember = ExternalPartyPackV2Member &
-  Required<Pick<ExternalPartyPackV2Member, 'skillBonuses' | 'senses'>>;
 type PartyPackSpellcastingSources = Extract<
   NonNullable<ExternalPartyPackV2Member['spellcasting']>,
   readonly unknown[]
@@ -121,8 +115,15 @@ function dice(value: string): { readonly count: number; readonly sides: 4 | 6 | 
   return { count, sides };
 }
 
+/** What Topple's DC reads from the sheet (`toppleSaveDc`). */
+interface ToppleSaveDcSheet {
+  readonly abilityModifiers: Readonly<Record<Ability, number>>;
+  readonly proficiencyBonus: number;
+}
+
 function attacks(
   panel: WeaponsPanel,
+  toppleSheet: ToppleSaveDcSheet,
 ):
   | { readonly status: 'exported'; readonly attacks: ExternalPartyPackMember['attacks'] }
   | { readonly status: 'refused'; readonly field: string; readonly detail: string } {
@@ -221,7 +222,10 @@ function attacks(
         exported.push({
           ...attackBase,
           masteryProperty: 'Topple',
-          masterySaveDc: 8 + ability.attack_bonus,
+          masterySaveDc: toppleSaveDc({
+            attackAbilityModifier: toppleSheet.abilityModifiers[ability.ability],
+            proficiencyBonus: toppleSheet.proficiencyBonus,
+          }),
         });
         break;
       case 'Cleave':
@@ -460,7 +464,15 @@ export function projectStoredCharacterPartyPackMember(
     }
     damageResponses.push({ damageTypeId: type, response: 'resistant' });
   }
-  const exportedAttacks = attacks(weapons);
+  if (sheet.proficiency_bonus.value === null) {
+    return refused('proficiencyBonus', 'The sheet Proficiency Bonus is undetermined.');
+  }
+  const exportedAttacks = attacks(weapons, {
+    abilityModifiers: Object.fromEntries(
+      sheet.ability_scores.map((score) => [score.ability, score.value]),
+    ) as Record<Ability, number>,
+    proficiencyBonus: sheet.proficiency_bonus.value,
+  });
   if (exportedAttacks.status === 'refused') {
     return refused(exportedAttacks.field, exportedAttacks.detail);
   }
@@ -488,7 +500,7 @@ export function projectStoredCharacterPartyPackMember(
     (total, bonus) => total + bonus.amount,
     0,
   );
-  const member: StoredCharacterPartyPackMember = {
+  const member: ExternalPartyPackV2Member = {
     combatantId: `combatant:character-${String(sheet.character_id)}`,
     tokenId: `token:character-${String(sheet.character_id)}`,
     characterId: sheet.character_id,
@@ -501,6 +513,7 @@ export function projectStoredCharacterPartyPackMember(
     savingThrowBonuses,
     skillBonuses: exportedSkills.bonuses,
     senses: senses.senses.map((sense) => ({ ...sense })),
+    senseFeatures: [...senses.senseFeatures],
     attacksPerAction: sheet.attacks_per_action.count,
     sizeCategory: size,
     hitDice: [...hitDiceBySides]

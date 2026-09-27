@@ -4,6 +4,7 @@ import { sha256 } from '../../../src/crypto/sha256';
 import { weaponMasteryProperties } from '../../../src/domain/enums';
 import {
   sourcedNotExecutedMastery,
+  toppleSaveDc,
   WEAPON_MASTERY_CAPABILITY_OWNER,
   WEAPON_MASTERY_STATUS,
 } from '../../../src/rules/weapon-mastery-status';
@@ -59,5 +60,15 @@ describe('weapon mastery status (rule H: hand-typed from cited spans)', () => {
       status: 'sourced_not_executed',
       awaiting: 'weapon_mastery_execution',
     });
+  });
+
+  it('computes Topple\'s DC from the attack ability modifier and the Proficiency Bonus only', () => {
+    // "DC 8 plus the ability modifier used to make the attack roll and your
+    // Proficiency Bonus" (the Topple span pinned above). Dex +3 at PB +4: 15.
+    expect(toppleSaveDc({ attackAbilityModifier: 3, proficiencyBonus: 4 })).toBe(15);
+    // A negative modifier lowers it: Str −1 at PB +2 is 9.
+    expect(toppleSaveDc({ attackAbilityModifier: -1, proficiencyBonus: 2 })).toBe(9);
+    expect(spanLines(WEAPON_MASTERY_STATUS.Topple.span).join('\n'))
+      .toContain('(DC 8 plus the ability modifier used to make the');
   });
 });
