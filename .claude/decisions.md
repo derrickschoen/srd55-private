@@ -2772,3 +2772,63 @@ LANDED: main = f0be3c93, 21 commits cherry-picked onto 6149fcc8.
 - Next on the LUNA6 path: FOOTPRINT, MOVE-COST, SQUEEZE-COMBAT and SQUEEZE-THROUGH (D905–D907) change study-room behaviour and come first. Then the D898 pre-run amendment, S-SCHEDULE, the V18 dry run and the study cells.
 
 Next free id: D911.
+
+## D911 — 2026-09-27 05:36 — post-landing wave 1 harvested; owner: COVER-EDGE seals walls and the brutal cohorts are REGENERATED under the correct rule
+
+WAVE wf_0700e317-e47 (6 Opus agents, own clones on main a9c60a51). Results saved under each unit's data dir. Agent-reported unless marked.
+- **WASM-SIMD experiment** (D895; nothing lands). Clone dnd-probe-wasm-7dcb, fa463930.
+  - The kernel is the cover walk as an anchor sweep. Sight has no separate per-square hot path.
+  - 2,019,549 squares over 97 states, 0 mismatches (engine, flat JS, WASM scalar and WASM SIMD all digest 91189e8c…); 11/11 mutants killed.
+  - Contended smoke: SIMD is 10.2x the engine. The flat typed-array layout alone gives 6.5x in plain JS; WASM adds 1.57x and SIMD 1.07x over scalar WASM.
+  - Agent recommends NOT adopting WASM-SIMD.
+  - The quiet-box run (.tmp/runs/wasm-simd/bench/run-quiet.sh) is owed by me.
+- **PATH-ONE** (D901). dnd-probe-pathone-bf5a 7cab28ba, one commit.
+  - The single failure code is 'unreachable_within_budget'.
+  - 5/6 mutants killed; M6 is equivalent by construction.
+  - 248/248 in 20 specs; pins unchanged. A miss is 3.35x cheaper (contended micro).
+  - Codex review owed.
+- **FOOTPRINT plan r2**, saved over .tmp-plans/2026-09-26-footprint-whole-body-on-map.md.
+  - All 9 codex r1 findings have dispositions: 7 fixed, 2 moved to later units by owner ruling.
+  - The repairs are derived independently in python.
+  - Codex review r2 is owed. Plan questions are pending.
+- **Recorder research** (D909).
+  - Walking the module graph equals tracing: the test-affected walker gives exactly the bundle's 102 sealed inputs.
+  - 165 undeclared = 134 bundle-check reads + 31 pre-x3.
+  - It found a real false green: the verdict cache ignores DND_LANE_INTEL_MODE.
+  - It recommends design A (the bundle sidecar becomes the child's derived declaration, 165 → 31) plus an env fix.
+- **pcac rebased** onto a9c60a51 as claude/pcac-onmain 57eb6d92: 24 commits, 7 textual conflicts and 2 non-textual breaks recorded.
+  - 235 specs pass (5,019 tests); 9/9 mutants killed.
+  - survival-seeds moves f9c357a1 → f10cc246. This is attributed to cover6's coverself rule reached through pcac's projected cover (probe, rerank9, cc_ref). PC drops go 41 → 50; 30/30 still succeed.
+  - 3 Playwright specs are owed, not 2: + tests/browser/ai-dm-board-snapshot.spec.ts.
+  - Codex review of the rebase and its D885 pair are owed.
+- **COVER-EDGE** (D908), status PARTIAL. dnd-probe-coveredge-cd0d 79451a3e, 8 commits.
+  - Seams and diagonal vertices are sealed.
+  - Production equals an independent exact python oracle on 61,209 queries; 17/17 mutants killed.
+  - Verdict path costs +16% (pin wall 81.1 → 84.5 s).
+  - Consequence: 41 tests and 1 suite are red outside the unit. Brutal rooms were generated while seams leaked, so sealed-off monsters get only Dodge/End Turn:
+    - 8/10 brutal generator seeds, 10/10 brutal-b fixtures and 6 brutal-2 fixtures fail productivity;
+    - the D569 v5 manifest is invalid, so d569-cells cannot be computed;
+    - plus composite-turn-proposals, Room-8, speculative-planning, two-room bytes and a screenshot-probe item;
+    - and an ACTIVATION_CHOICE_INVALID refusal (the engine refuses its own dry-run plan in 4 brutal rooms), which the agent recommends investigating first.
+  - The FOOTPRINT planner separately found that the frozen ai-dm-conversation.test.ts:2005-2007 cover trace appears to pin the seam defect.
+
+QUESTION (AskUserQuestion). Options: repair the affected rooms by a stated rule (my recommendation), run the study first, or regenerate.
+OWNER, verbatim choice: "Fix walls, regenerate rooms".
+
+READING AND SEQUENCING (mine; the owner can overturn):
+- The brutal-family cohorts whose rooms fail under sealed walls are REGENERATED from the generator under the correct rules, rejecting unproductive rooms. They are new rooms, not repaired ones.
+- For the study this replaces the brutal and brutal-2 strata's registered encounters. A PRE-RUN amendment to D898 is needed: new seeds, fixture shas and manifests, written before any cell.
+  - The hard strata stay unless they fail too.
+  - V17's power simulation takes effect sizes as parameters, not room data. I will check whether any registered quantity depends on the old rooms before the amendment.
+- ONE regeneration, under the FINAL rules. Productivity depends on movement cost (D905), squeezing (D906/D907), placement (D900) and sight (COVER-EDGE). Order:
+  1. FOOTPRINT;
+  2. MOVE-COST;
+  3. SQUEEZE-COMBAT;
+  4. SQUEEZE-THROUGH;
+  5. COVER-EDGE + REGEN, landing together so the tree is never red; the ACTIVATION_CHOICE_INVALID investigation comes first;
+  6. the D898 pre-run amendment;
+  7. S-SCHEDULE, V18 and the study cells.
+- FOOTPRINT's repair of brutal fixtures is interim (it keeps its tests green) and will be superseded by the regeneration. Its hard-room repairs stand.
+- D569 v5 (historical experiment, results sha 8c0bcb3c): its manifest must stay verifiable as history under the rule version it ran on, not be re-validated under sealed walls. The REGEN unit designs that.
+
+Next free id: D912.
