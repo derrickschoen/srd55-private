@@ -10,7 +10,7 @@ import {
   expandedCriticalMinimumRoll,
   targetArmorClass,
 } from '../simulation/contracts';
-import { attackRollProbabilities } from '../simulation/probability';
+import { attackRollProbabilities } from '../simulation/d20-probability';
 
 export const TACTICAL_EVALUATOR_POLICY = 'tactical-evaluator-v3' as const;
 

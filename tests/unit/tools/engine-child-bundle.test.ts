@@ -893,12 +893,21 @@ describe('engine child bundle build', () => {
     return built;
   }
 
-  it('records both ?raw corpus files as keyed inputs with their current digests', () => {
-    for (const path of ['docs/srd/full/srd-5.2.1.txt', 'docs/srd/source/spell-descriptions.txt']) {
-      expect(requireBuilt().inputs).toContainEqual({
-        path: resolve(root, path),
-        sha256: sha256Hex(readFileSync(resolve(root, path))),
-      });
+  it('compiles no SRD text: the engine reads the build-time artifacts, never a corpus', () => {
+    // It used to compile both ?raw corpora (2.1 MB of full SRD plus the spell
+    // extract) through probability.ts -> coverage.ts; the d20 folds moved to
+    // d20-probability.ts and coverage.ts reads a generated artifact. Sealing a
+    // ?raw input is still covered by the stand-in checkouts above.
+    const inputs = requireBuilt().inputs.map((input) => input.path);
+    expect(inputs.filter((path) => path.includes('/docs/srd/'))).toEqual([]);
+    expect(inputs).not.toContain(resolve(root, 'src/simulation/coverage.ts'));
+    expect(inputs).toContain(resolve(root, 'src/simulation/d20-probability.ts'));
+    for (const [corpus, marker] of [
+      [bundledSrd521, 'die and add your Constitution modifier to it. You'],
+      [bundledSpellDescriptions, '--- Verbatim extract: SRD 5.2.1 printed pages 107-175, Spell Descriptions. ---'],
+    ] as const) {
+      expect(corpus.split(marker)).toHaveLength(2);
+      expect(output).not.toContain(marker);
     }
   });
 

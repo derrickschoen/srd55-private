@@ -11,17 +11,18 @@ import {
 // never selected. This static import pins `probability.ts` into this file's
 // graph alongside the named imports below.
 import '../../../src/simulation/probability';
+import { resolveRollState } from '../../../src/simulation/d20-probability';
 import {
   enumerateDicePool,
   ordinaryDamageDistribution,
-  resolveRollState,
   type DamageOutcomeDistribution,
 } from '../../../src/simulation/probability';
 
 /**
- * Near-miss probes for two things in `src/simulation/probability.ts`.
+ * Near-miss probes for two things in the simulation probability layer.
  *
- * 1. ROLL-STATE SOURCE-COUNT VALIDATION (`resolveRollState`). The guard is a
+ * 1. ROLL-STATE SOURCE-COUNT VALIDATION (`resolveRollState`, in
+ *    `src/simulation/d20-probability.ts`). The guard is a
  *    four-way disjunction: each of `advantageSources` and `disadvantageSources`
  *    must be an integer AND must be nonnegative. Each case below makes exactly
  *    ONE of the four disjuncts true, so no disjunct can be deleted, forced

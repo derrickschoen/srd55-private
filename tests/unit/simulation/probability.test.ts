@@ -27,15 +27,17 @@ import {
   reviewedSaveSuccessClauses,
 } from '../../../src/simulation/coverage';
 import {
-  applyDamageResponse,
   attackRollProbabilities,
+  resolveRollState,
+  saveSuccessProbability,
+} from '../../../src/simulation/d20-probability';
+import {
+  applyDamageResponse,
   composeRoundDamageFolds,
   enumerateDicePool,
   foldAttackEvent,
   foldSavingThrowEvent,
   ordinaryDamageDistribution,
-  resolveRollState,
-  saveSuccessProbability,
 } from '../../../src/simulation/probability';
 
 const source: SourceRef = {
