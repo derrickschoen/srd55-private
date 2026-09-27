@@ -8,7 +8,8 @@ import { describe, expect, it } from 'vitest';
  * so a later refactor of the named imports cannot silently drop it.
  */
 import '../../../src/simulation/contracts';
-import { damageType, type DieSize } from '../../../src/domain/enums';
+import { damageType } from '../../../src/domain/enums';
+import type { DieSize } from '../../../src/domain/srd-vocabulary';
 import type {
   ContentKey,
   SourceInstanceId,
@@ -65,7 +66,7 @@ import {
  * deliberately not chased:
  *
  * - `typeof die !== 'number'` deleted from the dice guard. `isDieSize` is
- *   `dieSizes.includes(candidate)`, a SameValueZero scan over number literals,
+ *   `DIE_SIZES.includes(candidate)`, a SameValueZero scan over number literals,
  *   so it is false for EVERY non-number; the second operand already subsumes
  *   the first, and dropping the first only stops a short circuit.
  * - `left.kind !== right.kind` deleted from the `sameSourceRef` guard. With

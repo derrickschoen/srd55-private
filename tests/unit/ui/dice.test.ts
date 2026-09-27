@@ -15,7 +15,7 @@ import {
   type DiceConfig,
   type DieUpgrade,
 } from '../../../src/ui/screens/planner/dice';
-import { dieSizes, isDieSize } from '../../../src/domain/enums';
+import { DIE_SIZES, isDieSize } from '../../../src/domain/srd-vocabulary';
 
 function config(
   changes: Partial<DiceConfig> = {},
@@ -465,14 +465,15 @@ describe('promoted die outcome contract', () => {
  */
 describe('the die-size field states one set, not two', () => {
   it('round-trips every size the control offers', () => {
-    for (const size of dieSizes) {
+    for (const size of DIE_SIZES) {
       expect(selectedDieSize(String(size)), `d${String(size)}`).toBe(size);
     }
   });
 
   it('falls back to the control’s own default for anything else', () => {
     // The clamp accepted all of these and returned a different number for each.
-    for (const outside of ['7', '2', '3', '13', '99', '1', '0', '-8', '8.5']) {
+    // ('3' left this list when the owner added the d3, D920.)
+    for (const outside of ['7', '2', '13', '99', '1', '0', '-8', '8.5']) {
       expect(selectedDieSize(outside), outside).toBe(DEFAULT_BASIC_DIE_SIZE);
     }
     // And the shapes a `<select>` can genuinely produce when nothing matches.

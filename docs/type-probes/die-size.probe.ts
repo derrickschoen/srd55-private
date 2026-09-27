@@ -17,11 +17,8 @@
  * that no longer errors.
  */
 import { fixedHitPointsPerLevel } from '../../src/rules/sheet';
-import type {
-  DieSize,
-  HitDieSize,
-  MartialArtsDieSize,
-} from '../../src/domain/enums';
+import type { HitDieSize, MartialArtsDieSize } from '../../src/domain/enums';
+import type { DieSize } from '../../src/domain/srd-vocabulary';
 import type { DiceConfig } from '../../src/ui/screens/planner/dice';
 
 /* --- fixedHitPointsPerLevel: F12's four wrong numbers, now four errors ----- */
@@ -39,7 +36,7 @@ export const hitD4: HitDieSize = 4;
 export const martialD4: MartialArtsDieSize = 4;
 export const martialD20: MartialArtsDieSize = 20;
 
-/* --- the vocabulary is the owner's list, no wider ------------------------- */
+/* --- the vocabulary is the owner's list (D34 plus D920's d3), no wider ---- */
 export const seven: DieSize = 7;
 export const two: DieSize = 2;
 
@@ -56,4 +53,4 @@ export const untested: HitDieSize = stored;
  * DieSize[]`. That clause is the only thing stating that the subsets ARE
  * subsets, so it is probed here rather than assumed. */
 export const typo = [6, 8, 7, 12] as const satisfies readonly DieSize[];
-export const wider = [6, 8, 3] as const satisfies readonly DieSize[];
+export const wider = [6, 8, 5] as const satisfies readonly DieSize[];

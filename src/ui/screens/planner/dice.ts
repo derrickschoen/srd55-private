@@ -1,5 +1,5 @@
-import type { Ability, DieSize } from '../../../domain/enums';
-import { dieSizes, isDieSize } from '../../../domain/enums';
+import type { Ability } from '../../../domain/enums';
+import { DIE_SIZES, isDieSize, type DieSize } from '../../../domain/srd-vocabulary';
 import type { WorkspaceSlot } from '../../../domain/read-models';
 
 export type RollMode = 'normal' | 'advantage' | 'disadvantage';
@@ -70,8 +70,8 @@ export interface DiceConfig {
    * THE DIE THE USER PICKED, AS A `DieSize` AND NOT A `number`.
    *
    * This field had TWO answers in this one file. The `<select>` below offers
-   * `dieSizes`; the read-back clamped `boundedInteger(…, 2, 100)`, an integer
-   * RANGE that accepts 3, 7, 13 and 99. The browser could not reach the
+   * `DIE_SIZES`; the read-back clamped `boundedInteger(…, 2, 100)`, an integer
+   * RANGE that accepts 2, 7, 13 and 99. The browser could not reach the
    * disagreement — the select is the only writer of `.value` — but this
    * interface is EXPORTED and the unit tests build it directly, and
    * `ordinaryDamage` loops `face = 1..size` over whatever arrives. A 7 produced
@@ -1002,10 +1002,10 @@ export function renderDiceHelper(
   basicDice.value = '1';
   const basicDiceField = labeledInput('Damage dice', basicDice);
   const basicDieSize = document.createElement('select');
-  // THE OPTIONS ARE THE TYPE. Adding a size to `dieSizes` adds it here, and
+  // THE OPTIONS ARE THE TYPE. Adding a size to `DIE_SIZES` adds it here, and
   // there is no literal to forget: this loop WAS the only statement of the die
   // vocabulary anywhere in the application.
-  for (const size of dieSizes) {
+  for (const size of DIE_SIZES) {
     basicDieSize.append(new Option(`d${String(size)}`, String(size)));
   }
   basicDieSize.value = String(DEFAULT_BASIC_DIE_SIZE);
@@ -1087,7 +1087,7 @@ export function renderDiceHelper(
   );
   const upgradeDieSize = document.createElement('select');
   upgradeDieSize.append(new Option('Any', 'any'));
-  for (const size of dieSizes) {
+  for (const size of DIE_SIZES) {
     upgradeDieSize.append(new Option(`d${String(size)}`, String(size)));
   }
   const dieUpgradeFields = [

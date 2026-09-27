@@ -24,14 +24,18 @@ import { describe, expect, it } from 'vitest';
 import coreTraitsExtract from '../../../docs/srd/source/class-core-traits.txt?raw';
 import attackFeaturesExtract from '../../../docs/srd/source/attack-class-features.txt?raw';
 import {
-  dieSizes,
   hitDieSizes,
-  isDieSize,
   isHitDieSize,
   isMartialArtsDieSize,
   martialArtsDieSizes,
-  type DieSize,
 } from '../../../src/domain/enums';
+import { DIE_SIZES, isDieSize, type DieSize } from '../../../src/domain/srd-vocabulary';
+import { rollDie } from '../../../src/combat/random';
+import { rollOccurrenceId, rollOperationPath } from '../../../src/combat/roll-provenance';
+import { dieSides } from '../../../src/combat/values';
+import { enumerateDicePool } from '../../../src/simulation/probability';
+import { positiveDiceCount } from '../../../src/simulation/contracts';
+import { exactResult, seededRoll, type DiceConfig } from '../../../src/ui/screens/planner/dice';
 import {
   parseSrdClassTraits,
   parseSrdMartialArtsDice,
@@ -42,26 +46,25 @@ const PROBE = 'docs/type-probes/die-size.probe.ts';
 
 describe('the die vocabulary', () => {
   /**
-   * The owner's words, transcribed by hand and not read back from the module:
-   * "Do we have an enum for dice type? We only should have 4,6,8,10,12,20,100."
-   *
-   * NO SRD FILE CAN CLOSE THIS SET — `docs/srd/source/` prints the dice that
-   * particular rules use, never the vocabulary — so the owner's sentence IS the
-   * oracle, and this is the one list here with no citation because there is
-   * none to give.
+   * The owner's words, transcribed by hand and not read back from the module.
+   * D34: "Do we have an enum for dice type? We only should have
+   * 4,6,8,10,12,20,100." D920 reopened it — the SRD prints 1d3 nineteen times —
+   * with the choice "Add d3 everywhere": ONE die-size list for rule data and
+   * planning. The SRD vocabulary test proves the list is every size the SRD
+   * text prints; this one pins the owner's set.
    */
-  it('is exactly the seven sizes the owner named', () => {
-    expect([...dieSizes]).toEqual([4, 6, 8, 10, 12, 20, 100]);
+  it('is exactly the owner\'s seven sizes and the d3 D920 added', () => {
+    expect([...DIE_SIZES]).toEqual([3, 4, 6, 8, 10, 12, 20, 100]);
   });
 
   it('admits its own members and nothing between or beyond them', () => {
-    for (const size of dieSizes) {
+    for (const size of DIE_SIZES) {
       expect(isDieSize(size), `d${String(size)}`).toBe(true);
     }
-    // d2 and d3 are real dice the owner left out; 7 and 13 are not dice at all;
-    // 0 and the non-integers are what a mis-parse or a hand-edited document
+    // d2 is a real die the SRD never prints; 7 and 13 are not dice at all; 0
+    // and the non-integers are what a mis-parse or a hand-edited document
     // produces.
-    for (const rejected of [0, 1, 2, 3, 5, 7, 13, 99, 101, -8, 8.5, Number.NaN, Infinity]) {
+    for (const rejected of [0, 1, 2, 5, 7, 13, 99, 101, -8, 8.5, Number.NaN, Infinity]) {
       expect(isDieSize(rejected), String(rejected)).toBe(false);
     }
   });
@@ -87,6 +90,64 @@ describe('the die vocabulary', () => {
   it('keeps the hit die and the Martial Arts die as separate declarations', () => {
     expect(hitDieSizes).not.toBe(martialArtsDieSizes);
     expect([...hitDieSizes]).toEqual([...martialArtsDieSizes]);
+  });
+});
+
+/**
+ * THE d3, EXECUTED WHERE DICE ARE ROLLED AND FOLDED (owner D920: "a d3 roll
+ * distribution witness (1..3 uniform), average 2, and a probability fold that
+ * handles d3"). Every expectation is computed by hand: a d3 has faces 1, 2, 3
+ * at 1/3 each, mean (1 + 2 + 3) / 3 = 2; two d3 sum to 2..6 with weights
+ * 1, 2, 3, 2, 1 out of 9, mean 4.
+ */
+describe('the d3 the owner added (D920)', () => {
+  const PROVENANCE = {
+    occurrenceId: rollOccurrenceId('die-sizes:d3'),
+    operationPath: rollOperationPath('damage/d3'),
+    source: null,
+    targets: [],
+  } as const;
+
+  it('rolls 1, 2 and 3 exactly uniformly in the engine, averaging 2', () => {
+    // 3,000 evenly spaced draws over [0, 1): each face must take exactly 1,000.
+    const counts = new Map<number, number>();
+    for (let step = 0; step < 3_000; step += 1) {
+      const face = rollDie(() => (step + 0.5) / 3_000, dieSides(3), PROVENANCE);
+      counts.set(face, (counts.get(face) ?? 0) + 1);
+    }
+    expect([...counts.entries()].sort((a, b) => a[0] - b[0])).toEqual([[1, 1_000], [2, 1_000], [3, 1_000]]);
+    const mean = [...counts.entries()].reduce((sum, [face, count]) => sum + face * count, 0) / 3_000;
+    expect(mean).toBe(2);
+  });
+
+  it('folds a d3 pool into its exact distribution in the damage-probability engine', () => {
+    const one = enumerateDicePool({ count: positiveDiceCount(1), die: 3 });
+    expect(one.map(({ total, probability }) => [total, probability])).toEqual([[1, 1 / 3], [2, 1 / 3], [3, 1 / 3]]);
+    const two = enumerateDicePool({ count: positiveDiceCount(2), die: 3 });
+    expect(two.map(({ total }) => total)).toEqual([2, 3, 4, 5, 6]);
+    expect(two.map(({ probability }) => probability * 9).map((weight) => Math.round(weight * 1e9) / 1e9)).toEqual([1, 2, 3, 2, 1]);
+    expect(two.reduce((sum, { total, probability }) => sum + total * probability, 0)).toBeCloseTo(4, 12);
+  });
+
+  it('is offered and computed by the planner: 1d3 on a certain hit averages 2', () => {
+    const planned: DiceConfig = {
+      profile: 'basic', armorClass: 1, attackBonus: 30, rollMode: 'normal',
+      halflingLuck: false, luckyFeat: false, tripleAdvantage: false, bless: false, bane: false,
+      dieUpgrade: null, resistanceBypass: false, resistance: false, vulnerability: false,
+      basicDice: 1, basicDieSize: 3, damageModifier: 0,
+      sorcerousBaseDice: 1, explosionCap: 3, chromaticSlotLevel: 1,
+    };
+    const exact = exactResult(planned);
+    expect(exact.normalDamage).toBeCloseTo(2, 12);
+    // A critical doubles the dice: 2d3, mean 4.
+    expect(exact.criticalDamage).toBeCloseTo(4, 12);
+    const faces = new Set<number>();
+    for (let seed = 0; seed < 60; seed += 1) {
+      for (const die of seededRoll(planned, `d3-${String(seed)}`).attacks[0]?.damageDice ?? []) {
+        faces.add(die.raw);
+      }
+    }
+    expect([...faces].sort()).toEqual([1, 2, 3]);
   });
 });
 
@@ -324,11 +385,12 @@ describe('the type refuses a wrong die size at compile time', () => {
     type Assert<T extends true> = T;
     type Extends<A, B> = [A] extends [B] ? true : false;
 
+    // D920 added the d3 to D34's seven sizes.
     type _VocabularyIsClosed = Assert<
-      Extends<DieSize, 4 | 6 | 8 | 10 | 12 | 20 | 100>
+      Extends<DieSize, 3 | 4 | 6 | 8 | 10 | 12 | 20 | 100>
     >;
     type _VocabularyIsComplete = Assert<
-      Extends<4 | 6 | 8 | 10 | 12 | 20 | 100, DieSize>
+      Extends<3 | 4 | 6 | 8 | 10 | 12 | 20 | 100, DieSize>
     >;
     type _HitDiceAreDice = Assert<
       Extends<(typeof hitDieSizes)[number], DieSize>

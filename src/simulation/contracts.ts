@@ -9,11 +9,10 @@ import type {
 import {
   abilities,
   damageType,
-  isDieSize,
   type Ability,
   type DamageType,
-  type DieSize,
 } from '../domain/enums';
+import { isDieSize, type DieSize } from '../domain/srd-vocabulary';
 
 export type NonEmptyReadonlyArray<T> = readonly [T, ...T[]];
 

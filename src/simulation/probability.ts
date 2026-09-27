@@ -185,7 +185,8 @@ function normalizedDistribution(
 /**
  * Enumerates a finite dice pool by convolution. Dice and modifiers are defined
  * under the bundled SRD heading `Damage Rolls`; `DieSize` itself is the closed
- * sourced vocabulary already held by the app.
+ * sourced vocabulary already held by the app (the SRD vocabulary's
+ * `DIE_SIZES`, d3 included since owner D920).
  *
  * @see publicProbabilityCoverageManifest.damage_roll
  */

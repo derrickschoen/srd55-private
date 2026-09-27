@@ -2,6 +2,7 @@ import {
   DAMAGE_TYPES,
   type ConditionName,
   type DamageType as SrdDamageType,
+  type DieSize,
 } from './srd-vocabulary';
 
 export const abilities = [
@@ -550,24 +551,14 @@ export type MulticlassSkillPool = (typeof multiclassSkillPools)[number];
  * ========================================================================== */
 
 /**
- * THE DIE VOCABULARY. The owner's own list, verbatim: *"Do we have an enum for
- * dice type? We only should have 4,6,8,10,12,20,100."*
- *
- * Until this existed the set lived ONCE, as a loop literal in a UI file
- * (`src/ui/screens/planner/dice.ts`), and four other places re-stated a
- * different subset of it by hand. F12 named that; this is the type it asked
- * for.
- *
- * NO SRD FILE CLOSES THIS SET AND NONE COULD. `docs/srd/source/` is class,
- * weapon and species content — it prints the dice that particular rules USE, so
- * it can close `hitDieSizes` and `martialArtsDieSizes` below but never the
- * vocabulary itself. This list is therefore the OWNER'S, and is recorded as
- * such rather than dressed up with a citation it does not have. `d2` and `d3`
- * are absent because the owner left them out; that is a judgement, not a
- * sourcing claim.
+ * THE DIE VOCABULARY is the SRD vocabulary's `DIE_SIZES` (owner D920: "Add d3
+ * everywhere", one die-size list for rule data and planning; it reopened D34's
+ * owner list of 4, 6, 8, 10, 12, 20 and 100, which lacked the d3 the SRD prints
+ * 19 times). The two sourced subsets below are declared here, beside the
+ * classes they come from, and `satisfies` states that each is a subset of it.
  *
  * NOT A SIZE, AND SO NOT THIS TYPE — three things that look like they belong
- * here and do not:
+ * with it and do not:
  *
  *  - A DAMAGE VALUE. `WeaponDamage` distinguishes rolled dice, a flat number,
  *    custom text, and an unrecorded value. The source's own Blowgun does `1`
@@ -578,11 +569,7 @@ export type MulticlassSkillPool = (typeof multiclassSkillPools)[number];
  *  - A ROLLED FACE. `character_hit_point_rolls.rolled_value` is 1..12 from
  *    `SHEET_ROLL_BOUNDS`; its ceiling merely HAPPENS to equal a die size.
  *  - A COUNT of dice. `DiceConfig.basicDice` is 1..20 and is not a vocabulary.
- *
- * @see hitDieSizes for the sourced subset a class's Hit Point Die may take.
  */
-export const dieSizes = [4, 6, 8, 10, 12, 20, 100] as const;
-export type DieSize = (typeof dieSizes)[number];
 
 /**
  * THE HIT DIE — the size printed in a class's Core Traits row.
@@ -645,7 +632,8 @@ export const martialArtsDieSizes = [
 export type MartialArtsDieSize = (typeof martialArtsDieSizes)[number];
 
 /**
- * Membership tests for the three lists above.
+ * Membership tests for the two subsets above (the vocabulary's own is
+ * `isDieSize` in the SRD vocabulary).
  *
  * Separate from {@link isEnumValue} because that one takes `readonly string[]`
  * and these vocabularies are integers — the same reason `oneOf` in
@@ -659,10 +647,6 @@ export type MartialArtsDieSize = (typeof martialArtsDieSizes)[number];
  * question — "is this integer off the disk actually a hit die?" — belongs at
  * the boundary where the untrusted integer arrives instead.
  */
-export function isDieSize(candidate: number): candidate is DieSize {
-  return (dieSizes as readonly number[]).includes(candidate);
-}
-
 export function isHitDieSize(candidate: number): candidate is HitDieSize {
   return (hitDieSizes as readonly number[]).includes(candidate);
 }
@@ -971,19 +955,18 @@ export type SpellRangeKind = (typeof spellRangeKinds)[number];
  * `extraAttackWeaponScopes` applies to `one_bonded_weapon`. A member named
  * `lightning_bolt` would have invited a second member meaning the same thing.
  *
- * WHAT A SINGLE `area_feet` CANNOT HOLD, MEASURED RATHER THAN WAVED AT. The
- * only SRD 5.2.1 text in this repository that names an area shape is
- * `docs/srd/source/species-descriptions.txt:78`, the Dragonborn's Breath
- * Weapon: *"either a 15-foot Cone or a 30-foot Line that is 5 feet wide"*. A
- * LINE therefore carries a length AND a width, and a CYLINDER a radius AND a
- * height. This model stores ONE dimension per area and the second is left in
- * the verbatim `range` text, where it is displayed and not lost.
- *
- * That is a deliberate stop, not an oversight: under D26 the sheet is a
- * reference, and the number a player compares is the one they measure on the
- * table. A width column would be NULL for every sphere and every cone this
- * application can ever hold, and no number on the sheet moves when it is
- * filled in.
+ * AN UNFINISHED MIGRATION, NOT A DESIGN. The Area of Effect glossary entry
+ * names six shapes (Cone, Cube, Cylinder, Emanation, Line, Sphere), each with
+ * the dimensions it specifies — a Line a length AND a width, a Cylinder a
+ * radius AND a height — and the SRD vocabulary types all six as `AreaOfEffect`
+ * (src/domain/srd-vocabulary.ts). This database list has four shapes and one
+ * `area_feet` per area, the second dimension left in the verbatim `range`
+ * text. The rationale once given here (D26: the sheet is a reference, so a
+ * width column would move no number) is SUPERSEDED by D918: printed text is
+ * kept for display only and code never reads it, so every dimension a rule
+ * prints is typed data. SPELL-EFFECT-FACTS moves the catalogue to
+ * `AreaOfEffect` and deletes this list; until then the vocabulary test pins
+ * the difference (cube and emanation missing) so it cannot grow.
  */
 export const spellAreaShapes = ['sphere', 'cylinder', 'cone', 'line'] as const;
 export type SpellAreaShape = (typeof spellAreaShapes)[number];

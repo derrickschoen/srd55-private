@@ -7,11 +7,12 @@ import type { AreaTemplate } from '../../../src/combat/templates';
 import type { Feet as EngineFeet } from '../../../src/combat/values';
 import type { ConditionName as EngineConditionName } from '../../../src/combat/conditions';
 import type {
-  DieSize as PlannerDieSize,
   KnownConditionType,
   KnownDamageType,
   SpellAreaShape,
 } from '../../../src/domain/enums';
+import type { DicePool } from '../../../src/simulation/contracts';
+import type { DiceConfig } from '../../../src/ui/screens/planner/dice';
 import {
   AREA_SHAPES,
   CONDITION_NAMES,
@@ -24,7 +25,10 @@ import {
   RECHARGE_MINIMUMS,
   ROUNDS_PER_UNIT,
   SECONDS_PER_ROUND,
+  SHORT_REST_REGAINS,
   toRounds,
+  type ChargeRegain,
+  type ShortRestRegain,
   type AreaShape,
   type ConditionName,
   type DamageType,
@@ -88,6 +92,53 @@ describe('SRD-VOCAB transcriptions', () => {
     expect([...perDay].sort()).toEqual([...PER_DAY_USES]);
   });
 
+  it('every rest and charge regain the SRD prints is a Usage the type can hold', () => {
+    // Reading order, one column at a time, a line-end hyphen joined: a
+    // two-column page interleaves its columns on every raw line.
+    const text = srdReadingOrder(fullSrd).map((row) => row.text).join('\n')
+      .replace(/(\p{L})-\n(\p{Ll})/gu, '$1$2').replace(/\s+/g, ' ');
+    // Rest regains. A Long Rest always regains every use; what a Short Rest
+    // regains is the one closed choice, and each printed sentence maps to it.
+    const regains = new Map<string, ShortRestRegain>([
+      ['regain one expended use when you finish a Short Rest', 'one'],
+      ['regain one of its expended uses when you finish a Short Rest', 'one'],
+      ['regain all expended uses when you finish a Long Rest', 'none'],
+      ['regain all expended uses when you finish a Short or Long Rest', 'all'],
+    ]);
+    const printed = [...text.matchAll(/regain (?:one|all)(?: of its)? expended uses? when you finish a (?:Short or Long|Short|Long) Rest/g)]
+      .map((match) => match[0]);
+    expect(printed.length).toBeGreaterThanOrEqual(18);
+    for (const sentence of printed) {
+      expect({ sentence, typed: regains.has(sentence) }).toEqual({ sentence, typed: true });
+    }
+    // Each of the three is printed somewhere, so none is a guess.
+    expect([...new Set(printed.map((sentence) => regains.get(sentence)))].sort()).toEqual([...SHORT_REST_REGAINS].sort());
+    // "can't use it again until you finish a Long Rest" is one use and `none`;
+    // "…a Short or Long Rest" is one use and `all`: no third rest is printed.
+    const untilRests = new Set([...text.matchAll(/again until you finish a ([A-Za-z ]+?) Rest\b/g)].map((match) => match[1]));
+    expect([...untilRests].sort()).toEqual(['Long', 'Short or Long']);
+    // Charges: every "regain(s) … expended charge(s)" is a printed dice
+    // expression, a printed number or "all", and every one is daily at dawn.
+    const charges = [...text.matchAll(/regains? ([^.]{1,40}?) expended charges? (daily at dawn)?/g)];
+    expect(charges.length).toBeGreaterThanOrEqual(40);
+    const chargeRegain = (amount: string): ChargeRegain | null => {
+      if (amount === 'all') {
+        return { kind: 'all' };
+      }
+      if (/^\d+$/.test(amount)) {
+        return { kind: 'fixed', charges: Number(amount) };
+      }
+      const dice = parseDiceExpression(amount);
+      return dice === null ? null : { kind: 'dice', dice };
+    };
+    for (const [phrase, amount, when] of charges) {
+      expect({ phrase, typed: chargeRegain(amount ?? '') !== null, when }).toEqual({ phrase, typed: true, when: 'daily at dawn' });
+    }
+    expect(new Set(charges.map(([, amount]) => chargeRegain(amount ?? '')?.kind))).toEqual(new Set(['dice', 'fixed', 'all']));
+    // The d3 D920 added is among them: "regains 1d3 expended charges".
+    expect(charges.some(([, amount]) => amount === '1d3')).toBe(true);
+  });
+
   it('a free object interaction is the one Interacting with Things grants', () => {
     const text = LINES.slice(795, 804).map((line) => line.slice(55)).join(' ');
     expect(text).toMatch(/interact with\s+one object or feature of the environment for free,\s+during either your move or action/);
@@ -129,11 +180,16 @@ describe('the duplicates SRD-VOCAB replaces', () => {
     expect([templateShapes, actionCosts, statblockRecharges]).toEqual([true, true, true]);
   });
 
-  it('differ from it only where an owner decision or a later unit says they do', () => {
-    // The planner's owner-chosen dice (D34) lack the d3 the SRD prints 19 times.
-    const plannerLacksD3: Equal<Exclude<DieSize, PlannerDieSize>, 3> = true;
-    // The database's spell areas have four shapes; the Part A rule asks for six.
+  it('differ from it only where a named unit finishes the migration', () => {
+    // The database's spell areas have four shapes; SPELL-EFFECT-FACTS moves the
+    // catalogue to the six-shape AreaOfEffect (enums.ts spellAreaShapes).
     const databaseLacksTwoShapes: Equal<Exclude<AreaShape, SpellAreaShape>, 'cube' | 'emanation'> = true;
-    expect([plannerLacksD3, databaseLacksTwoShapes]).toEqual([true, true]);
+    expect(databaseLacksTwoShapes).toBe(true);
+  });
+
+  it('is the one die list the planner and the probability folds use (D920)', () => {
+    const plannerDiceAreTheVocabulary: Equal<DiceConfig['basicDieSize'], DieSize> = true;
+    const foldDiceAreTheVocabulary: Equal<DicePool['die'], DieSize> = true;
+    expect([plannerDiceAreTheVocabulary, foldDiceAreTheVocabulary]).toEqual([true, true]);
   });
 });

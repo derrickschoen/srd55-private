@@ -12,9 +12,8 @@
  * (`docs/srd/source/weapons-table.txt`) and the backgrounds print `GP`
  * (`docs/srd/source/backgrounds.txt`), but neither states what a gold piece is
  * worth in copper. These five rates are therefore the standard 5e values
- * carried as a DECLARED CONSTANT, in the same posture `dieSizes` takes towards
- * the owner's die list — recorded as unsourced rather than dressed up with a
- * citation it does not have. If a rate is wrong, one edit here corrects every
+ * carried as a DECLARED CONSTANT — recorded as unsourced rather than dressed up
+ * with a citation it does not have. If a rate is wrong, one edit here corrects every
  * derived value, and the `coin, in copper pieces` suite in
  * `tests/unit/domain/spell-components.test.ts` pins all five by name and rate,
  * so the edit cannot be silent. THE FILE NAME IS PART OF THE CLAIM: this

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dieSizes } from '../../../src/domain/enums';
+import { DIE_SIZES } from '../../../src/domain/srd-vocabulary';
 import {
   damageFlatModifier,
   positiveDiceCount,
@@ -112,7 +112,7 @@ function weightOf(distribution: DamageOutcomeDistribution): number {
 
 describe('normalised distribution shape', () => {
   it('enumerates every dice pool as a contiguous ascending run summing to one', () => {
-    for (const die of dieSizes) {
+    for (const die of DIE_SIZES) {
       for (let count = 1; count <= 6; count += 1) {
         const distribution = enumerateDicePool({
           count: positiveDiceCount(count),
@@ -136,7 +136,7 @@ describe('normalised distribution shape', () => {
   });
 
   it('keeps mixed dice and modifiers ascending, clamped at zero, and normalised', () => {
-    for (const first of dieSizes) {
+    for (const first of DIE_SIZES) {
       for (const modifier of [-40, -7, -1, 0, 3, 25]) {
         const components: readonly DamageComponent[] = [
           { kind: 'dice', pool: { count: positiveDiceCount(2), die: first } },

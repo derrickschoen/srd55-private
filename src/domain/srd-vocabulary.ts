@@ -1,3 +1,4 @@
+import type { Ability } from './enums';
 import type { Brand } from './ids';
 
 /**
@@ -13,19 +14,42 @@ import type { Brand } from './ids';
  * and the database schema already import `src/domain` and neither imports
  * `src/rules`; a vocabulary under `src/rules` would add those two edges.
  *
- * Duplicates, and when each one goes (see the RULE-INDEX unit's report):
- * - NOW, as the definition: `Feet` and `feet()` (combat `values.ts` re-exports
- *   them), `conditionNames`/`ConditionName` (combat `conditions.ts` re-exports
- *   them), `damageTypes`/`KnownDamageType` and `KnownConditionType` (domain
+ * ONE LIST PER SUBJECT. Merged into this module (their old declarations are
+ * gone or are re-exports that name the unit that deletes them):
+ * - `Feet` and `feet()` (combat `values.ts` re-exports them),
+ *   `conditionNames`/`ConditionName` (combat `conditions.ts` re-exports them),
+ *   `damageTypes`/`KnownDamageType` and `KnownConditionType` (domain
  *   `enums.ts`; its duplicate `conditionTypes` list is deleted).
- * - LATER, pinned equal by compile-time checks until then
- *   (tests/unit/domain/srd-vocabulary.test.ts): the engine's `AreaTemplate`
- *   shapes (templates.ts) and `ActionCost` (events.ts).
- * - LATER, and deliberately different today: the engine's open
- *   `DamageType = Brand<string>` and `DieSides` (values.ts), the stat-block
- *   recharge literal (statblock.ts), the planner's owner-chosen `dieSizes`
- *   (enums.ts, D34: no d3), and the database's four-shape `spellAreaShapes`
- *   (enums.ts; the Part A rule asks for six).
+ * - The die sizes: `DIE_SIZES` is the ONE list for rule data and for planning
+ *   (owner D920, "Add d3 everywhere", reopening D34). The planner, the damage
+ *   probability folds and the sourced subsets in `enums.ts` all use it.
+ *
+ * UNFINISHED MIGRATIONS, each with the unit that finishes it. Until then each
+ * is pinned by a compile-time check in tests/unit/domain/srd-vocabulary.test.ts,
+ * so it cannot drift further:
+ * - the engine's `AreaTemplate` shapes (templates.ts): pinned EQUAL to
+ *   `AreaShape`; merged by EFFECT-VOCAB-CONVERGE.
+ * - the engine's `ActionCost` (events.ts): pinned EQUAL to `EconomyCost` less
+ *   the object interaction; merged by ACTIONS-COMPLETE.
+ * - the stat-block recharge literal (statblock.ts): pinned a SUBSET of
+ *   `RechargeMinimum`; replaced by `Usage` in MON-VOCAB.
+ * - the database's `spellAreaShapes` (enums.ts): four of the six shapes;
+ *   SPELL-EFFECT-FACTS gives the catalogue the six-shape `AreaOfEffect`.
+ * - the engine's `DamageType` (values.ts) is an OPEN branded string, and it
+ *   cannot close, because user content carries homebrew damage types into
+ *   combat and must keep them (AGENTS.md's trap: a closed enum rejects
+ *   homebrew, a data-loss bug). The consumers that block it: species and
+ *   subclass authoring store a homebrew type through the domain's passthrough
+ *   `DamageType` (src/authoring/species-publisher.ts; its test stores 'Void'),
+ *   content packs and exported parties convert pack damage types into the
+ *   engine's (src/vtt/party-pack.ts), and the engine's own scripted skirmish
+ *   deals 'Scripted force' (src/vtt/scripted-skirmish.ts). The target is the
+ *   domain's `DamageType` — the thirteen known types plus passthrough — in the
+ *   engine, and this module's closed `DamageType` for SRD data;
+ *   EFFECT-VOCAB-CONVERGE.
+ * - the engine's `DieSides` (values.ts) is an open integer brand (content
+ *   packs pass the sides they state through `dieSides`, src/vtt/party-pack.ts);
+ *   closing it to `DieSize` is EFFECT-VOCAB-CONVERGE's.
  *
  * Every closed list here is cited to the SRD text it transcribes, and the
  * vocabulary test re-reads those spans: a hand list is a pinned transcription,
@@ -201,6 +225,31 @@ export type RechargeMinimum = (typeof RECHARGE_MINIMUMS)[number];
 export const PER_DAY_USES = [1, 2, 3, 4, 5, 6] as const;
 export type PerDayUses = (typeof PER_DAY_USES)[number];
 
+/**
+ * How many uses a feature has before it is regained by a rest (Rules
+ * Glossary and class text): a printed number, a number equal to the Proficiency
+ * Bonus ("a number of times equal to your Proficiency Bonus"), an ability
+ * modifier with the SRD's floor of one ("equal to your Wisdom modifier
+ * (minimum of once)"), or a column of the owning class's Features table ("the
+ * number of times shown for your Barbarian level in the Rages column").
+ */
+export type UsesFormula =
+  | { readonly kind: 'fixed'; readonly uses: number }
+  | { readonly kind: 'proficiency_bonus' }
+  | { readonly kind: 'ability_modifier'; readonly ability: Ability; readonly minimum: 1 }
+  | { readonly kind: 'class_table' };
+
+/**
+ * What a Short Rest regains. A Long Rest regains every use in every form the
+ * SRD prints: "you regain one expended use when you finish a Short Rest, and
+ * you regain all expended uses when you finish a Long Rest" (`one`); "you
+ * regain all expended uses when you finish a Long Rest" and "you can't use it
+ * again until you finish a Long Rest" (`none`); "...a Short or Long Rest"
+ * (`all`). The vocabulary test re-reads every such sentence.
+ */
+export const SHORT_REST_REGAINS = ['none', 'one', 'all'] as const;
+export type ShortRestRegain = (typeof SHORT_REST_REGAINS)[number];
+
 export type Usage =
   | { readonly kind: 'at_will' }
   /** `X/Day`: X uses, regained on a Long Rest; `each` for `X/Day Each`. */
@@ -208,19 +257,64 @@ export type Usage =
   /** `Recharge X–6`: one use; at the start of each of its turns a 1d6 of X or more regains it, as does a Short or Long Rest. */
   | { readonly kind: 'recharge_roll'; readonly minimum: RechargeMinimum }
   /** `Recharge after a Short or Long Rest`: one use, regained by either rest. */
-  | { readonly kind: 'recharge_after_rest' };
+  | { readonly kind: 'recharge_after_rest' }
+  /** A class, species or feat feature's uses, regained by rests. */
+  | { readonly kind: 'per_rest'; readonly uses: UsesFormula; readonly shortRest: ShortRestRegain }
+  /**
+   * A magic item's charges: it "has N charges" and regains some daily at dawn.
+   * Every regain the SRD prints is daily at dawn (The Next Dawn, Magic Items).
+   */
+  | { readonly kind: 'charges'; readonly charges: number; readonly regain: ChargeRegain; readonly at: 'dawn' };
+
+/**
+ * What a charged item regains: a printed dice expression ("regains 1d6 + 1
+ * expended charges"), a printed number ("regains 1 expended charge"), or every
+ * charge ("regain all expended charges").
+ */
+export type ChargeRegain =
+  | { readonly kind: 'dice'; readonly dice: DiceExpression }
+  | { readonly kind: 'fixed'; readonly charges: number }
+  | { readonly kind: 'all' };
+
+/* ==========================================================================
+ * DIFFICULT TERRAIN, WHILE FLYING — A HOUSE RULE (owner D921 Q3)
+ * ========================================================================== */
+
+/**
+ * SRD 5.2.1 has no rule that flying ignores difficult terrain; the owner ruled
+ * one (D921 Q3, "Yes, tag ground/volume/creature (Recommended)", a house
+ * ruling beside D905). Every difficult-terrain source carries one closed tag:
+ * - `ground`: rubble, snow, undergrowth, furniture, ground-based magic such as
+ *   Spike Growth — ignored while flying;
+ * - `volume`: an effect filling a 3-D volume in the air or stating a height
+ *   (Web's cube, Fog Cloud, Sleet Storm) — applies to flyers;
+ * - `creature`: another creature's space — applies; the 2-D engine has no
+ *   heights, so passing through a square is not flying over it.
+ * Data only here; MOVE-COST with MOVEMENT-MODES executes it
+ * (src/rules/srd/owner-rulings.ts `flyer-terrain-tags`).
+ */
+export const DIFFICULT_TERRAIN_TAGS = ['ground', 'volume', 'creature'] as const;
+export type DifficultTerrainTag = (typeof DIFFICULT_TERRAIN_TAGS)[number];
+
+export const DIFFICULT_TERRAIN_APPLIES_WHILE_FLYING = {
+  ground: false,
+  volume: true,
+  creature: true,
+} as const satisfies { readonly [T in DifficultTerrainTag]: boolean };
 
 /* ==========================================================================
  * DICE
  * ========================================================================== */
 
 /**
- * The die sizes the SRD text prints in dice expressions, counted over
- * docs/srd/full/srd-5.2.1.txt: d3 19 times (trap darts, magic item charges),
- * d4 232, d6 570, d8 499, d10 371, d12 93, d20 69, d100 31. No other size
- * occurs. This is a DIFFERENT list from the planner's `dieSizes` in
- * `enums.ts`, which the owner closed without d3 (D34); whether the two merge is
- * an owner question recorded by the RULE-INDEX unit.
+ * THE DIE SIZES: the ONE list for rule data and for planning (owner D920, "Add
+ * d3 everywhere", which reopened D34's planner list of 4, 6, 8, 10, 12, 20 and
+ * 100). It is exactly the sizes the SRD text prints in dice expressions,
+ * counted over docs/srd/full/srd-5.2.1.txt: d3 19 times (trap darts, magic
+ * item charges), d4 232, d6 570, d8 499, d10 371, d12 93, d20 69, d100 31. No
+ * other size occurs. The planner's die control, the damage-probability folds
+ * (src/simulation/probability.ts) and the sourced subsets in `enums.ts`
+ * (`hitDieSizes`, `martialArtsDieSizes`) all use it.
  */
 export const DIE_SIZES = [3, 4, 6, 8, 10, 12, 20, 100] as const;
 export type DieSize = (typeof DIE_SIZES)[number];

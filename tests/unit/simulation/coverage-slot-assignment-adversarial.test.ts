@@ -9,7 +9,8 @@
 import '../../../src/simulation/coverage';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { damageType, type DieSize } from '../../../src/domain/enums';
+import { damageType } from '../../../src/domain/enums';
+import type { DieSize } from '../../../src/domain/srd-vocabulary';
 import {
   damageFlatModifier,
   positiveDiceCount,

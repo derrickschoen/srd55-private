@@ -844,8 +844,9 @@ test('planner parity flows persist override, clear, selection, acknowledgement, 
   // THE DIE-SIZE CONTROL OFFERS THE VOCABULARY AND NOTHING ELSE.
   //
   // This list is the owner's, transcribed here by hand rather than imported:
-  // "We only should have 4,6,8,10,12,20,100." The control is populated from
-  // `dieSizes` in `src/domain/enums.ts`, and this is the only place the
+  // "We only should have 4,6,8,10,12,20,100." (D34), then "Add d3 everywhere"
+  // (D920). The control is populated from `DIE_SIZES` in
+  // `src/domain/srd-vocabulary.ts`, and this is the only place the
   // rendered options can be seen at all — vitest runs the unit suite under
   // `environment: 'node'`, so no unit test can call the renderer. A `<select>`
   // is also why the closed set costs nothing here: the user PICKS, and cannot
@@ -854,14 +855,14 @@ test('planner parity flows persist override, clear, selection, acknowledgement, 
   await expect(dieSize).toHaveValue('8');
   await expect(
     dieSize.locator('option'),
-  ).toHaveText(['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100']);
+  ).toHaveText(['d3', 'd4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100']);
   // The VALUES as well as the labels: `d8` is rendered from the number, so a
   // label check alone could pass while the option carried something else.
   expect(
     await dieSize.locator('option').evaluateAll((options) =>
       options.map((option) => (option as HTMLOptionElement).value),
     ),
-  ).toEqual(['4', '6', '8', '10', '12', '20', '100']);
+  ).toEqual(['3', '4', '6', '8', '10', '12', '20', '100']);
 
   await page.getByLabel('Attack profile').selectOption(
     'manual-chromatic-orb',
