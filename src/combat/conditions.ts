@@ -1,26 +1,11 @@
 import type { Ability } from '../domain/enums';
+import type { ConditionName } from '../domain/srd-vocabulary';
 import type { RollMode } from './resolution';
 import type { CombatantId } from './values';
 
-export const conditionNames = [
-  'Blinded',
-  'Charmed',
-  'Deafened',
-  'Exhaustion',
-  'Frightened',
-  'Grappled',
-  'Incapacitated',
-  'Invisible',
-  'Paralyzed',
-  'Petrified',
-  'Poisoned',
-  'Prone',
-  'Restrained',
-  'Stunned',
-  'Unconscious',
-] as const;
-
-export type ConditionName = (typeof conditionNames)[number];
+// The fifteen conditions are defined once, by the SRD vocabulary (D918). This
+// re-export goes when CONDITION-D20 moves this module's importers to it.
+export { CONDITION_NAMES as conditionNames, type ConditionName } from '../domain/srd-vocabulary';
 export type ExhaustionLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
 type SourceConditionName = 'Charmed' | 'Frightened' | 'Grappled';

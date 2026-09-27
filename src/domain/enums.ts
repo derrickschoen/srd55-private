@@ -1,3 +1,9 @@
+import {
+  DAMAGE_TYPES,
+  type ConditionName,
+  type DamageType as SrdDamageType,
+} from './srd-vocabulary';
+
 export const abilities = [
   'strength',
   'dexterity',
@@ -388,48 +394,25 @@ export type SpellSchool =
 export const spellSchool = (value: string): SpellSchool =>
   value as SpellSchool;
 
-/** The thirteen entries in the SRD 5.2.1 Damage Types table. */
-export const damageTypes = [
-  'Acid',
-  'Bludgeoning',
-  'Cold',
-  'Fire',
-  'Force',
-  'Lightning',
-  'Necrotic',
-  'Piercing',
-  'Poison',
-  'Psychic',
-  'Radiant',
-  'Slashing',
-  'Thunder',
-] as const;
-export type KnownDamageType = (typeof damageTypes)[number];
+/**
+ * The thirteen entries in the SRD 5.2.1 Damage Types table, defined once by the
+ * SRD vocabulary (D918). `DamageType` below adds homebrew passthrough for the
+ * import boundary.
+ */
+export const damageTypes = DAMAGE_TYPES;
+export type KnownDamageType = SrdDamageType;
 export type DamageType =
   | KnownDamageType
   | PassthroughVocabulary<'DamageType'>;
 export const damageType = (value: string): DamageType =>
   value as DamageType;
 
-/** The fifteen conditions named by the SRD 5.2.1 Condition glossary entry. */
-export const conditionTypes = [
-  'Blinded',
-  'Charmed',
-  'Deafened',
-  'Exhaustion',
-  'Frightened',
-  'Grappled',
-  'Incapacitated',
-  'Invisible',
-  'Paralyzed',
-  'Petrified',
-  'Poisoned',
-  'Prone',
-  'Restrained',
-  'Stunned',
-  'Unconscious',
-] as const;
-export type KnownConditionType = (typeof conditionTypes)[number];
+/**
+ * The fifteen conditions named by the SRD 5.2.1 Condition glossary entry: the
+ * SRD vocabulary's `ConditionName` (D918). The list that used to be declared
+ * here a second time is gone; `ConditionType` below adds homebrew passthrough.
+ */
+export type KnownConditionType = ConditionName;
 export type ConditionType =
   | KnownConditionType
   | PassthroughVocabulary<'ConditionType'>;

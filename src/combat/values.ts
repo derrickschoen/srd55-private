@@ -1,6 +1,8 @@
 import type { Brand } from '../domain/ids';
 
-export type Feet = Brand<number, 'Feet'>;
+// Distance is defined once, by the SRD vocabulary (src/domain/srd-vocabulary.ts,
+// D918). This re-export goes when the engine's importers move to it.
+export { feet, type Feet } from '../domain/srd-vocabulary';
 export type ArmorClass = Brand<number, 'ArmorClass'>;
 export type DifficultyClass = Brand<number, 'DifficultyClass'>;
 export type DieSides = Brand<number, 'DieSides'>;
@@ -28,11 +30,6 @@ function nonNegativeFinite(value: number, label: string): number {
     throw new RangeError(`${label} must be a finite, non-negative number.`);
   }
   return value;
-}
-
-/** Establishes the non-negative, finite invariant for spatial measurements. */
-export function feet(value: number): Feet {
-  return nonNegativeFinite(value, 'Feet') as Feet;
 }
 
 export function armorClass(value: number): ArmorClass {
