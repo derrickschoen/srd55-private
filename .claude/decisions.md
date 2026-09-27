@@ -2868,3 +2868,51 @@ OWNER, verbatim choice: "Accept, and tune later".
 - PC-TUNE comes after pcac lands and after COVER-EDGE+REGEN, because sealed walls change the same encounters.
 
 Next free id: D914.
+
+## D914 — 2026-09-27 07:47 — pcac LANDED; PATH-ONE r1 and FOOTPRINT plan r2 REVISE; recorder-A and IMPORT-SLIM analysis harvested; WASM quiet bench contaminated
+
+pcac LANDED: main = a435f3f5, 24 commits (claude/pcac-onmain 57eb6d92, rebased onto a9c60a51) cherry-picked onto 8e75ad3c. The tree equals the timed B arm ec14b4d0 except .claude/decisions.md.
+- Codex r6 (gpt-6-sol xhigh): APPROVE on the rebase.
+- Timed pair (run and read by me; void rule v2; all VALID; passed): A = main 36a480f8, B = + pcac.
+  - Initial 187.5 → 199.2 s; total 198.6 → 212.4 s (+13.8 s), inside the +30 s guard.
+  - 11,657 → 11,704 tests.
+  - test_cpu 18.8 s and 17.4 s came from agent test slots (D885 allows one) and stay under the void threshold.
+- Playwright (run by me on the B arm, PLAYWRIGHT_PORT set):
+  - tests/browser/ai-dm-board-snapshot.spec.ts: 2/2 passed.
+  - vtt-handoff runtime-parity.spec.ts + worker.spec.ts: 2/2 passed with VTT_HANDOFF_ARTIFACT=dev and their own config (-c tests/browser/vtt-handoff/playwright.config.ts). The main config does not collect that folder; my first run missed it and I re-ran it.
+- survival-seeds = f10cc246 on main, as accepted in D913.
+
+WASM QUIET BENCH: CONTAMINATED.
+- The import-slim graph-census agent reports its own vite-node runs at 06:04:39–41 and plain-node scripts during 06:03–06:07, inside the bench (06:03:25–06:07:13). Load was 2.7–4.7.
+- Reported ratios (simd/scalar median 0.946) are contended evidence only. A re-run on a quiet box is owed; it cannot change D912's "no WASM".
+- My process gap: queue5 waited for codex processes only, not for workflow agents. Future quiet queues run only when no workflow is running.
+
+REVIEWS:
+- PATH-ONE r1 (gpt-6-sol xhigh) REVISE:
+  - P2: M6 (the second search restored) survives. Output-equivalent is not performance-equivalent, so it needs an exact killer.
+  - P2: a timed A/B pair is owed (D888).
+  - P3: the mutation tally is really 4 compiling runtime kills + 1 compile error + 1 survivor.
+  - All accepted.
+- FOOTPRINT plan r2 (gpt-6-sol xhigh) REVISE, 3 P1 + 1 P2, all accepted:
+  - P1: the order conflicts with D911. FOOTPRINT goes first under the rule actually present; interim brutal repairs keep tests green; the study amendment follows regeneration.
+  - P1: v12 checkpoint migration can discard a saved squeezed placement; needs a witness plus an explicit recovery path.
+  - P1: migrated history loses reducer-replay verification; the original transition must stay verifiable, with a recomputed-checksum negative control. This keeps plan Q3 open and blocking.
+  - P2: M14's killer cannot distinguish row-major from column-major; needs a tie case.
+  - Round 3 of 3 follows (consensus cap).
+
+HARVESTED (agent-reported):
+- RECORDER-A, claude/recordera e3b19cf8 (3 commits):
+  - undeclared inputs 165 + 4 → 31 + 4;
+  - the DND_LANE_INTEL_MODE false green shown red first and fixed;
+  - 17/17 mutants killed; pins unchanged.
+  - Codex review owed.
+- IMPORT-SLIM (3 lenses + synthesis; reports in .tmp/runs/import-slim/*/report.md):
+  - Slimming saves about 0 s at the gate: under isolate:false each worker loads the module union once.
+  - Real costs: the engine-child bundle and boot, shipped app JS (the 2.1 MB SRD shipped 3 times), and single-file runs.
+  - One mechanism dominates: module-scope parsing of the SRD text via two narrow bridges.
+    - tactical-evaluator → probability → coverage. Moving one 1.2 KB function (P1): engine child 3.97 → 1.34 MB, boot 367 → 155 ms (synthesis-measured).
+    - class-resources-srd. With P1 + P3, shipped JS 14.77 → 7.54 MB.
+  - Two fail-open holes in the verdict cache (scripts/test-affected.mjs): import.meta.glob targets never enter the closure (the MetaProperty check), and `import { type X }` is treated as erased. 63 of 658 tests are affected. The analysts recommend fixing these first.
+  - Owner question pending.
+
+Next free id: D915.
