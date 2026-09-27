@@ -66,6 +66,7 @@ import vttContextTokenUsage from '../../drizzle/0062_vtt_context_token_usage.sql
 import vttContextRollover from '../../drizzle/0063_vtt_context_rollover.sql?raw';
 import vttCreatureSpace from '../../drizzle/0064_vtt_creature_space.sql?raw';
 import vttObservationHistory from '../../drizzle/0065_vtt_observation_history.sql?raw';
+import speciesTemplateSenses from '../../drizzle/0066_species_template_senses.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -679,6 +680,14 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
     sql: vttObservationHistory,
     checksum: 'a3344dd16fa1985e6363d1f4df02e76c7ea4ff25a3cfa651f7f48e6300460d44',
     resultSchemaChecksum: 'e73b614050a8e31746c989d6a00dfbb061803979d0c17eda8dead1c2beeb81ca',
+  }),
+  // PC-EXPORT-TRUTH fix 1 (owner D923 Q10): an authored species states its
+  // senses. A new table only; no existing row gains a statement.
+  Object.freeze({
+    id: '0066_species_template_senses',
+    sql: speciesTemplateSenses,
+    checksum: '141d6c26844435f12e93bd9eca399fa9539886fd69d37602bf3aa5ed585ff4ee',
+    resultSchemaChecksum: 'a903420d08785c08efc77607b038e19c7e73a7515051bf16a22dab649a3ce730',
   }),
 ]);
 

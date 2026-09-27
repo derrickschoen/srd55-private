@@ -763,6 +763,13 @@ export const COLUMN_FACTS = {
     created_at: { base: 'degraded', notNull: false },
     updated_at: { base: 'degraded', notNull: false },
   },
+  species_template_senses: {
+    id: { base: 'integer', notNull: true },
+    species_template_id: { base: 'integer', notNull: true },
+    senses_json: { base: 'degraded', notNull: true },
+    created_at: { base: 'degraded', notNull: false },
+    updated_at: { base: 'degraded', notNull: false },
+  },
   species_template_trait_effects: {
     id: { base: 'integer', notNull: true },
     species_template_trait_id: { base: 'integer', notNull: true },

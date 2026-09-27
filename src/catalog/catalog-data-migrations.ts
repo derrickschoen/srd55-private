@@ -30,6 +30,7 @@ import skillExpertiseGrantsSource from '../grants/skill-expertise-grants.ts?raw'
 import spellEligibilitySource from '../eligibility/spell-selection-eligibility.ts?raw';
 import spellConstraintSource from '../eligibility/spell-selection-constraint.ts?raw';
 import storedProjectorSource from './stored-authored-content-projector-v1.ts?raw';
+import speciesSensesSource from './species-senses.ts?raw';
 import contentIdentitySource from './content-identity.ts?raw';
 import contentRegistrySource from './content-registry.ts?raw';
 import { reconcileSpeciesLineageContentV2 } from './reconcile-species-lineage-content-v2';
@@ -191,6 +192,13 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
           path: 'src/catalog/stored-authored-content-projector-v1.ts',
           bytes: storedProjectorSource,
         }),
+        // PC-EXPORT-TRUTH fix 1 (D923 Q10): the projector above reads and
+        // projects a species' stated senses through this module, so its bytes
+        // decide what a stored species projects to and are frozen with it.
+        Object.freeze({
+          path: 'src/catalog/species-senses.ts',
+          bytes: speciesSensesSource,
+        }),
         Object.freeze({
           path: 'src/catalog/content-identity.ts',
           bytes: contentIdentitySource,
@@ -261,8 +269,14 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
       // rows-unchanged for an image that has not yet run this migration: its
       // `ensureBundledSpeciesDefinitions` call now also writes that row. The
       // rows it RECONCILES (the Elf, Gnome and Tiefling lineages) are unchanged.
+      // Re-pinned 2026-09-27 for PC-EXPORT-TRUTH fix 1 (owner D923 Q10): the
+      // frozen projector reads and projects an authored species' STATED senses
+      // (new frozen source species-senses.ts). Bundled species state none, so
+      // every row this migration reads or writes projects byte-identically;
+      // the pin moves because D226 freezes source bytes. Images carrying the
+      // previous pin are refused with the typed reset remedy (D923 Q11).
       checksum:
-        'd7b0912c4bda32dd9fa90243416c5b83fd5dada253f085328bf58d6166240ef0',
+        'c11d45534e495b419e016cd1b1e62d9927fa5896b2fce1043591ad2b7594f890',
       run: reconcileSpeciesLineageContentV2,
     }),
   ]);

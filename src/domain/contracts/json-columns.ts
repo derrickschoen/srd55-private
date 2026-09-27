@@ -218,6 +218,11 @@ export const JSON_COLUMNS = {
     allowEmpty: true,
     reader: 'decodeGrantJson (src/grants/source-rule-reader.ts:94)',
   },
+  'species_template_senses.senses_json': {
+    shape: 'array',
+    allowEmpty: false,
+    reader: 'storedSpeciesSenses (src/catalog/stored-authored-content-projector-v1.ts) — each element { kind, range_feet }, each kind once; anything else is refused',
+  },
 } as const satisfies Partial<Record<EveryColumnKey, JsonColumnFact>>;
 
 export type JsonColumnKey = keyof typeof JSON_COLUMNS;

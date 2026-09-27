@@ -59,7 +59,7 @@ import {
   type ExecutedWeaponMastery,
   type SourcedNotExecutedWeaponMastery,
 } from '../rules/weapon-mastery-status';
-import { abilities, creatureSizes, damageTypes, skills, weaponMasteryProperties, type Ability, type KnownCreatureSize, type Skill } from '../domain/enums';
+import { abilities, creatureSizes, damageTypes, rangedSenseKinds, SENSE_RANGE_FEET, skills, weaponMasteryProperties, type Ability, type KnownCreatureSize, type Skill } from '../domain/enums';
 import { hitDieSizes, type HitDieSize } from '../domain/enums';
 import { exactValues } from '../domain/exact-table';
 import { TotalMap } from '../domain/total-map';
@@ -1164,14 +1164,11 @@ const passivesSchema = z.strictObject({
 const skillBonusRecordShape = Object.fromEntries(
   skills.map((skill) => [skill, modifierSchema]),
 ) as Record<Skill, typeof modifierSchema>;
-const RANGED_SENSE_KINDS = exactValues<'blindsight' | 'darkvision' | 'tremorsense' | 'truesight'>()(
-  'blindsight', 'darkvision', 'tremorsense', 'truesight',
-);
 const senseSchema = z.union([
   z.strictObject({ kind: z.literal('normal_sight') }),
   z.strictObject({
-    kind: z.enum(RANGED_SENSE_KINDS),
-    rangeFeet: integerSchema.min(1).max(1_000),
+    kind: z.enum(rangedSenseKinds),
+    rangeFeet: integerSchema.min(SENSE_RANGE_FEET.minimum).max(SENSE_RANGE_FEET.maximum),
   }),
 ]);
 type SenseWireInput = z.infer<typeof senseSchema>;
@@ -1181,7 +1178,7 @@ const SENSES_RULES = [
     'Senses must use unique kinds.',
   ),
 ] as const satisfies readonly PartyPackRule<readonly SenseWireInput[]>[];
-const sensesSchema = z.array(senseSchema).min(1).max(RANGED_SENSE_KINDS.length + 1)
+const sensesSchema = z.array(senseSchema).min(1).max(rangedSenseKinds.length + 1)
   .superRefine(refinementFromRules(SENSES_RULES));
 const SENSE_FEATURE_WIRE_NAMES = exactValues<SenseFeatureName>()('Stonecunning', "Devil's Sight");
 const SENSE_FEATURE_RULES = [

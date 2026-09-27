@@ -5,6 +5,7 @@ import type {
   ContentFingerprintReference,
   DenseSubclassContentProgression,
   SpeciesContentAggregate,
+  SpeciesSense,
   SubclassContentAggregate,
   SubclassContentProgressionRow,
   SubclassFeatureValueContribution,
@@ -94,10 +95,16 @@ import {
   contentIdentitySet,
   isContentFingerprintScheme,
   type ContentIdentitySequence,
+  type ContentIdentitySet,
   type ContentFingerprintDigest,
   type ContentKind,
   type DerivedContentIdentityV1,
 } from './content-identity';
+import {
+  canonicalSpeciesSenses,
+  decodeSpeciesSenses,
+  readStoredSpeciesSenses,
+} from './species-senses';
 import {
   resolveContentAggregate,
   type ContentFingerprintCandidate,
@@ -189,6 +196,41 @@ export class StoredAuthoredContentJsonError extends TypeError {
 
 function projectionError(message: string, options?: ErrorOptions): never {
   throw new StoredAuthoredContentProjectionError(message, options);
+}
+
+/**
+ * A species' sense statement as identity reads it (owner D923 Q10): absent
+ * stays absent — no payload key, so content that predates the field keeps its
+ * fingerprint — and a present one must decode, or the projection is refused.
+ */
+function statedSpeciesSensesPayload(
+  senses: unknown,
+  label: string,
+): { readonly senses?: ContentIdentitySet<SpeciesSense> } {
+  if (senses === undefined) return {};
+  const decoded = decodeSpeciesSenses(senses);
+  if (!decoded.ok) {
+    return projectionError(
+      `${label} senses${decoded.index === null ? '' : `[${String(decoded.index)}]`} are invalid (${decoded.problem}).`,
+    );
+  }
+  return { senses: canonicalSpeciesSenses(decoded.senses) };
+}
+
+/** The stored statement of one template: absent, or decoded, or refused. */
+function storedSpeciesSenses(
+  db: DatabaseContext,
+  templateId: number,
+  contentKey: ContentKey,
+): { readonly senses?: readonly SpeciesSense[] } {
+  const stored = readStoredSpeciesSenses(db, templateId);
+  if (stored === undefined) return {};
+  if (!stored.ok) {
+    return projectionError(
+      `species '${contentKey}' stored senses${stored.index === null ? '' : `[${String(stored.index)}]`} are invalid (${stored.problem}).`,
+    );
+  }
+  return { senses: stored.senses };
 }
 
 function nonEmpty(value: string, label: string): string {
@@ -1153,6 +1195,7 @@ function projectSpecies(
       ? null
       : canonicalOpenPassthroughValue(aggregate.alternate_size),
     walking_speed_feet: aggregate.walking_speed_feet,
+    ...statedSpeciesSensesPayload(aggregate.senses, 'species'),
     traits: contentIdentitySequence(aggregate.traits.map((trait) => ({
       ...projectedStoredFields(trait),
       name: trait.name,
@@ -1464,6 +1507,7 @@ function readSpecies(
     primary_size: root.size,
     alternate_size: root.alternate_size,
     walking_speed_feet: root.base_speed_feet,
+    ...storedSpeciesSenses(db, root.template_id, contentKey),
     traits,
     grants: authoringGrants(db, root.grant_rules, references, 'species grant_rules'),
   };
@@ -1552,6 +1596,7 @@ function readSpeciesV2(
     primary_size: root.size,
     alternate_size: root.alternate_size,
     walking_speed_feet: root.base_speed_feet,
+    ...storedSpeciesSenses(db, root.template_id, contentKey),
     traits: readSpeciesTraits(db, root.template_id),
     source_rules: projectedRules.sourceRules,
   }, {
@@ -1608,6 +1653,7 @@ export function projectSpeciesContentAggregateV2(
       ? null
       : canonicalOpenPassthroughValue(aggregate.alternate_size),
     walking_speed_feet: aggregate.walking_speed_feet,
+    ...statedSpeciesSensesPayload(aggregate.senses, 'species'),
     traits: contentIdentitySequence(aggregate.traits.map((trait) => ({
       name: trait.name,
       description: canonicalRuleText(trait.description),

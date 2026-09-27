@@ -4,7 +4,9 @@ import {
   characterLevels,
   extraAttackWeaponScopes,
   progressionTypes,
+  rangedSenseKinds,
   rulesEditions,
+  SENSE_RANGE_FEET,
   skills,
   spellSchools,
 } from '../domain/enums';
@@ -277,6 +279,19 @@ const baseDraft = {
   rules_edition: nullable(rulesEdition),
   reference_text: codePointText(AUTHORING_TEXT_LIMITS.referenceText),
 };
+/**
+ * `senses` is REQUIRED in the species document (owner D923 Q10): `null` is
+ * "not yet stated", `[]` is "normal sight only". It joined document version 1
+ * in place rather than as version 2 because no version-1 species draft can
+ * reach this codec: every local database from before PC-EXPORT-TRUTH fix 1
+ * carries a catalog data marker this build refuses until the database is
+ * reset (D923 Q11), and drafts travel in no export but a whole-database image.
+ */
+const speciesDraftSense = z.strictObject({
+  draft_item_uuid: draftItemUuid,
+  kind: nullable(z.enum(rangedSenseKinds)),
+  range_feet: nullableInteger(SENSE_RANGE_FEET.minimum, SENSE_RANGE_FEET.maximum),
+});
 const speciesV1 = z.strictObject({
   kind: z.literal('species'),
   ...baseDraft,
@@ -284,6 +299,7 @@ const speciesV1 = z.strictObject({
   primary_size: openVocabulary,
   alternate_size: nullable(openVocabulary),
   walking_speed_feet: nullableInteger(1, AUTHORING_NUMERIC_LIMITS.maximumSpeedFeet),
+  senses: nullable(z.array(speciesDraftSense).max(AUTHORING_LIST_LIMITS.sensesPerSpeciesDraft)),
   traits: z.array(z.strictObject({
     draft_item_uuid: draftItemUuid,
     name: shortText,
@@ -513,6 +529,8 @@ const FIELD_LABELS: Readonly<Record<string, string>> = Object.freeze({
   primary_size: 'Primary size',
   alternate_size: 'Alternate size',
   walking_speed_feet: 'Walking speed',
+  senses: 'Senses',
+  range_feet: 'Sense range',
   traits: 'Traits',
   features: 'Features',
   grants: 'Grants',
@@ -606,6 +624,8 @@ function fieldKey(path: readonly (string | number)[]): string | null {
 
 function fieldLabel(path: readonly (string | number)[]): string {
   const key = fieldKey(path);
+  // A sense row's `kind` is the sense, not the document's content kind.
+  if (key === 'kind' && path[0] === 'senses') return 'Sense';
   return key === null ? 'Draft' : FIELD_LABELS[key] ?? 'Field';
 }
 
@@ -620,7 +640,7 @@ function numericBound(
 ): string {
   const printed = String(value);
   const key = fieldKey(path);
-  if (key !== 'walking_speed_feet' && key !== 'speed_bonus_feet') return printed;
+  if (key !== 'walking_speed_feet' && key !== 'speed_bonus_feet' && key !== 'range_feet') return printed;
   return `${printed} ${value === 1 ? 'foot' : 'feet'}`;
 }
 

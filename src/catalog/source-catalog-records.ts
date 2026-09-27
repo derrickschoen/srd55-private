@@ -69,6 +69,7 @@ import {
   SourceCatalogInvalidGrantRuleError,
   SourceCatalogJsonSerializationError,
   SourceCatalogMissingEffectPayloadError,
+  SourceCatalogSpeciesSensesError,
   SourceCatalogNonZeroFieldError,
   SourceCatalogRequiredFieldError,
   SourceCatalogSourceKindMismatchError,
@@ -76,6 +77,7 @@ import {
   SourceCatalogStoreLocalFieldError,
   SourceCatalogUnknownFieldError,
 } from './source-catalog-records-errors';
+import { decodeSpeciesSenses } from './species-senses';
 
 export type SourceCatalogRecordKind = 'class' | 'feat' | 'species' | 'background';
 
@@ -718,8 +720,16 @@ function validateSpecies(aggregate: Record<string, unknown>): void {
   exactKeys(aggregate, 'aggregate', [
     'kind', 'name', 'rules_edition', 'reference_text', 'repeatable',
     'creature_type', 'primary_size', 'alternate_size', 'walking_speed_feet',
+    // Optional (owner D923 Q10): absent on content that predates stated senses.
+    'senses',
     'grants', 'traits',
   ]);
+  if (Object.hasOwn(aggregate, 'senses')) {
+    const senses = decodeSpeciesSenses(aggregate.senses);
+    if (!senses.ok) {
+      throw new SourceCatalogSpeciesSensesError('aggregate.senses', senses.index, senses.problem);
+    }
+  }
   boundedText(aggregate.name, 'aggregate.name', AUTHORING_TEXT_LIMITS.name);
   boundedString(aggregate.reference_text, 'aggregate.reference_text', AUTHORING_TEXT_LIMITS.referenceText);
   boolean(aggregate.repeatable, 'aggregate.repeatable');

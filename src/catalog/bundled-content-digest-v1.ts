@@ -319,6 +319,10 @@ const DIGEST_SLICES_V1: readonly DigestSliceV1[] = Object.freeze([
   root('species', 'species_definitions', { nameColumn: 'name' }),
   root('species', 'species_templates', { nameColumn: 'name' }),
   owned('species', 'species_template_traits', 'species_templates', 'species_template_id'),
+  // D923 Q10: a stated sense list is species content. Bundled SRD species state
+  // none here (their senses are the generated SRD table's), so this slice adds
+  // no rows to any bundled aggregate today; it keeps a future statement covered.
+  owned('species', 'species_template_senses', 'species_templates', 'species_template_id'),
   Object.freeze({
     kind: 'species',
     table: 'species_template_trait_effects',

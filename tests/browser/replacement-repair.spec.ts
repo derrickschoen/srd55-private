@@ -26,6 +26,8 @@ async function publishSpellSpecies(
   await page.getByLabel('Creature type').fill('Humanoid');
   await page.getByLabel('Primary size').fill('Medium');
   await page.getByLabel('Walking speed (feet)').fill('30');
+  // D923 Q10: a species states its senses; nothing is assumed.
+  await page.getByLabel('Senses', { exact: true }).selectOption('normal_sight');
   const grants = page.locator('.species-grant-card');
   if (await grants.count() === 0) {
     await page.getByRole('button', { name: 'Add grant' }).click();

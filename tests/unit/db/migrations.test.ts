@@ -399,6 +399,14 @@ const SCHEMA_BEFORE_VTT_OBSERVATION_HISTORY = DATABASE_MIGRATIONS
   .map((entry) => entry.sql)
   .join('\n');
 const VTT_OBSERVATION_HISTORY_MIGRATION = DATABASE_MIGRATIONS[VTT_OBSERVATION_HISTORY_INDEX]!;
+const SPECIES_TEMPLATE_SENSES_INDEX = DATABASE_MIGRATIONS.findIndex(
+  (entry) => entry.id === '0066_species_template_senses',
+);
+const SCHEMA_BEFORE_SPECIES_TEMPLATE_SENSES = DATABASE_MIGRATIONS
+  .slice(0, SPECIES_TEMPLATE_SENSES_INDEX)
+  .map((entry) => entry.sql)
+  .join('\n');
+const SPECIES_TEMPLATE_SENSES_MIGRATION = DATABASE_MIGRATIONS[SPECIES_TEMPLATE_SENSES_INDEX]!;
 
 /**
  * One character, three source instances (one of them deleted so the
@@ -4512,6 +4520,48 @@ describe('database migration chain', () => {
       `);
       expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
         VTT_OBSERVATION_HISTORY_MIGRATION.resultSchemaChecksum,
+      );
+      expect(databaseSchemaSignature(db)).toBe(schemaSignature(SCHEMA_BEFORE_SPECIES_TEMPLATE_SENSES));
+    } finally {
+      db.close();
+    }
+  });
+
+  it('0066 adds the species senses statement table and gives no existing species a statement', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(SCHEMA_BEFORE_SPECIES_TEMPLATE_SENSES);
+      db.exec(`
+        INSERT INTO catalog_content_identities
+          (content_kind, content_key, key_kind, catalog_layer, visibility, normalized_name)
+        VALUES ('species', '2024:species:dwarf', 'bundled-stable', 'bundled', 'listed', 'dwarf');
+        INSERT INTO species_templates (content_key, name, creature_type, size, base_speed_feet)
+        VALUES ('2024:species:dwarf', 'Dwarf', 'Humanoid', 'Medium', 30);
+      `);
+
+      db.exec(SPECIES_TEMPLATE_SENSES_MIGRATION.sql);
+
+      // A pre-existing species is UNSTATED, not "normal sight": no row.
+      expect(db.selectValue('SELECT count(*) FROM species_template_senses')).toBe(0);
+      const templateId = Number(db.selectValue('SELECT id FROM species_templates'));
+      // The CHECK holds the JSON shape: an object is not a sense list.
+      expect(() => db.exec({
+        sql: `INSERT INTO species_template_senses (species_template_id, senses_json) VALUES (?, ?)`,
+        bind: [templateId, '{"kind":"darkvision"}'],
+      })).toThrow(/CHECK constraint failed/u);
+      db.exec({
+        sql: `INSERT INTO species_template_senses (species_template_id, senses_json) VALUES (?, ?)`,
+        bind: [templateId, '[{"kind":"darkvision","range_feet":120}]'],
+      });
+      // One statement per template.
+      expect(() => db.exec({
+        sql: `INSERT INTO species_template_senses (species_template_id, senses_json) VALUES (?, ?)`,
+        bind: [templateId, '[]'],
+      })).toThrow(/UNIQUE constraint failed/u);
+      db.exec('DELETE FROM species_templates');
+      expect(db.selectValue('SELECT count(*) FROM species_template_senses')).toBe(0);
+      expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
+        SPECIES_TEMPLATE_SENSES_MIGRATION.resultSchemaChecksum,
       );
       expect(databaseSchemaSignature(db)).toBe(schemaSignature(schema));
     } finally {

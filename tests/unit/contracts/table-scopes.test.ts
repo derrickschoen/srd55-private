@@ -171,6 +171,8 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'named_feature_effects',
       ...APPLICATION_ADDITIONS,
       'species_definitions',
+      // D923 Q10: a template's stated senses, sorted before its siblings.
+      'species_template_senses',
       'species_template_trait_effects',
       'species_template_traits',
       'species_templates',
@@ -378,9 +380,10 @@ describe('table scope classification', () => {
     // character-owned share-lineage receipt table. Migration 0046 adds the
     // recipient's durable replacement-choice table. Migration 0051 adds the
     // ONE whole-database-only VTT revision stream table explicitly listed in
-    // the application-table oracle above.
-    expect(names).toHaveLength(88);
-    expect(new Set(names).size).toBe(88);
+    // the application-table oracle above. Migration 0066 adds the ONE
+    // species senses statement table (D923 Q10).
+    expect(names).toHaveLength(89);
+    expect(new Set(names).size).toBe(89);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 

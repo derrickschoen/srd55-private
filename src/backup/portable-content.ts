@@ -90,7 +90,7 @@ import {
   decodeStoredSupersedesReference,
   decodeStoredValueExpression,
 } from '../domain/contracts/row-rules';
-import { BackupValidationError, assertExactKeys, backupRecord } from './backup-version';
+import { BackupValidationError, assertExactKeys, assertKeysAllowingAbsent, backupRecord } from './backup-version';
 import {
   CONTENT_PROVENANCE_LIMITS,
   recordContentProvenance,
@@ -460,7 +460,14 @@ function projectPortableAggregate(
   scheme: ContentFingerprintScheme = CONTENT_FINGERPRINT_SCHEME_V1,
 ): { readonly edition: string; readonly name: string; readonly payload: unknown } {
   const object = backupRecord(aggregate, `Portable ${kind} aggregate`);
-  exactKeys(object, aggregateTopLevelKeys(kind, scheme), `Portable ${kind} aggregate`);
+  // A species MAY state its senses (owner D923 Q10); a file written before
+  // the field states none and still imports, as unstated content.
+  assertKeysAllowingAbsent(
+    object,
+    aggregateTopLevelKeys(kind, scheme),
+    kind === 'species' ? ['senses'] : [],
+    `Portable ${kind} aggregate`,
+  );
   if (object.kind !== kind) {
     throw new BackupValidationError(`Portable ${kind} aggregate kind disagrees with its envelope.`);
   }

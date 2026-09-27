@@ -5,6 +5,7 @@ import type {
   CreatureType,
   GrantRuleKind,
   ProgressionType,
+  RangedSenseKind,
   RulesEdition,
   Skill,
   SpellSchool,
@@ -143,8 +144,21 @@ export interface SpeciesAuthoringDraft
   readonly primary_size: string;
   readonly alternate_size: string | null;
   readonly walking_speed_feet: number | null;
+  /**
+   * The species' standing senses beyond normal sight. REQUIRED and never
+   * defaulted (owner D923 Q10): `null` until the author states them, which
+   * refuses publishing; `[]` is the statement "normal sight only".
+   */
+  readonly senses: readonly SpeciesAuthoringDraftSense[] | null;
   readonly traits: readonly SpeciesAuthoringDraftTrait[];
   readonly grants: readonly AuthoringDraftGrant[];
+}
+
+/** One sense row of a species draft; either half may still be unanswered. */
+export interface SpeciesAuthoringDraftSense {
+  readonly draft_item_uuid: HomebrewDraftItemUuid;
+  readonly kind: RangedSenseKind | null;
+  readonly range_feet: number | null;
 }
 
 export interface SpeciesAuthoringDraftTrait {
@@ -303,9 +317,30 @@ export interface SpeciesContentAggregate
   readonly primary_size: CreatureSize;
   readonly alternate_size: CreatureSize | null;
   readonly walking_speed_feet: number;
+  /**
+   * The senses the species states beyond normal sight; `[]` states normal
+   * sight only (owner D923 Q10). ABSENT only on species content that predates
+   * the field: bundled SRD species, whose senses are the generated SRD table's
+   * (`src/rules/generated/species-srd-tables.ts`), and portable content written
+   * before it. Absent is "unstated", never "normal sight": a character built
+   * from unstated authored content refuses export. A species published from
+   * the editor always states them (`StatedSpeciesContentAggregate`).
+   */
+  readonly senses?: readonly SpeciesSense[];
   readonly traits: readonly SpeciesContentTrait[];
   readonly grants: readonly AuthoringGrant[];
 }
+
+/** One standing sense a species states: an engine sense kind and its range. */
+export interface SpeciesSense {
+  readonly kind: RangedSenseKind;
+  readonly range_feet: number;
+}
+
+/** What the species editor publishes: the senses are always stated. */
+export type StatedSpeciesContentAggregate = SpeciesContentAggregate & {
+  readonly senses: readonly SpeciesSense[];
+};
 
 export interface SpeciesContentTrait {
   readonly sort_order: number;

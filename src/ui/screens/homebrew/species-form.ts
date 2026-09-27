@@ -6,6 +6,7 @@ import type {
   PublishResult,
   SpellGrantAuthoringReferences,
   SpeciesAuthoringDraft,
+  SpeciesAuthoringDraftSense,
   SpeciesAuthoringDraftTrait,
   StoredHomebrewDraft,
 } from '../../../authoring/contracts';
@@ -16,10 +17,13 @@ import type { HomebrewDraftItemUuid } from '../../../authoring/ids';
 import {
   creatureSizes,
   creatureTypes,
+  rangedSenseKinds,
   rulesEditions,
+  SENSE_RANGE_FEET,
   skills,
   spellSchools,
   type CharacterEffectKind,
+  type RangedSenseKind,
   type Skill,
 } from '../../../domain/enums';
 import { RpcError } from '../../../rpc/protocol';
@@ -216,6 +220,13 @@ function validationIssues(error: unknown): readonly AuthoringValidationIssue[] |
   return valid ? issues as unknown as readonly AuthoringValidationIssue[] : null;
 }
 
+const SENSE_LABELS = {
+  blindsight: 'Blindsight',
+  darkvision: 'Darkvision',
+  tremorsense: 'Tremorsense',
+  truesight: 'Truesight',
+} as const satisfies Readonly<Record<RangedSenseKind, string>>;
+
 function previewList(
   preview: PublishPreview,
   draft: SpeciesAuthoringDraft,
@@ -247,6 +258,14 @@ function previewList(
   );
   root.append(name, creature, size, element('p', {
     text: `Rules edition: ${rulesEditionLabel(aggregate.rules_edition)}; walking speed: ${String(aggregate.walking_speed_feet)} feet.`,
+  }), element('p', {
+    className: 'species-senses-preview',
+    text: `Senses: ${aggregate.senses === undefined
+      ? 'not stated'
+      : aggregate.senses.length === 0
+        ? 'normal sight only'
+        : `normal sight, ${aggregate.senses.map((sense) =>
+          `${SENSE_LABELS[sense.kind]} ${String(sense.range_feet)} feet`).join(', ')}`}.`,
   }));
   const traits = element('ol', { attributes: { 'aria-label': 'Trait preview' } });
   for (const trait of aggregate.traits) {
@@ -280,6 +299,141 @@ function previewList(
     root.append(reference);
   }
   return root;
+}
+
+type SensesStatement = '' | 'normal_sight' | 'listed';
+
+function sensesStatement(senses: SpeciesAuthoringDraft['senses']): SensesStatement {
+  if (senses === null) return '';
+  return senses.length === 0 ? 'normal_sight' : 'listed';
+}
+
+/**
+ * THE SPECIES' SENSES, A REQUIRED FIELD WITH NO DEFAULT (owner D923 Q10).
+ *
+ * The author answers one question first — "Choose…", "Normal sight only" or
+ * "Normal sight and these senses" — and only the last shows sense rows. The
+ * unanswered state is kept as `null` and refuses publishing, so a species can
+ * never reach a character with a sight nobody stated.
+ */
+function renderSensesSection(options: {
+  /** The LIVE statement: a row edit reads it, never the one rendered. */
+  readonly senses: () => SpeciesAuthoringDraft['senses'];
+  readonly itemUuid: () => HomebrewDraftItemUuid;
+  readonly pathAttribute: (path: readonly (string | number)[]) => Readonly<Record<string, string>>;
+  readonly onChange: (senses: SpeciesAuthoringDraft['senses'], rerender: boolean) => void;
+}): HTMLElement {
+  const section = element('fieldset', { className: 'species-senses-section' });
+  section.append(element('legend', { text: 'Senses (required)' }));
+  const statement = element('select', {
+    attributes: {
+      id: 'species-senses-statement',
+      required: '',
+      ...options.pathAttribute(['senses']),
+    },
+  });
+  for (const [value, text] of [
+    ['', 'Choose…'],
+    ['normal_sight', 'Normal sight only'],
+    ['listed', 'Normal sight and the senses listed below'],
+  ] as const) {
+    statement.append(element('option', { text, attributes: { value } }));
+  }
+  statement.value = sensesStatement(options.senses());
+  statement.addEventListener('change', () => {
+    const current = options.senses();
+    switch (statement.value) {
+      case 'normal_sight':
+        options.onChange([], true);
+        return;
+      case 'listed':
+        options.onChange(
+          current !== null && current.length > 0
+            ? current
+            : [{ draft_item_uuid: options.itemUuid(), kind: null, range_feet: null }],
+          true,
+        );
+        return;
+      default:
+        options.onChange(null, true);
+    }
+  });
+  section.append(
+    ...labelledControl('Senses', statement.id, statement),
+    element('p', {
+      className: 'authoring-mechanic-disclosure',
+      text: 'Combat uses exactly these senses for a character of this species. Nothing is assumed when this is unanswered.',
+    }),
+  );
+  const senses = options.senses();
+  if (senses === null || senses.length === 0) return section;
+  const replace = (
+    senseIndex: number,
+    change: (sense: SpeciesAuthoringDraftSense) => SpeciesAuthoringDraftSense,
+  ): void => {
+    const live = options.senses() ?? [];
+    options.onChange(
+      live.map((current, index) => index === senseIndex ? change(current) : current),
+      false,
+    );
+  };
+  for (const [senseIndex, sense] of senses.entries()) {
+    const prefix = `species-sense-${sense.draft_item_uuid}`;
+    const row = element('div', {
+      className: 'species-sense-row',
+      attributes: { 'data-draft-item-uuid': sense.draft_item_uuid },
+    });
+    const kind = element('select', {
+      attributes: { id: `${prefix}-kind`, required: '', ...options.pathAttribute(['senses', senseIndex, 'kind']) },
+    });
+    kind.append(element('option', { text: 'Choose…', attributes: { value: '' } }));
+    for (const value of rangedSenseKinds) {
+      kind.append(element('option', { text: SENSE_LABELS[value], attributes: { value } }));
+    }
+    kind.value = sense.kind ?? '';
+    kind.addEventListener('change', () => {
+      const selected = rangedSenseKinds.find((candidate) => candidate === kind.value) ?? null;
+      replace(senseIndex, (current) => ({ ...current, kind: selected }));
+    });
+    const range = element('input', {
+      attributes: {
+        id: `${prefix}-range`, type: 'number', required: '',
+        min: String(SENSE_RANGE_FEET.minimum), max: String(SENSE_RANGE_FEET.maximum), step: '1',
+        ...options.pathAttribute(['senses', senseIndex, 'range_feet']),
+      },
+    });
+    range.value = sense.range_feet === null ? '' : String(sense.range_feet);
+    range.addEventListener('input', () =>
+      replace(senseIndex, (current) => ({ ...current, range_feet: nullableInteger(range.value) })));
+    const remove = element('button', {
+      className: 'button-secondary',
+      text: 'Remove sense',
+      attributes: { type: 'button', 'aria-label': `Remove sense ${String(senseIndex + 1)}` },
+    });
+    remove.addEventListener('click', () => {
+      const remaining = (options.senses() ?? []).filter((_current, index) => index !== senseIndex);
+      // Removing the last listed sense leaves the question unanswered, not
+      // "normal sight only": that is a statement the author makes.
+      options.onChange(remaining.length === 0 ? null : remaining, true);
+    });
+    row.append(
+      ...labelledControl(`Sense ${String(senseIndex + 1)}`, kind.id, kind),
+      ...labelledControl(`Sense ${String(senseIndex + 1)} range (feet)`, range.id, range),
+      remove,
+    );
+    section.append(row);
+  }
+  const add = element('button', {
+    className: 'button-secondary',
+    text: 'Add sense',
+    attributes: { type: 'button' },
+  });
+  add.addEventListener('click', () => options.onChange(
+    [...(options.senses() ?? []), { draft_item_uuid: options.itemUuid(), kind: null, range_feet: null }],
+    true,
+  ));
+  section.append(add);
+  return section;
 }
 
 /** Render one complete HA-7 species authoring session. */
@@ -424,6 +578,16 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
         text: 'Reference text is shown to the player but is not applied to sheet numbers.',
       }),
     ]);
+
+    const sensesSection = renderSensesSection({
+      senses: () => document.senses,
+      itemUuid,
+      pathAttribute,
+      onChange: (senses, rerender) => {
+        update({ ...document, senses });
+        if (rerender) render();
+      },
+    });
 
     const traitsSection = element('section', {
       className: 'species-traits-section',
@@ -1054,6 +1218,7 @@ export function renderSpeciesForm(options: SpeciesFormOptions): Cleanup {
     form.append(
       validationMount,
       rootFields,
+      sensesSection,
       traitsSection,
       grantsSection,
       element('div', { className: 'species-form-actions' }, [save, preview]),

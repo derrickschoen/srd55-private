@@ -1,3 +1,4 @@
+import type { SpeciesSensesProblem } from './species-senses';
 export type SourceCatalogFieldShape = 'object' | 'non_empty_text' | 'boolean';
 
 const SOURCE_CATALOG_FIELD_SHAPE_PHRASES: Readonly<
@@ -243,6 +244,25 @@ export class SourceCatalogBackgroundGrantKindError extends TypeError {
       `Catalog field 'aggregate.grants[${String(grant_index)}].kind' ` +
         `must be 'grant_source' for background content; received ` +
         `'${received_kind}'.`,
+    );
+  }
+}
+
+/**
+ * A species' stated senses (owner D923 Q10) that are not a list of distinct
+ * engine senses with in-range ranges. `index` is the offending entry, or null
+ * when the list itself is wrong.
+ */
+export class SourceCatalogSpeciesSensesError extends TypeError {
+  override readonly name = 'SourceCatalogSpeciesSensesError' as const;
+  constructor(
+    readonly field: string,
+    readonly index: number | null,
+    readonly problem: SpeciesSensesProblem,
+  ) {
+    super(
+      `Catalog field '${field}${index === null ? '' : `[${String(index)}]`}' ` +
+        `is not a stated species sense list (${problem}).`,
     );
   }
 }

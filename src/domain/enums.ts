@@ -444,6 +444,24 @@ export type CreatureType =
 export const creatureType = (value: string): CreatureType =>
   value as CreatureType;
 
+/**
+ * The standing senses a species or feature grants BEYOND normal sight: the
+ * engine's ranged `CombatSense` kinds (src/combat/statblock.ts; the rules
+ * layer proves the two lists equal at compile time). Closed, because each is
+ * an engine behaviour; a homebrew sense the engine cannot run stays trait
+ * prose. An authored species states its senses in these terms (D923 Q10).
+ */
+export const rangedSenseKinds = [
+  'blindsight',
+  'darkvision',
+  'tremorsense',
+  'truesight',
+] as const;
+export type RangedSenseKind = (typeof rangedSenseKinds)[number];
+
+/** Sense range bounds, shared by authored species and the party-pack wire. */
+export const SENSE_RANGE_FEET = Object.freeze({ minimum: 1, maximum: 1_000 } as const);
+
 /** The six categories in the SRD 5.2.1 Size glossary entry. */
 export const creatureSizes = [
   'Tiny',

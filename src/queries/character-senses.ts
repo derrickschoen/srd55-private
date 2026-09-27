@@ -1,10 +1,12 @@
 import { characterSourceCatalogResolution } from '../catalog/recorded-source-provenance';
+import { readStoredSpeciesSenses } from '../catalog/species-senses';
 import { sqlInteger, sqlString } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import { ACTIVE_SOURCE_INSTANCE_STATE } from '../domain/source-instance-state';
 import {
   characterSenses,
   type CharacterSenses,
+  type LineageDarkvision,
   type SpeciesSenseSource,
 } from '../rules/character-senses';
 import { SRD_SPECIES_SENSES, type SrdSpeciesName } from '../rules/generated/species-srd-tables';
@@ -18,13 +20,25 @@ export function bundledSrdSpeciesContentKey(name: SrdSpeciesName): string {
   return `${BUNDLED_ORIGIN_RULES_EDITION}:species:${name.toLowerCase().replaceAll(/[^a-z0-9]+/gu, '-')}`;
 }
 
+function lineageDarkvision(sheet: CharacterSheet): LineageDarkvision {
+  return sheet.lineage_darkvision === null
+    ? null
+    : sheet.lineage_darkvision.kind === 'known'
+      ? { kind: 'known', value: sheet.lineage_darkvision.value }
+      : { kind: 'unknown', detail: sheet.lineage_darkvision.detail };
+}
+
 /**
- * Which SRD species this character's copied species IS, established rather
- * than guessed: exactly one active species source, which the catalog
- * resolves to a BUNDLED SRD template, and whose copied name is still that
- * species' name. Anything else — no source, an authored or imported species,
- * a renamed copy — is `unsourced`, because nothing structured records its
- * senses.
+ * Where this character's species senses come from, established rather than
+ * guessed: exactly one active species source, which the catalog resolves,
+ * and whose copied name is still that species' name.
+ *
+ *  - A BUNDLED SRD species: the generated SRD table (`srd_species`).
+ *  - Any other catalog species that STATES its senses (an authored species,
+ *    owner D923 Q10): exactly that statement (`stated_species`).
+ *
+ * Anything else — no source, a renamed copy, a species whose content predates
+ * stated senses — is `unsourced`, and the export refuses rather than guess.
  */
 function speciesSenseSource(
   db: DatabaseContext,
@@ -55,20 +69,40 @@ function speciesSenseSource(
   const resolution = characterSourceCatalogResolution(db, sourceId, copiedName);
   const species = SRD_SPECIES_NAMES.find((name) =>
     name === copiedName && bundledSrdSpeciesContentKey(name) === resolution.content_key);
-  if (resolution.catalog_layer !== 'bundled' || species === undefined) {
+  if (resolution.catalog_layer === 'bundled' && species !== undefined) {
+    return { kind: 'srd_species', species, lineageDarkvision: lineageDarkvision(sheet) };
+  }
+  const template = resolution.content_key === null
+    ? null
+    : db.one(
+        'SELECT id, name FROM species_templates WHERE content_key = ?',
+        [resolution.content_key],
+        (row) => ({ id: sqlInteger(row, 'id'), name: sqlString(row, 'name') }),
+      );
+  if (template === null || template.name !== copiedName) {
     return {
       kind: 'unsourced',
-      detail: `${copiedName} is not a bundled SRD species, and no structured record states its senses.`,
+      detail: `${copiedName} is not a catalog species this character still copies, so its senses are not recorded.`,
+    };
+  }
+  const stated = readStoredSpeciesSenses(db, template.id);
+  if (stated === undefined) {
+    return {
+      kind: 'unsourced',
+      detail: `${copiedName} does not state its senses: open it in the species editor, state them and publish it again.`,
+    };
+  }
+  if (!stated.ok) {
+    return {
+      kind: 'unsourced',
+      detail: `${copiedName}'s stored senses are invalid (${stated.problem}).`,
     };
   }
   return {
-    kind: 'srd_species',
-    species,
-    lineageDarkvision: sheet.lineage_darkvision === null
-      ? null
-      : sheet.lineage_darkvision.kind === 'known'
-        ? { kind: 'known', value: sheet.lineage_darkvision.value }
-        : { kind: 'unknown', detail: sheet.lineage_darkvision.detail },
+    kind: 'stated_species',
+    name: copiedName,
+    senses: stated.senses.map((sense) => ({ kind: sense.kind, rangeFeet: sense.range_feet })),
+    lineageDarkvision: lineageDarkvision(sheet),
   };
 }
 

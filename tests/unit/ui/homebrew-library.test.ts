@@ -54,6 +54,7 @@ function speciesDraft(
       primary_size: '',
       alternate_size: null,
       walking_speed_feet: null,
+      senses: null,
       traits: [],
       grants: [],
     },

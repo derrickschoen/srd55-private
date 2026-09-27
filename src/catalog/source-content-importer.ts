@@ -46,6 +46,7 @@ import type {
   PortableSourceRuleV2,
   SpeciesProjectorAggregateV2,
 } from './authored-content-projector-contract-v2';
+import { insertStoredSpeciesSenses } from './species-senses';
 
 export interface SourceContentImportCounters {
   readonly classes_matched: number;
@@ -295,6 +296,7 @@ function insertSpecies(db: DatabaseContext, aggregate: SpeciesContentAggregate, 
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [contentKey, aggregate.rules_edition, aggregate.name, aggregate.creature_type, aggregate.primary_size, aggregate.alternate_size, aggregate.walking_speed_feet, now, now],
   ).lastInsertId;
+  insertStoredSpeciesSenses(db, templateId, aggregate.senses, now);
   for (const [traitIndex, trait] of aggregate.traits.entries()) {
     const traitId = db.exec(
       `INSERT INTO species_template_traits
@@ -339,6 +341,7 @@ function insertSpeciesV2(
       aggregate.primary_size, aggregate.alternate_size,
       aggregate.walking_speed_feet, now, now],
   ).lastInsertId;
+  insertStoredSpeciesSenses(db, templateId, aggregate.senses, now);
   for (const [traitIndex, trait] of aggregate.traits.entries()) {
     const traitId = db.exec(
       `INSERT INTO species_template_traits

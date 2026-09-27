@@ -109,6 +109,7 @@ describe('catalog data-migration registry', () => {
         'src/eligibility/spell-selection-eligibility.ts',
         'src/eligibility/spell-selection-constraint.ts',
         'src/catalog/stored-authored-content-projector-v1.ts',
+        'src/catalog/species-senses.ts',
         'src/catalog/content-identity.ts',
         'src/catalog/content-registry.ts',
       ],
@@ -144,7 +145,10 @@ describe('catalog data-migration registry', () => {
       // Re-pinned 2026-09-27 with the registry for PC-EXPORT-TRUTH (D918): the
       // Dragonborn definition and the generated species table it reads — see
       // the registry comment.
-      checksum: 'd7b0912c4bda32dd9fa90243416c5b83fd5dada253f085328bf58d6166240ef0',
+      // Re-pinned 2026-09-27 with the registry for PC-EXPORT-TRUTH fix 1 (D923
+      // Q10): the frozen projector reads stated species senses through the
+      // newly frozen species-senses.ts — see the registry comment.
+      checksum: 'c11d45534e495b419e016cd1b1e62d9927fa5896b2fce1043591ad2b7594f890',
     }]);
     expect(() =>
       validateCatalogDataMigrationRegistry(CATALOG_DATA_MIGRATIONS)

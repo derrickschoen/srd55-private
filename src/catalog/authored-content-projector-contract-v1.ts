@@ -4,6 +4,7 @@ import type {
   ContentFingerprintReference,
   SpeciesContentAggregate,
   SpeciesContentTrait,
+  SpeciesSense,
   SubclassContentAggregate,
   SubclassFeatureValueContribution,
 } from '../authoring/contracts';
@@ -195,7 +196,11 @@ export interface CanonicalSpeciesTraitV1 {
   readonly effects: ContentIdentitySequence<CanonicalSpeciesCharacterEffectV1>;
 }
 
-/** A complete definition/template pair. Its shape is frozen by HA-1. */
+/**
+ * A complete definition/template pair. Its shape is frozen by HA-1; the one
+ * later key, `senses` (owner D923 Q10), is present only on content that
+ * states them, so every payload minted before it keeps its bytes.
+ */
 export interface SpeciesTwoHalfProjectorPayloadV1 {
   readonly reference_text: CanonicalRuleText;
   readonly repeatable: boolean;
@@ -204,6 +209,7 @@ export interface SpeciesTwoHalfProjectorPayloadV1 {
   readonly primary_size: CanonicalOpenPassthroughValue;
   readonly alternate_size: CanonicalOpenPassthroughValue | null;
   readonly walking_speed_feet: number;
+  readonly senses?: ContentIdentitySet<SpeciesSense>;
   readonly traits: ContentIdentitySequence<CanonicalSpeciesTraitV1>;
 }
 

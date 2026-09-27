@@ -701,6 +701,8 @@ test('whole-library download restores authored and imported content into a fresh
   await page.getByLabel('Creature type', { exact: true }).fill('Astral');
   await page.getByLabel('Primary size', { exact: true }).fill('Medium');
   await page.getByLabel('Walking speed (feet)', { exact: true }).fill('35');
+  // D923 Q10: a species states its senses; nothing is assumed.
+  await page.getByLabel('Senses', { exact: true }).selectOption('normal_sight');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await page.getByRole('button', { name: 'Preview publish', exact: true }).click();
   await page.getByRole('button', { name: 'Publish species', exact: true }).click();

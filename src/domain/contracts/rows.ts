@@ -633,6 +633,7 @@ type NativeContractTable =
   // row. The three CHARACTER-side origin tables are not listed: they are
   // `backup: true` and arrive through `BackupTable` already.
   | 'species_templates'
+  | 'species_template_senses'
   | 'species_template_traits'
   | 'species_template_trait_effects'
   | 'background_templates'
@@ -1291,6 +1292,13 @@ const REFINEMENTS = {
   'species_templates.base_speed_feet': positiveInt,
   'species_templates.created_at': sqlTimestamp,
   'species_templates.updated_at': sqlTimestamp,
+
+  // --- species_template_senses ---------------------------------------------
+  // `senses_json` takes its contract from ./json-columns.ts.
+  'species_template_senses.id': positiveInt,
+  'species_template_senses.species_template_id': positiveInt,
+  'species_template_senses.created_at': sqlTimestamp,
+  'species_template_senses.updated_at': sqlTimestamp,
 
   // --- species_template_traits ---------------------------------------------
   'species_template_traits.id': positiveInt,

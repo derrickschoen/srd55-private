@@ -244,6 +244,8 @@ function emptyDraft(kind: AuthoredContentKind): HomebrewDraft {
         primary_size: '',
         alternate_size: null,
         walking_speed_feet: null,
+        // Unstated until the author states them (owner D923 Q10); never defaulted.
+        senses: null,
         traits: [],
         grants: [],
       };
@@ -586,6 +588,14 @@ export class CatalogAuthoringService {
       primary_size: aggregate.primary_size,
       alternate_size: aggregate.alternate_size,
       walking_speed_feet: aggregate.walking_speed_feet,
+      // Content that predates stated senses opens UNSTATED, so the editor asks.
+      senses: aggregate.senses === undefined
+        ? null
+        : aggregate.senses.map((sense) => ({
+            draft_item_uuid: itemUuid(this.#randomUuid),
+            kind: sense.kind,
+            range_feet: sense.range_feet,
+          })),
       traits: aggregate.traits.map((trait) => ({
         draft_item_uuid: itemUuid(this.#randomUuid),
         name: trait.name,

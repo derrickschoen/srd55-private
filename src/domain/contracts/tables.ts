@@ -1024,6 +1024,18 @@ export const TABLE_SCOPES = {
     backupReference: false,
   },
   /**
+   * A template's stated senses (D923 Q10): catalog content exactly like its
+   * traits, portable only inside the species aggregate, never as rows.
+   */
+  species_template_senses: {
+    role: 'catalog_origin',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+  /**
    * The CATALOG half of the effect model, and it carries `species_template_traits`'
    * flags unchanged for the identical reason: it declares what a TEMPLATE
    * GRANTS, a character's own effect row holds no template effect id, and there
@@ -1412,6 +1424,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'named_feature_effects',
   'party_document_states',
   'species_definitions',
+  'species_template_senses',
   'species_template_trait_effects',
   'species_template_traits',
   'species_templates',

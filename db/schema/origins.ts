@@ -22,6 +22,7 @@ import type {
   ContentKey,
   SourceInstanceId,
   SpeciesTemplateId,
+  SpeciesTemplateSensesId,
   SpeciesTemplateTraitEffectId,
   SpeciesTemplateTraitId,
   WeaponTemplateId,
@@ -414,6 +415,48 @@ export const species_template_trait_effects = sqliteTable(
     uniqueIndex('species_template_trait_effects_trait_sort_unique').on(
       table.species_template_trait_id,
       table.sort_order,
+    ),
+  ],
+);
+
+/**
+ * THE SENSES A SPECIES STATES (owner D923 Q10). At most one row per template.
+ *
+ * A ROW IS A STATEMENT, AND ITS ABSENCE IS "UNSTATED", NEVER "NORMAL SIGHT".
+ * An authored species published from the editor always has a row; `[]` is the
+ * statement "normal sight only". The nine bundled SRD species have NO row:
+ * their senses are the generated SRD table's
+ * (`src/rules/generated/species-srd-tables.ts`, rule G), which the export
+ * reads directly. Authored content published before this table has none
+ * either, and a character built from it refuses export rather than guessing.
+ *
+ * `senses_json` is the list of `{ kind, range_feet }`, each kind at most once,
+ * kinds from `rangedSenseKinds` and ranges within `SENSE_RANGE_FEET`. The CHECK
+ * holds the JSON shape; the element vocabulary is decoded, and refused if
+ * wrong, by the one reader (`stored-authored-content-projector-v1.ts`).
+ */
+export const species_template_senses = sqliteTable(
+  'species_template_senses',
+  {
+    id: integer('id')
+      .primaryKey({ autoIncrement: true })
+      .notNull()
+      .$type<SpeciesTemplateSensesId>(),
+    species_template_id: integer('species_template_id')
+      .notNull()
+      .$type<SpeciesTemplateId>()
+      .references(() => species_templates.id, { onDelete: 'cascade' }),
+    senses_json: sqlText()('senses_json').notNull(),
+    created_at: datetime()('created_at'),
+    updated_at: datetime()('updated_at'),
+  },
+  (table) => [
+    check(
+      'species_template_senses_json_check',
+      sql`json_valid(senses_json) AND json_type(senses_json) = 'array'`,
+    ),
+    uniqueIndex('species_template_senses_template_unique').on(
+      table.species_template_id,
     ),
   ],
 );

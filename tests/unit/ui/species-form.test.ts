@@ -59,6 +59,7 @@ function speciesDocument(): SpeciesAuthoringDraft {
     primary_size: 'Colossal',
     alternate_size: 'Small',
     walking_speed_feet: 35,
+    senses: null,
     traits: [{
       draft_item_uuid: itemUuid('trait-one'),
       name: hostile,
@@ -327,7 +328,7 @@ describe('HA-7 species authoring form', () => {
       const empty: SpeciesAuthoringDraft = {
         kind: 'species', document_version: 1, name: '', rules_edition: null,
         reference_text: '', creature_type: '', primary_size: '', alternate_size: null,
-        walking_speed_feet: null, traits: [], grants: [],
+        walking_speed_feet: null, senses: null, traits: [], grants: [],
       };
       const savedDocuments: SpeciesAuthoringDraft[] = [];
       const calls: string[] = [];
@@ -431,6 +432,77 @@ describe('HA-7 species authoring form', () => {
       expect(navigated).toEqual([
         '/homebrew?publishOutcome=created&publishedKey=expanded%3Aspecies%3Aclockwork-voyager&publishedName=Clockwork+Voyager&publishedLayer=external&previousUsageCount=0',
       ]);
+      cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('states the species\' senses in a required typed field: unstated, normal sight only, or listed senses (D923 Q10)', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const savedDocuments: SpeciesAuthoringDraft[] = [];
+      const authoring = client({
+        saveDraft: async (params) => {
+          if (params.document.kind !== 'species') throw new Error('Expected species.');
+          savedDocuments.push(params.document);
+          return { ...stored(params.document), revision: 1 as DraftRevision };
+        },
+      });
+      const screenContext = context();
+      const mount = document.createElement('div');
+      screenContext.root.append(mount);
+      const unstated = { ...speciesDocument(), senses: null } as SpeciesAuthoringDraft;
+      const draft = stored(unstated);
+      if (!isStoredSpeciesDraft(draft)) throw new Error('Species fixture did not narrow.');
+      let uuid = 0;
+      const cleanup = renderSpeciesForm({
+        context: screenContext,
+        client: authoring,
+        mount,
+        draft,
+        randomUuid: () => `senses-item-${String(++uuid)}`,
+        windowObject: new EventTarget() as unknown as Window,
+      });
+      const root = interactiveElement(mount);
+      const statementControl = () => root.querySelectorAll('select')
+        .find((control) => control.getAttribute('id') === 'species-senses-statement');
+
+      // Required and unanswered: no default is chosen for the author.
+      expect(statementControl()?.getAttribute('required')).toBe('');
+      expect(statementControl()?.value).toBe('');
+      expect(elementText(root as unknown as Node)).toContain('Senses');
+
+      const statement = byId(root, 'select', 'species-senses-statement');
+      statement.value = 'normal_sight';
+      statement.dispatchEvent(new Event('change'));
+      button(root, 'Save draft').click();
+      await settle();
+      expect(savedDocuments.at(-1)?.senses).toEqual([]);
+
+      byId(root, 'select', 'species-senses-statement').value = 'listed';
+      byId(root, 'select', 'species-senses-statement').dispatchEvent(new Event('change'));
+      const kind = byId(root, 'select', 'species-sense-senses-item-1-kind');
+      kind.value = 'darkvision';
+      kind.dispatchEvent(new Event('change'));
+      input(byId(root, 'input', 'species-sense-senses-item-1-range'), '90');
+      button(root, 'Add sense').click();
+      const second = byId(root, 'select', 'species-sense-senses-item-2-kind');
+      second.value = 'tremorsense';
+      second.dispatchEvent(new Event('change'));
+      input(byId(root, 'input', 'species-sense-senses-item-2-range'), '15');
+      button(root, 'Save draft').click();
+      await settle();
+      expect(savedDocuments.at(-1)?.senses).toEqual([
+        { draft_item_uuid: 'senses-item-1', kind: 'darkvision', range_feet: 90 },
+        { draft_item_uuid: 'senses-item-2', kind: 'tremorsense', range_feet: 15 },
+      ]);
+
+      byId(root, 'select', 'species-senses-statement').value = '';
+      byId(root, 'select', 'species-senses-statement').dispatchEvent(new Event('change'));
+      button(root, 'Save draft').click();
+      await settle();
+      expect(savedDocuments.at(-1)?.senses).toBeNull();
       cleanup();
     } finally {
       restoreDocument();

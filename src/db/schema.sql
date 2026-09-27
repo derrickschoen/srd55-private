@@ -1490,6 +1490,17 @@ CREATE TABLE `species_definitions` (
 
 CREATE UNIQUE INDEX `species_definitions_content_key_unique` ON `species_definitions` (`content_key`);
 CREATE INDEX `species_definitions_name_rules_edition_index` ON `species_definitions` (`name`,`rules_edition`);
+CREATE TABLE `species_template_senses` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`species_template_id` integer NOT NULL,
+	`senses_json` TEXT NOT NULL,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	FOREIGN KEY (`species_template_id`) REFERENCES `species_templates`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "species_template_senses_json_check" CHECK(json_valid(senses_json) AND json_type(senses_json) = 'array')
+);
+
+CREATE UNIQUE INDEX `species_template_senses_template_unique` ON `species_template_senses` (`species_template_id`);
 CREATE TABLE `species_template_trait_effects` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`species_template_trait_id` integer NOT NULL,

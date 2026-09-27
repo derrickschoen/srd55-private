@@ -137,6 +137,8 @@ function completeSpecies(
     creature_type: 'Humanoid',
     primary_size: 'Medium',
     walking_speed_feet: speed,
+    // A published species states its senses (D923 Q10): normal sight only.
+    senses: [],
   };
 }
 
@@ -405,6 +407,7 @@ describe('catalog authoring RPC handlers', () => {
           creature_type: 'Clockwork',
           primary_size: 'Colossal',
           walking_speed_feet: 30,
+          senses: [],
         },
       },
     );

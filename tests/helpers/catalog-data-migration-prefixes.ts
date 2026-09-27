@@ -75,6 +75,7 @@ export const RECORDED_SCHEMA_PREFIX_IDS = [
   '0063_vtt_context_rollover',
   '0064_vtt_creature_space',
   '0065_vtt_observation_history',
+  '0066_species_template_senses',
 ] as const;
 
 export const PREFIX_MIGRATION_ID = 'test_catalog_prefix_probe';

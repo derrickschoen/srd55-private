@@ -23,6 +23,7 @@ import {
   SourceCatalogNonZeroFieldError,
   SourceCatalogRequiredFieldError,
   SourceCatalogSourceKindMismatchError,
+  SourceCatalogSpeciesSensesError,
   SourceCatalogStoredOnlyFieldError,
   SourceCatalogStoreLocalFieldError,
   SourceCatalogUnknownFieldError,
@@ -60,6 +61,8 @@ describe('source catalog record error formatters', () => {
     [new SourceCatalogExactListError('aggregate.suggested_abilities', 3, 'abilities'), "Catalog field 'aggregate.suggested_abilities' must contain three abilities.", { field: 'aggregate.suggested_abilities', count: 3, subject: 'abilities' }],
     [new SourceCatalogAbilityPointsError('aggregate.ability_points'), "Catalog field 'aggregate.ability_points' must be 0, 1, or 2.", { field: 'aggregate.ability_points' }],
     [new SourceCatalogBackgroundGrantKindError(2, 'skill_proficiency'), "Catalog field 'aggregate.grants[2].kind' must be 'grant_source' for background content; received 'skill_proficiency'.", { grant_index: 2, received_kind: 'skill_proficiency' }],
+    [new SourceCatalogSpeciesSensesError('aggregate.senses', 1, 'repeated_kind'), "Catalog field 'aggregate.senses[1]' is not a stated species sense list (repeated_kind).", { field: 'aggregate.senses', index: 1, problem: 'repeated_kind' }],
+    [new SourceCatalogSpeciesSensesError('aggregate.senses', null, 'not_a_list'), "Catalog field 'aggregate.senses' is not a stated species sense list (not_a_list).", { field: 'aggregate.senses', index: null, problem: 'not_a_list' }],
   ];
 
   it.each(cases)('formats %s', (error, message, parameters) => {

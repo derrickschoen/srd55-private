@@ -35,6 +35,11 @@ export const AUTHORING_LIST_LIMITS = Object.freeze({
   classChildRows: 100,
   queryValues: 100,
   validationIssues: 500,
+  /**
+   * Sense rows in a species DRAFT: room for a repeated kind the author is
+   * still correcting. A published species states each sense kind at most once.
+   */
+  sensesPerSpeciesDraft: 8,
 });
 
 export const AUTHORING_DOCUMENT_LIMITS = Object.freeze({

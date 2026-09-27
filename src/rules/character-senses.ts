@@ -35,23 +35,36 @@
  * unit) in `SENSE_FEATURES`, and a character holding one states it.
  */
 import type { CombatSense } from '../combat/statblock';
+import type { RangedSenseKind } from '../domain/enums';
 import { SRD_SPECIES_SENSES, type SrdSpeciesName } from './generated/species-srd-tables';
 
 export type SrdFullSpan = `docs/srd/full/srd-5.2.1.txt:${number}-${number}`;
+
+/**
+ * The sheet's `lineage_darkvision`: `null` when no species choice owns the
+ * Darkvision range, otherwise the choice's known or unknown range.
+ */
+export type LineageDarkvision =
+  | null
+  | { readonly kind: 'known'; readonly value: number }
+  | { readonly kind: 'unknown'; readonly detail: string };
 
 /** The one species fact a character's senses start from. */
 export type SpeciesSenseSource =
   | {
       readonly kind: 'srd_species';
       readonly species: SrdSpeciesName;
+      readonly lineageDarkvision: LineageDarkvision;
+    }
+  | {
       /**
-       * The sheet's `lineage_darkvision`: `null` when no species choice owns
-       * the Darkvision range, otherwise the choice's known or unknown range.
+       * An authored or imported species that STATES its senses (owner D923
+       * Q10): exactly the stated list, `[]` being normal sight only.
        */
-      readonly lineageDarkvision:
-        | null
-        | { readonly kind: 'known'; readonly value: number }
-        | { readonly kind: 'unknown'; readonly detail: string };
+      readonly kind: 'stated_species';
+      readonly name: string;
+      readonly senses: readonly { readonly kind: RangedSenseKind; readonly rangeFeet: number }[];
+      readonly lineageDarkvision: LineageDarkvision;
     }
   | { readonly kind: 'unsourced'; readonly detail: string };
 
@@ -61,7 +74,17 @@ export interface CharacterSenseInputs {
   readonly featContentKeys: readonly string[];
 }
 
-export type RangedSenseKind = Exclude<CombatSense['kind'], 'normal_sight'>;
+type Equal<Left, Right> =
+  (<T>() => T extends Left ? 1 : 2) extends (<T>() => T extends Right ? 1 : 2) ? true : false;
+
+/**
+ * The domain's ranged sense vocabulary IS the engine's: adding a `CombatSense`
+ * kind without the domain list (or the reverse) stops this line compiling.
+ */
+export const RANGED_SENSE_KINDS_MATCH_ENGINE: Equal<
+  RangedSenseKind,
+  Exclude<CombatSense['kind'], 'normal_sight'>
+> = true;
 
 export interface FeatureSenseGrant {
   readonly feature: string;
@@ -210,13 +233,23 @@ export type CharacterSenses =
       readonly detail: string;
     };
 
+function printedSpeciesSenses(
+  source: Exclude<SpeciesSenseSource, { readonly kind: 'unsourced' }>,
+): readonly { readonly kind: RangedSenseKind; readonly rangeFeet: number }[] {
+  switch (source.kind) {
+    case 'srd_species':
+      return SRD_SPECIES_SENSES[source.species];
+    case 'stated_species':
+      return source.senses;
+  }
+}
+
 function speciesSenses(
-  source: Extract<SpeciesSenseSource, { readonly kind: 'srd_species' }>,
+  source: Exclude<SpeciesSenseSource, { readonly kind: 'unsourced' }>,
 ):
   | { readonly status: 'sourced'; readonly senses: readonly CombatSense[] }
   | Extract<CharacterSenses, { readonly status: 'undetermined' }> {
-  const printed: readonly { readonly kind: 'darkvision'; readonly rangeFeet: number }[] =
-    SRD_SPECIES_SENSES[source.species];
+  const printed = printedSpeciesSenses(source);
   const lineage = source.lineageDarkvision;
   if (lineage === null) {
     return { status: 'sourced', senses: printed.map((sense) => ({ ...sense })) };
@@ -225,8 +258,15 @@ function speciesSenses(
     case 'unknown':
       return { status: 'undetermined', field: 'senses.darkvision', detail: lineage.detail };
     case 'known':
-      // The choice owns the Darkvision range; the printed base is replaced, not added to.
-      return { status: 'sourced', senses: [{ kind: 'darkvision', rangeFeet: lineage.value }] };
+      // The choice owns the Darkvision range; the printed one is replaced, not
+      // added to, and every other sense the species has stays.
+      return {
+        status: 'sourced',
+        senses: [
+          ...printed.filter((sense) => sense.kind !== 'darkvision').map((sense) => ({ ...sense })),
+          { kind: 'darkvision', rangeFeet: lineage.value },
+        ],
+      };
   }
 }
 
@@ -263,10 +303,14 @@ export function characterSenses(inputs: CharacterSenseInputs): CharacterSenses {
       detail: `Two sources grant ${repeated}, and no rule says which range applies.`,
     };
   }
-  const { species } = inputs.species;
+  const source = inputs.species;
   return {
     status: 'sourced',
     senses: [{ kind: 'normal_sight' }, ...ranged],
-    senseFeatures: SENSE_FEATURE_NAMES.filter((name) => holdsSenseFeature(SENSE_FEATURES[name], species)),
+    // Every sense feature is an SRD species' or an SRD option's; an authored
+    // species states its senses and holds none of them.
+    senseFeatures: source.kind === 'srd_species'
+      ? SENSE_FEATURE_NAMES.filter((name) => holdsSenseFeature(SENSE_FEATURES[name], source.species))
+      : [],
   };
 }

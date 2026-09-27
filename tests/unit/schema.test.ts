@@ -469,6 +469,13 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     text: ['name', 'description'],
     numeric: ['created_at', 'updated_at'],
   },
+  // D923 Q10: a template's stated senses, one JSON list per template. The
+  // row is the statement; its absence is "unstated".
+  species_template_senses: {
+    integer: ['id', 'species_template_id'],
+    text: ['senses_json'],
+    numeric: ['created_at', 'updated_at'],
+  },
   // The CATALOG half of the inverted effect model: what a printed trait GRANTS.
   // The five `effect_*` columns that used to sit on the trait row above are
   // here, one row per effect, so a trait granting two is two rows.
@@ -868,6 +875,8 @@ const expectedNotNull: Record<string, string[]> = {
   species_template_traits: [
     'id', 'species_template_id', 'sort_order', 'name', 'description',
   ],
+  // A statement always carries its list; `[]` is "normal sight only".
+  species_template_senses: ['id', 'species_template_id', 'senses_json'],
   // `effect_kind` is NOT NULL on both effect tables where it was nullable on
   // the trait row it replaced: a trait with no mechanical effect is now the
   // ABSENCE of a row rather than a row of nulls.
@@ -1136,6 +1145,9 @@ const expectedNamedIndexes: Record<string, string> = {
     'species_template_traits:species_template_id,sort_order:unique',
   species_template_traits_template_name_unique:
     'species_template_traits:species_template_id,name:unique',
+  // One statement per template (D923 Q10).
+  species_template_senses_template_unique:
+    'species_template_senses:species_template_id:unique',
   // UNIQUE on `(trait, sort_order)` on the CATALOG side, where the character
   // side below gets a plain index — the same asymmetry the trait tables
   // already carry, and for the same reason: the source's order is dense and a
@@ -1458,6 +1470,7 @@ const expectedUniqueGroups: Record<string, string[]> = {
   species_template_traits: [
     'species_template_id,name', 'species_template_id,sort_order',
   ],
+  species_template_senses: ['species_template_id'],
   species_template_trait_effects: ['species_template_trait_id,sort_order'],
   background_templates: ['content_key'],
   background_template_effects: ['background_template_id,sort_order'],
@@ -1857,6 +1870,9 @@ const expectedForeignKeys: Record<string, string[]> = {
     'subclass_feature_id->subclass_features.id|CASCADE',
   ],
   species_template_traits: [
+    'species_template_id->species_templates.id|CASCADE',
+  ],
+  species_template_senses: [
     'species_template_id->species_templates.id|CASCADE',
   ],
   species_template_trait_effects: [

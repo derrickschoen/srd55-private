@@ -508,6 +508,12 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['content_key'],
   },
   {
+    table: 'species_template_senses',
+    columns: ['species_template_id'],
+    target: 'species_templates',
+    targetColumns: ['id'],
+  },
+  {
     table: 'species_template_trait_effects',
     columns: ['species_template_trait_id'],
     target: 'species_template_traits',

@@ -37,6 +37,8 @@ test('authors, previews, publishes, lists, and applies a homebrew species', asyn
   await page.getByLabel('Primary size').fill('Colossal');
   await page.getByLabel('Alternate size (optional)').fill('Small');
   await page.getByLabel('Walking speed (feet)').fill('35');
+  // D923 Q10: a species states its senses; nothing is assumed.
+  await page.getByLabel('Senses', { exact: true }).selectOption('normal_sight');
   await page
     .getByLabel('Reference text for mechanics not applied to the sheet')
     .fill('Its winding key is reference prose and changes no sheet number.');

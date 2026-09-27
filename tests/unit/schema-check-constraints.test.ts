@@ -808,6 +808,17 @@ const speciesTemplate =
     newSpeciesTemplate(db, values);
   };
 
+/** One template's stated senses (D923 Q10). */
+const speciesTemplateSenses =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'species_template_senses', {
+      species_template_id: newSpeciesTemplate(db),
+      senses_json: '[]',
+      ...values,
+    });
+  };
+
 const backgroundTemplate =
   (values: Values): Write =>
   (db) => {
@@ -3199,6 +3210,20 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       ['the 30 eight of the nine species print', speciesTemplate({ base_speed_feet: 30 })],
       // The one species that would ship silently wrong if Speed were defaulted.
       ["the Goliath's 35", speciesTemplate({ base_speed_feet: 35 })],
+    ],
+  },
+  {
+    // The statement is a JSON LIST; the element vocabulary is decoded, and
+    // refused if wrong, by src/catalog/species-senses.ts.
+    constraint: 'species_template_senses_json_check',
+    rejects: [
+      ['one sense object rather than a list', speciesTemplateSenses({ senses_json: '{"kind":"darkvision","range_feet":60}' })],
+      ['text that is not JSON', speciesTemplateSenses({ senses_json: 'darkvision 60' })],
+      ['a JSON string', speciesTemplateSenses({ senses_json: '"darkvision"' })],
+    ],
+    accepts: [
+      ['the empty statement, normal sight only', speciesTemplateSenses({ senses_json: '[]' })],
+      ['a stated Darkvision', speciesTemplateSenses({ senses_json: '[{"kind":"darkvision","range_feet":60}]' })],
     ],
   },
   {

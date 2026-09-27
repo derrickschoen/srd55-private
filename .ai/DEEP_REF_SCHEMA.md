@@ -45,7 +45,7 @@ archive metadata.
 
 `db/schema/origins.ts`:
 
-- `background_templates` (`:1001`) stores the printed background template and
+- `background_templates` (`:1044`) stores the printed background template and
   its nullable migrated/default Origin-feat content key. New writers always
   supply the key; null represents only an ambiguous legacy name that migration
   0037 could not bind without guessing.
@@ -91,7 +91,7 @@ artifact, keep the split.
 |---|---|
 | `generated/column-facts.ts` | GENERATED. Per-column facts: does the column exist, is it `notNull`, could drizzle-zod type it |
 | `generated/reference-facts.ts` | GENERATED. Catalog tables a backup resolves references against |
-| `rows.ts` | The Zod contracts. `COLUMN_REFINEMENTS` (`:430`), `NARROWED_REFINEMENTS` (`:514`), `rowContractError` (`:1641`) |
+| `rows.ts` | The Zod contracts. `COLUMN_REFINEMENTS` (`:430`), `NARROWED_REFINEMENTS` (`:514`), `rowContractError` (`:1649`) |
 | `row-rules.ts` | Cross-column rules a per-column contract cannot express |
 | `json-columns.ts` | WHICH text columns hold serialized JSON, and what SHAPE each reader needs |
 | `tables.ts` | The table inventory and scope classification — §3 below |
@@ -151,10 +151,10 @@ Two mechanisms make this stick, and they are worth knowing by name:
    without that column is `Type 'true' is not assignable to type 'false'`. That
    fact previously lived only in a reviewer's head.
 
-Derived from the classification: `SnapshotTable` (`:1231`), `BackupTable` (`:1233`),
-`ShareTable` (`:1234`), and the ordered constants `CHARACTER_STATE_TABLES`
-(`:1445`), `DELETE_ORDER` (`:1530`), `BACKUP_TABLES` (`:1597`), `SHARE_TABLES`
-(`:1690`).
+Derived from the classification: `SnapshotTable` (`:1243`), `BackupTable` (`:1245`),
+`ShareTable` (`:1246`), and the ordered constants `CHARACTER_STATE_TABLES`
+(`:1458`), `DELETE_ORDER` (`:1543`), `BACKUP_TABLES` (`:1610`), `SHARE_TABLES`
+(`:1703`).
 
 **Classification is not the same as working.** That was Q8's bug, and D24 records
 the discipline that replaced it: each arm gets its own test — a column-for-column

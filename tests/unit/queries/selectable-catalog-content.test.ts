@@ -51,6 +51,8 @@ function speciesDocument(
     primary_size: 'Medium',
     alternate_size: null,
     walking_speed_feet: walkingSpeedFeet,
+    // A published species states its senses (D923 Q10): normal sight only.
+    senses: [],
     traits: [],
     grants: [],
   };

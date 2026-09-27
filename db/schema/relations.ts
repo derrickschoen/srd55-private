@@ -84,6 +84,7 @@ import {
   character_species,
   character_species_traits,
   character_effects,
+  species_template_senses,
   species_template_trait_effects,
   species_template_traits,
   species_templates,
@@ -305,6 +306,18 @@ export const speciesTemplatesRelations = relations(
       references: [catalog_content_identities.content_key],
     }),
     traits: many(species_template_traits),
+    senses: many(species_template_senses),
+  }),
+);
+
+/** One template's stated senses (D923 Q10); its parent is the template. */
+export const speciesTemplateSensesRelations = relations(
+  species_template_senses,
+  ({ one }) => ({
+    species_template: one(species_templates, {
+      fields: [species_template_senses.species_template_id],
+      references: [species_templates.id],
+    }),
   }),
 );
 

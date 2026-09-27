@@ -94,6 +94,9 @@ const nativeAutoIncrementTables = [
   // template GRANTS and what a character HAS.
   'character_effects',
   'species_template_trait_effects',
+  // D923 Q10: one template's stated senses. A surrogate key like every other
+  // catalog child; `species_template_id` is UNIQUE beside it.
+  'species_template_senses',
   // AC-1 (D72): the character's own items, a surrogate key for the same
   // backup-remap reason every character-owned table above carries one.
   'character_items',
@@ -208,7 +211,7 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       return db;
     }
 
-    it('declares AUTOINCREMENT on exactly the 30 Laravel and 44 native surrogate-key tables', () => {
+    it('declares AUTOINCREMENT on exactly the 30 Laravel and 45 native surrogate-key tables', () => {
       const db = openDb();
       const declared = db
         .selectValues(
@@ -222,8 +225,9 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
         .map(String);
 
       expect(declared).toEqual(allAutoIncrementTables);
-      // 30 surviving Laravel tables plus 44 native: 4 weapons, 9 origins, 2
-      // character/template effects, 1 character-items table, 2 item-catalog
+      // 30 surviving Laravel tables plus 45 native: 4 weapons, 9 origins, 2
+      // character/template effects, 1 species senses statement (D923 Q10),
+      // 1 character-items table, 2 item-catalog
       // tables, 10 sheet-core tables, 2 class-feature tables, 3 feature-effect
       // tables, 2 typed feature-value contribution tables,
       // 7 stored character-input/choice tables, and 2 spell progression
@@ -232,9 +236,9 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       // composite provenance identity use natural primary keys and therefore
       // belong in `naturalKeyTables`; so do S6-05's one-per-character receipt
       // and S6-08's exact-transition replacement choice.
-      expect(declared).toHaveLength(74);
+      expect(declared).toHaveLength(75);
       expect(autoIncrementTables).toHaveLength(30);
-      expect(nativeAutoIncrementTables).toHaveLength(44);
+      expect(nativeAutoIncrementTables).toHaveLength(45);
 
       const withoutAutoIncrement = db
         .selectValues(

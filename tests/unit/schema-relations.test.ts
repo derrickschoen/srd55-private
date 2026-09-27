@@ -246,8 +246,9 @@ describe('declared relations match the foreign keys', () => {
     // provenance row adds one composite registry-identity edge: one constraint
     // across two PRAGMA rows. S6-05's receipt adds one character edge/row.
     // S6-08 adds two composite content edges and one character edge (five rows).
-    expect(constraintEdges(db)).toHaveLength(114);
-    expect(rowCount).toBe(138);
+    // D923 Q10's `species_template_senses` adds one single-column template edge.
+    expect(constraintEdges(db)).toHaveLength(115);
+    expect(rowCount).toBe(139);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {

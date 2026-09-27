@@ -6,6 +6,7 @@ import {
   creatureSize,
   creatureType,
   damageType,
+  type RangedSenseKind,
 } from '../domain/enums';
 import type { ContentKey } from '../domain/ids';
 import {
@@ -44,6 +45,8 @@ import type {
   PublishResult,
   SpeciesAuthoringDraft,
   SpeciesContentAggregate,
+  SpeciesSense,
+  StatedSpeciesContentAggregate,
   StoredHomebrewDraft,
 } from './contracts';
 import type {
@@ -247,6 +250,8 @@ function duplicateItemUuids(
   });
   draft.grants.forEach((grant, grantIndex) =>
     check(grant.draft_item_uuid, ['grants', grantIndex, 'draft_item_uuid']));
+  draft.senses?.forEach((sense, senseIndex) =>
+    check(sense.draft_item_uuid, ['senses', senseIndex, 'draft_item_uuid']));
 }
 
 export function resolvedAuthoringGrant(
@@ -353,10 +358,46 @@ export function resolvedAuthoringGrant(
   }
 }
 
+/**
+ * The draft's sense statement (owner D923 Q10): REQUIRED, never defaulted.
+ * An unstated draft does not publish; `[]` publishes "normal sight only".
+ * Each row needs its sense and its range, and each sense is stated once.
+ */
+function statedSenses(
+  draft: SpeciesAuthoringDraft,
+  issues: AuthoringValidationIssue[],
+): readonly SpeciesSense[] {
+  if (draft.senses === null) {
+    authoringIssue(
+      issues,
+      ['senses'],
+      'required',
+      'State the species\' senses: normal sight only, or each sense it has with its range.',
+    );
+    return [];
+  }
+  const stated = new Set<RangedSenseKind>();
+  return draft.senses.flatMap((sense, index) => {
+    const path = ['senses', index] as const;
+    if (sense.kind === null) {
+      authoringIssue(issues, [...path, 'kind'], 'required', 'Choose the sense.');
+    } else if (stated.has(sense.kind)) {
+      authoringIssue(issues, [...path, 'kind'], 'duplicate', 'Each sense is stated once.');
+    }
+    if (sense.range_feet === null) {
+      authoringIssue(issues, [...path, 'range_feet'], 'required', 'The sense range is required.');
+    }
+    if (sense.kind !== null) stated.add(sense.kind);
+    return sense.kind === null || sense.range_feet === null
+      ? []
+      : [Object.freeze({ kind: sense.kind, range_feet: sense.range_feet })];
+  });
+}
+
 export function speciesDraftToAggregate(
   db: DatabaseContext,
   draft: SpeciesAuthoringDraft,
-): SpeciesContentAggregate {
+): StatedSpeciesContentAggregate {
   const issues: AuthoringValidationIssue[] = [];
   authoringNonEmpty(draft.name, ['name'], issues);
   if (draft.rules_edition === null) authoringIssue(issues, ['rules_edition'], 'required', 'Rules edition is required.');
@@ -364,6 +405,7 @@ export function speciesDraftToAggregate(
   authoringNonEmpty(draft.primary_size, ['primary_size'], issues);
   if (draft.alternate_size !== null) authoringNonEmpty(draft.alternate_size, ['alternate_size'], issues);
   if (draft.walking_speed_feet === null) authoringIssue(issues, ['walking_speed_feet'], 'required', 'Walking speed is required.');
+  const senses = statedSenses(draft, issues);
   duplicateItemUuids(draft, issues);
 
   const ruleKeys = new Set<string>();
@@ -410,6 +452,7 @@ export function speciesDraftToAggregate(
     primary_size: creatureSize(draft.primary_size),
     alternate_size: draft.alternate_size === null ? null : creatureSize(draft.alternate_size),
     walking_speed_feet: draft.walking_speed_feet!,
+    senses: Object.freeze(senses),
     traits: Object.freeze(traits),
     grants: Object.freeze(grants),
   });

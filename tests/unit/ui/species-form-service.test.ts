@@ -88,6 +88,8 @@ function validDocument(
     primary_size: 'Medium',
     alternate_size: null,
     walking_speed_feet: 30,
+    // A published species states its senses (D923 Q10): normal sight only.
+    senses: [],
     traits: [{
       draft_item_uuid: itemUuid(`${name}-trait`),
       name: 'Service ward',

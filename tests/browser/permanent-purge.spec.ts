@@ -38,6 +38,8 @@ async function publishSpecies(
   await page.getByLabel('Creature type').fill('Humanoid');
   await page.getByLabel('Primary size').fill('Medium');
   await page.getByLabel('Walking speed (feet)').fill(String(speed));
+  // D923 Q10: a species states its senses; nothing is assumed.
+  await page.getByLabel('Senses', { exact: true }).selectOption('normal_sight');
   await page.getByRole('button', { name: 'Save draft' }).click();
   await expect(page.locator('.species-authoring-status')).toContainText(
     'Saved revision 1.',
@@ -91,6 +93,8 @@ test('publishes, versions, archives, restores, and permanently purges a whole li
   await expect(page.getByLabel('Species authoring form')).toBeVisible();
   await page.getByLabel('Name').fill('Purge Journey Species Revised');
   await page.getByLabel('Walking speed (feet)').fill('40');
+  // D923 Q10: a species states its senses; nothing is assumed.
+  await page.getByLabel('Senses', { exact: true }).selectOption('normal_sight');
   await page.getByRole('button', { name: 'Save draft' }).click();
   await expect(page.locator('.species-authoring-status')).toContainText('Saved revision');
   await page.getByRole('button', { name: 'Preview publish' }).click();

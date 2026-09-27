@@ -24,6 +24,8 @@ async function publishSpecies(
   await page.getByLabel('Creature type').fill('Humanoid');
   await page.getByLabel('Primary size').fill('Medium');
   await page.getByLabel('Walking speed (feet)').fill(String(walkingSpeedFeet));
+  // D923 Q10: a species states its senses; nothing is assumed.
+  await page.getByLabel('Senses', { exact: true }).selectOption('normal_sight');
   await page.getByRole('button', { name: 'Save draft' }).click();
   await expect(page.locator('.species-authoring-status')).toContainText(
     'Saved revision 1.',
@@ -90,6 +92,8 @@ test('superseded species leave fresh selection while replacement characters stil
     .click();
   await page.getByLabel('Name').fill('Fresh Picker Species Revised');
   await page.getByLabel('Walking speed (feet)').fill('35');
+  // D923 Q10: a species states its senses; nothing is assumed.
+  await page.getByLabel('Senses', { exact: true }).selectOption('normal_sight');
   await page.getByRole('button', { name: 'Save draft' }).click();
   await expect(page.locator('.species-authoring-status')).toContainText(
     'Saved revision',

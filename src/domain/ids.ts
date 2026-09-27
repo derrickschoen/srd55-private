@@ -150,6 +150,9 @@ export type SpeciesTemplateTraitEffectId = Brand<
   number,
   'SpeciesTemplateTraitEffectId'
 >;
+
+/** `species_template_senses.id`: one catalog template's stated senses (D923 Q10). */
+export type SpeciesTemplateSensesId = Brand<number, 'SpeciesTemplateSensesId'>;
 export type CharacterEffectId = Brand<number, 'CharacterEffectId'>;
 
 /**

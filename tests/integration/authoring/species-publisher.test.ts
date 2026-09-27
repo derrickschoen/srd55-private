@@ -103,6 +103,8 @@ function validSpecies(
     primary_size: 'Colossal',
     alternate_size: 'Small',
     walking_speed_feet: 35,
+    // A published species states its senses (D923 Q10): normal sight only.
+    senses: [],
     traits: [{
       draft_item_uuid: itemUuid(`${name}-trait`),
       name: 'Void Ward',
@@ -1054,7 +1056,9 @@ describe('HA-3 species publisher', () => {
       expected_revision: draft.revision,
     });
     expect(preview.facts.canonical_json).toBe(
-      '{"edition":"expanded","kind":"species","normalizedName":"projectororacle","payload":{"alternate_size":"Small","creature_type":"Clockwork","grants":[],"primary_size":"Colossal","reference_text":"","repeatable":false,"traits":[],"walking_speed_feet":35},"scheme":"content-v1"}',
+      // The stated "normal sight only" (D923 Q10) is the payload's `senses`
+      // key holding an empty set, in its sorted place after `repeatable`.
+      '{"edition":"expanded","kind":"species","normalizedName":"projectororacle","payload":{"alternate_size":"Small","creature_type":"Clockwork","grants":[],"primary_size":"Colossal","reference_text":"","repeatable":false,"senses":[],"traits":[],"walking_speed_feet":35},"scheme":"content-v1"}',
     );
     expect(preview.facts.candidate_content_keys).toEqual([
       'expanded:content.species:projector-oracle',
