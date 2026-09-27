@@ -3136,3 +3136,28 @@ QUESTION 2 (die sizes: the SRD prints 1d3 19 times; D34 closed the planner's dic
 - Requirements: a d3 roll distribution witness (1..3 uniform), average 2, and a probability fold that handles d3. Existing pins unaffected unless some rule already used a d3 substitute (say which).
 
 Next free id: D921.
+
+## D921 — 2026-09-27 16:26 — owner question series (brainstorm, one at a time): Q1 temporary HP, Q2 resistance, Q3 flyers and terrain
+
+Q1. Temporary HP: SRD 5.2.1 says they don't stack and the recipient chooses; the engine silently keeps the larger. OWNER, verbatim choice: "Keep larger, as a typed rule (Recommended)".
+- An explicit typed ruling (house rule): a creature keeps the larger pool automatically, with a witness.
+- Owner: RULES-CORE, or CONDITION-D20 if it touches the same code first.
+
+Q2. Resistance rounding: the engine halves each damage term. OWNER, verbatim choice: "Per type per instance (Recommended)".
+- All damage of one type from one hit or effect is summed, then halved once. Example: 7 + 7 fire → 7, not 3 + 3 = 6.
+- This is a behaviour change: wrong-result fix, failing test first, pins attributed. It goes BEFORE REGEN, with the CONDITION-D20 wave (D918: wrong results before REGEN).
+
+Q3. Flyers and difficult terrain (the engine lets any flyer ignore all difficult terrain; SRD 5.2.1 has no such rule).
+- OWNER first answer, verbatim: "Research what the community rulings have been for 5e. My guess is that you ignore all terrain effects if you are flying above it unless it has a specified height or is a shaped spell effect (cube,sphere,cylinder, etc) that has 3 dimensions".
+- Research (mine):
+  - Neither docs/srd/full/srd-5.2.1.txt nor the SRD 5.1 text in the repo says flying ignores difficult terrain; I grepped both. SRD 5.1 "Flying Movement" covers only falling.
+  - Community rulings (D&D Beyond forum threads, spell guides) say ground terrain does not hamper a creature flying above it. Spike Growth (a sphere, but "the ground … sprouts spikes") is avoided by flyers and hoverers unless the space is too low.
+  - A web claim that "difficult terrain never applies to flying creatures" traces to 3.x-era text, not 5e.
+- Follow-up question (the proposed tagging). OWNER, verbatim choice: "Yes, tag ground/volume/creature (Recommended)".
+- THE RULE (typed; a house ruling beside D905): every difficult-terrain source carries a closed tag ground | volume | creature.
+  - ground (rubble, snow, undergrowth, furniture, ground-based magic such as Spike Growth): ignored while flying.
+  - volume (effects filling a 3-D volume in the air or stating a height, e.g. Web's cube, Fog Cloud, Sleet Storm): applies to flyers.
+  - creature (another creature's space): applies. The 2-D engine has no heights, so passing through a square is not flying over it.
+- Owner: MOVE-COST (the stacking cost kinds, D905) with MOVEMENT-MODES (the fly mode). Tag data lives in the typed effect and terrain definitions, so a new effect must declare its tag.
+
+Next free id: D922.
