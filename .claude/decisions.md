@@ -2701,3 +2701,46 @@ QUIET WINDOW (D899), running as .tmp/runs/perf-02/pairs/queue2.sh then queue3.sh
 - Every arm runs tsc -b --force and check-command-outcomes first (D897 rule).
 
 Next free id: D909.
+
+## D909 — 2026-09-26 21:21 — #3 board3 and #6 cover6 LANDED (timed pairs VALID, −43.5 s and −5.7 s); B1 whole gate passed; owner: research input tracing before deciding the recorder question
+
+TIMED PAIRS (D885 §6, void rule v2, one AB pair each, all runs VALID, every gate verdict passed). Run and read by me (exp/gate-results.txt):
+- Pair b3, A = main 33880118, B = main + board3 (283cc172 ≙ 016e21ee):
+  - initial 248.7 → 205.1 s; total 259.0 → 215.5 s (−43.5 s);
+  - inventory 650 → 654 files, 11,550 → 11,585 tests.
+  - Prewarms: 390.9 → 237.4 s.
+- Pair b3c6, A = main + board3, B = + cover6 (fcd72f1e ≙ 564bd504):
+  - initial 204.6 → 190.2 s; total 204.6 → 198.9 s (−5.7 s);
+  - 654 → 655 files, 11,585 → 11,605 tests.
+  - Prewarms: 235.8 → 218.7 s.
+- Both B arms clear the +30 s no-regression guard. Neither unit claims a saving threshold: #3 and #6 were ordered by the owner as architecture work (D895).
+- Load before the arms was 1.5–6.0; the void rule attributes by process, and every run is VALID with test_max60s = 0 and db_max60s = 0.
+- Before the pairs, every arm passed tsc -b --force (exit 0) and check-command-outcomes (exit 0).
+
+LANDED:
+- main = 59a4f523: 28 commits (board3 + cover6, including my merge adaptation 564bd504), cherry-picked onto 1139d411.
+- The main tree equals the timed B arm fcd72f1e except .claude/decisions.md (D908), checked by git diff.
+- Mirror verified at 59a4f523.
+- cover6 lands as the exact refactor; the shared-edge wall defect is unit COVER-EDGE (D908).
+
+B1 WHOLE GATE (D899), on dnd-gate-exp-b1-71940c8f a9a1de27: VALID, passed, initial 302.7 s, retry 95.0 s, total 397.6 s, 651 files, 11,570 tests, 0 failures after retry.
+- This was a cold-cache first run (no prewarm), so the time is not comparable.
+- B1 is NOT landed alone. It lands with B4, B2 and B6 after a whole gate on the new main (below).
+
+LUNA6 LANDING PATH:
+- queue3 runs the combined arm on the old main (84b862ed) plus B6 V10 ×3.
+- queue4 then gates dnd-gate-exp-luna6-onmain-59a4f523: new main + B1 + B4 + B2 + B6 + my allowlist adaptation, 21 commits by clean pick.
+- Landing follows if that passes.
+
+OWNER, recorder question (x3 P3: the verdict-cache recorder audit shows 164 undeclared inputs against 31 on main; the options were declaring from the bundle metafile (recommended), never caching engine-child tests, or accepting as debt). Verbatim answer: "Can we not walk the input tree? Trace which parts of the engine are used? Research prior art".
+- Reading: before choosing, research how build and test systems derive a test's true input set by tracing, as opposed to declaring it. Examples to cover:
+  - Bazel/Buck hermetic inputs;
+  - Jest and Vitest changed-file dependency graphs;
+  - esbuild and Vite module graphs and metafiles;
+  - Nx/Turborepo input hashing;
+  - file-access tracing (strace, fsatrace, tup's FUSE, the Node --experimental-policy and loader hooks);
+  - coverage-based test impact analysis (Microsoft TIA, Launchable, Google TAP, Facebook predictive test selection).
+- Then propose a design where the engine child records which modules and data files it actually loads, not the whole bundle.
+- The research runs after the quiet window (queue3/queue4), so its agents cannot void the gates.
+
+Next free id: D910.
