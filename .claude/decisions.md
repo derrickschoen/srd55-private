@@ -3242,3 +3242,30 @@ Q19. Content-pack baseCount ≥ 1 blocks True Strike's 0 base dice. OWNER, verba
 - A small content-pack unit. The stand-in test pack is replaced by the exact spell.
 
 Next free id: D925.
+
+## D925 — 2026-09-27 17:45 — owner: "Just go xhigh Luna 6" — the effort study is withdrawn before any cell; E = xhigh. Q20, Q21; Q23 moot
+
+Q20. Visibility performance unit (detectCombatant, 22.5% of engine time). OWNER, verbatim choice: "After COVER-EDGE (Recommended)".
+- VISIBILITY-PERF follows COVER-EDGE+REGEN and must be byte-identical to the engine (differential + pins).
+- It runs before PERCEPTION adds new sight rules.
+
+Q21. Flat-layout cover sweep in TypeScript (about 6.5x on that pass, about 3.5 s of an 82 s workload). OWNER, verbatim choice: "Yes, after COVER-EDGE (Recommended)".
+- Unit COVER-SWEEP-FLAT, with the WASM experiment's 2,019,549-square differential as its permanent killer.
+
+Q22. LUNA6 study timing (it waited behind 8 rule units and REGEN). OWNER, verbatim: "Just go xhigh Luna 6".
+- The preregistered effort study (D898, luna6-effort-study-v1) is WITHDRAWN PRE-RUN.
+  - No study cell ever ran (no S-SCHEDULE, V18 or cells).
+  - D898 stays in the record as registered and withdrawn, not edited.
+- The route E is set by owner ruling: gpt-6-luna at XHIGH. That replaces what S-RESULT would have decided (plan r5 §3, D890 b/c).
+- Consequences, from plan r5 (.claude/consensus/luna6/plan-r5.md):
+  - PR6's interim ends. Script-chosen Luna runs move from gpt-5.6-luna to gpt-6-luna xhigh under the B1 lift and hang guard.
+  - B5 (the launcher and launch provenance, plan §5, formerly "after S-RESULT") is unblocked, with E = xhigh.
+  - PR4: live escalation is a fresh gpt-6-luna session at xhigh.
+  - DATA-01's teacher route (§7, PR10/PR11) is gpt-6-luna xhigh. It still waits for the three named human audit roles and the D903 rubric freeze.
+  - The D898 pre-run amendment for FOOTPRINT/REGEN fixture changes is no longer needed. REGEN stays (D911) for the rooms themselves, not for a study.
+- B6's effort-study operator and T8 (landed in D910) now have no use. Whether to delete them is an owner question (pre-alpha: delete unused code).
+- The RL corpus route (B2, gpt-6-luna LOW, D887 b) is a different role and is unchanged by this ruling unless the owner says so.
+
+Q23 (re-check the power simulation after REGEN): MOOT; the study is withdrawn.
+
+Next free id: D926.
