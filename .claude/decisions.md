@@ -2916,3 +2916,35 @@ HARVESTED (agent-reported):
   - Owner question pending.
 
 Next free id: D915.
+
+## D915 — 2026-09-27 09:25 — owner: all four IMPORT-SLIM proposals; "Why are we parsing the srd text at runtime. That seems crazy." → SRD-BUILDTIME
+
+QUESTION (AskUserQuestion, multi-select; IMPORT-SLIM synthesis, .tmp/runs/import-slim/import-slim-synthesis/report.md).
+OWNER, verbatim: "Fix the 2 cache holes (Recommended), Cut the two SRD bridges (Recommended), Test-helper split + type-import hygiene (Recommended), Permanent import-boundary guard (Recommended), Why are we parsing the srd text at runtime. That seems crazy."
+
+MY ANSWER TO THE QUESTION (verified by me in the code):
+- Three runtime modules import the SRD text:
+  - src/rules/class-resources-srd.ts:10 imports docs/srd/full/srd-5.2.1.txt?raw (D91-M, a1af6875, 2026-07-31) and parses class tables at DB boot.
+  - src/simulation/coverage.ts:5-6 imports the full SRD and spell-descriptions.txt?raw (Stage 2B, bfb53799, 2026-08-14). At module scope (:615-629) it runs a source-of-truth AUDIT: two readings of every spell body must agree, then the save-for-damage clauses are derived. Its comment says: "costs about 0.17 s per process … there is no cache".
+  - src/rules/spells-srd.ts:14 imports spell-descriptions.txt?raw.
+- Why: the project rule that rules data comes from the repo's SRD text, never from recall, was implemented as runtime derivation instead of a build-time derivation with a drift check. Combat code reaches coverage.ts only through one small d20 helper in probability.ts.
+- The mistake is where the derivation runs, not the rule.
+
+SCOPE, raised by the owner's question: unit SRD-BUILDTIME covers ALL runtime SRD-text consumers, not just the two bridges.
+- P1: move the d20 folds out of probability.ts.
+- P3: class-resources derivations become generated data.
+- P1b: coverage.ts's derivation becomes generated data.
+- spells-srd.ts: its spell-description reading becomes generated data too.
+- Each generated artifact is committed, with a generator command and a drift test that re-derives it from the SRD text and fails on any byte difference. Import-time self-checks move into those tests.
+- Goal: no module outside tests, the generator and the drift tests imports an SRD ?raw corpus; the SRD appears in 0 app chunks and 0 engine-child bytes. The import-boundary guard's R2 enforces this, and a dist byte scan checks it after build.
+
+THE OTHER SELECTIONS, all as proposed:
+- VERDICT-SOUND: fix the two fail-open holes in scripts/test-affected.mjs (the import.meta.glob MetaProperty check; `import { type X }` counted as runtime). It is folded into RECORDER-A as a fix round after its codex r1.
+- OPENDB split of tests/helpers/open-db.ts, plus P8 hygiene: 26 `import { type X }` sites become `import type`.
+- GUARD: scripts/check-import-boundaries.mjs with R1–R5 and self-tests, chained into check-command-outcomes.
+
+Order and ownership:
+- SRD-BUILDTIME and OPENDB+P8+GUARD run now in their own clones. They do not touch encounter.ts, so there is little overlap with FOOTPRINT, MOVE-COST, COVER-EDGE and visibility.
+- Each needs a codex review, a timed pair and a landing.
+
+Next free id: D916.
