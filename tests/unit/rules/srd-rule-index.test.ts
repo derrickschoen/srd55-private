@@ -315,11 +315,13 @@ describe('SRD_RULE_INDEX structure', () => {
       if (lines === undefined) {
         continue;
       }
-      const printed = (lines[Number(first?.[2]) - 1] ?? '') + ' ' + (lines[Number(first?.[2])] ?? '');
-      // A name printed over two lines (a subclass, a wrapped item or section
-      // name) shares its lines with the other column: probe its first word.
-      const probe = kind === 'rule_section' || kind === 'magic_item' || kind === 'subclass' ? name.split(/[ ,]/)[0] ?? name : name;
-      expect({ id, printsName: printed.includes(probe) }).toEqual({ id, printsName: true });
+      const line = Number(first?.[2]);
+      // A name printed over two lines (a wrapped item or section name) starts
+      // on the span's first line: probe its first word there. A subclass
+      // heading prints `<Class> Subclass:` first and its name after.
+      const wraps = kind === 'rule_section' || kind === 'magic_item';
+      const probe = kind === 'subclass' ? 'Subclass:' : wraps ? name.split(/[ ,]/)[0] ?? name : name;
+      expect({ id, printsName: (lines[line - 1] ?? '').includes(probe) }).toEqual({ id, printsName: true });
     }
   });
 });
