@@ -212,15 +212,18 @@ describe('the generator never loads what it generates', () => {
 
   it('imports its readers without reaching a generated artifact, so a stale or missing one cannot block regeneration', async () => {
     vi.resetModules();
+    const loaded: string[] = [];
     for (const artifact of SRD_ARTIFACTS) {
       vi.doMock(`../../../${artifact.path}`, () => {
-        throw new Error(`${artifact.path} was loaded by the generator's import graph.`);
+        loaded.push(artifact.path);
+        return {};
       });
     }
     const generator = await import('../../../scripts/srd-artifacts');
     expect(generator.SRD_ARTIFACTS.map((artifact) => artifact.path)).toEqual(
       SRD_ARTIFACTS.map((artifact) => artifact.path),
     );
+    expect(loaded).toEqual([]);
   });
 });
 
