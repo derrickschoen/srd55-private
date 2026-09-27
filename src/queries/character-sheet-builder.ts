@@ -92,6 +92,7 @@ import {
   type ProficiencyWeapon,
   type WeaponProficiencyVerdict,
 } from '../rules/multiclass-proficiency';
+import { choiceDeterminedResistanceRefs } from './choice-determined-resistances';
 import {
   effectHitPoints,
   summariseEffects,
@@ -988,6 +989,8 @@ export class CharacterSheetBuilder {
     // A MADE species choice that determines the species' unnamed resistance
     // NAMES that resistance rather than adding a second one
     // (`resolveChoiceDeterminedResistances`, PC-EXPORT-TRUTH).
+    // Only a STATED relation resolves (`CHOICE_DETERMINED_RESISTANCE_TRAITS`):
+    // the one trait effect the choice's own rule names.
     const resistanceChoiceState = choiceStates.find((choice) =>
       choice.unknown_sheet_fields.includes('damage_resistances'));
     const effectRows = resolveChoiceDeterminedResistances(
@@ -999,6 +1002,12 @@ export class CharacterSheetBuilder {
             source_instance_id: speciesChoice.source_instance_id,
             made: resistanceChoiceState.options.some((option) =>
               option.value === resistanceChoiceState.selected_option),
+            rule_key: resistanceChoiceState.rule_key,
+            determined_effect_refs: choiceDeterminedResistanceRefs(
+              this.db,
+              speciesChoice.source_instance_id,
+              resistanceChoiceState.rule_key,
+            ),
           },
     ).map(
       (effect): EffectRow => ({

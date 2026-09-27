@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import speciesExtract from '../../../docs/srd/source/species-descriptions.txt?raw';
+import { sha256 } from '../../../src/crypto/sha256';
 import {
+  CHOICE_DETERMINED_RESISTANCE_TRAITS,
   effectHitPoints,
   resolveChoiceDeterminedResistances,
   summariseEffects,
@@ -418,18 +421,26 @@ describe('a made species choice names the resistance its source left unnamed (PC
     template_ref: 'configured_choice:dragonborn-draconic-ancestry:Red:0',
   });
   const ids = (effects: readonly { readonly id: string }[]) => effects.map((effect) => effect.id);
+  // The stated relation (CHOICE_DETERMINED_RESISTANCE_TRAITS): Draconic
+  // Ancestry names the Damage Resistance trait's copied effect, ref :3.
+  const dragonbornChoice = (made: boolean) => ({
+    source_instance_id: 4,
+    made,
+    rule_key: 'dragonborn-draconic-ancestry',
+    determined_effect_refs: ['species_template_trait_effects:3'],
+  });
 
   it('resolves a made choice: the untyped effect of the same source is the one the typed effect names', () => {
     expect(ids(resolveChoiceDeterminedResistances(
       [untyped(4), typed(4)],
-      { source_instance_id: 4, made: true },
+      dragonbornChoice(true),
     ))).toEqual(['typed-4']);
   });
 
   it('keeps the unnamed resistance while the choice is unmade, or when no choice owns it', () => {
     expect(ids(resolveChoiceDeterminedResistances(
       [untyped(4), typed(4)],
-      { source_instance_id: 4, made: false },
+      dragonbornChoice(false),
     ))).toEqual(['untyped-4', 'typed-4']);
     expect(ids(resolveChoiceDeterminedResistances([untyped(4)], null))).toEqual(['untyped-4']);
   });
@@ -438,17 +449,111 @@ describe('a made species choice names the resistance its source left unnamed (PC
     // Two untyped grants and one choice: which one it settles is not stated.
     expect(ids(resolveChoiceDeterminedResistances(
       [untyped(4), { ...untyped(4), id: 'second-untyped-4' }, typed(4)],
-      { source_instance_id: 4, made: true },
+      dragonbornChoice(true),
     ))).toEqual(['untyped-4', 'second-untyped-4', 'typed-4']);
     // A made choice that inserted no typed effect settles nothing.
     expect(ids(resolveChoiceDeterminedResistances(
       [untyped(4)],
-      { source_instance_id: 4, made: true },
+      dragonbornChoice(true),
     ))).toEqual(['untyped-4']);
     // Another source's unnamed resistance is not this choice's to name.
     expect(ids(resolveChoiceDeterminedResistances(
       [untyped(9), typed(4)],
-      { source_instance_id: 4, made: true },
+      dragonbornChoice(true),
     ))).toEqual(['untyped-9', 'typed-4']);
+  });
+});
+
+describe('a made choice names only the grant its stated relation names (PC-EXPORT-TRUTH fix 1)', () => {
+  // codex r1 P2: "any one unnamed resistance and one configured-choice
+  // resistance from the same source" was read as ONE grant. The relation is
+  // now stated: the bundled species trait whose Resistance the choice
+  // determines, by its copied template effect ref, and the choice's own rule.
+  const unnamed = (id: string, templateRef: string): ChoiceResolvableEffect & { readonly id: string } => ({
+    id,
+    effect_kind: 'damage_resistance',
+    damage_type: null,
+    source_instance_id: 4,
+    template_ref: templateRef,
+  });
+  const chosen = (ruleKey: string): ChoiceResolvableEffect & { readonly id: string } => ({
+    id: `chosen-${ruleKey}`,
+    effect_kind: 'damage_resistance',
+    damage_type: 'Fire',
+    source_instance_id: 4,
+    template_ref: `configured_choice:${ruleKey}:Red:0`,
+  });
+  const ids = (effects: readonly { readonly id: string }[]) => effects.map((effect) => effect.id);
+
+  it('keeps an authored species\' independent unnamed resistance beside a choice granting Fire', () => {
+    // No bundled relation is stated for an authored species, so the choice's
+    // Fire is ADDED and the independent grant stays unnamed: the sheet keeps
+    // refusing rather than silently losing it.
+    expect(ids(resolveChoiceDeterminedResistances(
+      [unnamed('independent', 'species_template_trait_effects:77'), chosen('authored-choice')],
+      {
+        source_instance_id: 4,
+        made: true,
+        rule_key: 'authored-choice',
+        determined_effect_refs: [],
+      },
+    ))).toEqual(['independent', 'chosen-authored-choice']);
+  });
+
+  it('names only the related trait\'s effect, and only from the related choice', () => {
+    // The Dragonborn's Damage Resistance trait effect is ref :3; an unnamed
+    // resistance on any OTHER trait is not the one Draconic Ancestry names.
+    expect(ids(resolveChoiceDeterminedResistances(
+      [unnamed('other-trait', 'species_template_trait_effects:77'), chosen('dragonborn-draconic-ancestry')],
+      {
+        source_instance_id: 4,
+        made: true,
+        rule_key: 'dragonborn-draconic-ancestry',
+        determined_effect_refs: ['species_template_trait_effects:3'],
+      },
+    ))).toEqual(['other-trait', 'chosen-dragonborn-draconic-ancestry']);
+    // A typed resistance from another rule is not this choice's answer.
+    expect(ids(resolveChoiceDeterminedResistances(
+      [unnamed('related', 'species_template_trait_effects:3'), chosen('some-other-rule')],
+      {
+        source_instance_id: 4,
+        made: true,
+        rule_key: 'dragonborn-draconic-ancestry',
+        determined_effect_refs: ['species_template_trait_effects:3'],
+      },
+    ))).toEqual(['related', 'chosen-some-other-rule']);
+    // The related pair resolves.
+    expect(ids(resolveChoiceDeterminedResistances(
+      [unnamed('related', 'species_template_trait_effects:3'), chosen('dragonborn-draconic-ancestry')],
+      {
+        source_instance_id: 4,
+        made: true,
+        rule_key: 'dragonborn-draconic-ancestry',
+        determined_effect_refs: ['species_template_trait_effects:3'],
+      },
+    ))).toEqual(['chosen-dragonborn-draconic-ancestry']);
+  });
+
+  it('states each relation from its printed span (hash pinned; the phrases read by hand)', () => {
+    const lines = speciesExtract.split('\n');
+    const spanText = (span: string): string => {
+      const match = /:(\d+)-(\d+)$/u.exec(span);
+      if (match === null) throw new Error(`Bad span ${span}`);
+      return lines.slice(Number(match[1]) - 1, Number(match[2])).join('\n');
+    };
+    expect(CHOICE_DETERMINED_RESISTANCE_TRAITS.map((relation) => [
+      relation.species,
+      relation.trait,
+      relation.choiceRuleKey,
+      sha256(spanText(relation.span)),
+    ])).toEqual([
+      ['Dragonborn', 'Damage Resistance', 'dragonborn-draconic-ancestry',
+        '351112b69dade778b9432f3f407b59c14d4e3550144f6d2dc62206a5c31f1749'],
+      ['Tiefling', 'Fiendish Legacy', 'tiefling-lineage',
+        'db8ff58e143ba1ac8264b7beb0acdb01487c140779f6ec91d74b45ce7332baa5'],
+    ]);
+    // Two-column extract: the trait's words are in the span's left or right column.
+    expect(spanText(CHOICE_DETERMINED_RESISTANCE_TRAITS[0].span)).toContain('Damage Resistance. You have Resistance to the');
+    expect(spanText(CHOICE_DETERMINED_RESISTANCE_TRAITS[1].span)).toContain('level 1 benefit of the chosen legacy.');
   });
 });

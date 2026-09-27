@@ -1,5 +1,6 @@
 import type { DamageType, EffectKind } from '../domain/enums';
 import { effectKinds, isEnumValue } from '../domain/enums';
+import type { SrdSpeciesName } from './generated/species-srd-tables';
 
 /**
  * WHAT A MECHANICAL EFFECT ACTUALLY DOES.
@@ -247,11 +248,67 @@ export interface ChoiceResolvableEffect {
   readonly template_ref: string | null;
 }
 
-/** The configured choice that DETERMINES a source's unnamed resistance, when made. */
+/**
+ * The configured choice that DETERMINES a source's unnamed resistance, when
+ * made, and the one grant it names.
+ *
+ * `determined_effect_refs` are the copied template refs
+ * (`species_template_trait_effects:<id>`) of the species trait effect the
+ * choice's rule is STATED to name (`CHOICE_DETERMINED_RESISTANCE_TRAITS`).
+ * Empty when no such relation is stated — an authored or imported species —
+ * and then nothing resolves.
+ */
 export interface ResistanceChoiceResolution {
   readonly source_instance_id: number;
   readonly made: boolean;
+  /** The configured choice's `rule_key`; its effects are `configured_choice:<rule_key>:…`. */
+  readonly rule_key: string;
+  readonly determined_effect_refs: readonly string[];
 }
+
+export type SpeciesDescriptionsSpan = `docs/srd/source/species-descriptions.txt:${number}-${number}`;
+
+/** One stated relation: this bundled species' choice names this trait's Resistance. */
+export interface ChoiceDeterminedResistanceTrait {
+  /** The bundled SRD species, by its printed name. */
+  readonly species: SrdSpeciesName;
+  /** The printed trait whose untyped Resistance the choice determines. */
+  readonly trait: string;
+  /** The seeded configured choice (`origin-definitions-srd.ts`) that names it. */
+  readonly choiceRuleKey: string;
+  readonly span: SpeciesDescriptionsSpan;
+}
+
+/**
+ * EVERY SPECIES TRAIT WHOSE RESISTANCE A CHOICE NAMES, STATED ONE BY ONE
+ * (production rule H: hand-typed from the cited span; the span text is hash
+ * pinned by tests/unit/rules/species-effects.test.ts).
+ *
+ *  - Dragonborn, "Damage Resistance. You have Resistance to the damage type
+ *    determined by your Draconic Ancestry trait."
+ *  - Tiefling, "Fiendish Legacy. ... Choose a legacy from the Fiendish
+ *    Legacies table. You gain the level 1 benefit of the chosen legacy." —
+ *    whose level 1 benefit is the Resistance the legacy row names.
+ *
+ * Nothing else resolves. An authored species' configured choice declares
+ * which sheet fields it leaves unknown, not which of its grants a choice
+ * settles, so its unnamed resistance stays unchosen and the sheet keeps
+ * refusing rather than dropping a grant it cannot tie to the choice.
+ */
+export const CHOICE_DETERMINED_RESISTANCE_TRAITS = [
+  {
+    species: 'Dragonborn',
+    trait: 'Damage Resistance',
+    choiceRuleKey: 'dragonborn-draconic-ancestry',
+    span: 'docs/srd/source/species-descriptions.txt:91-93',
+  },
+  {
+    species: 'Tiefling',
+    trait: 'Fiendish Legacy',
+    choiceRuleKey: 'tiefling-lineage',
+    span: 'docs/srd/source/species-descriptions.txt:205-211',
+  },
+] as const satisfies readonly ChoiceDeterminedResistanceTrait[];
 
 const CONFIGURED_CHOICE_TEMPLATE_PREFIX = 'configured_choice:';
 
@@ -259,22 +316,19 @@ const CONFIGURED_CHOICE_TEMPLATE_PREFIX = 'configured_choice:';
  * A MADE CHOICE NAMES THE RESISTANCE ITS SOURCE LEFT UNNAMED; IT DOES NOT ADD
  * A SECOND ONE (PC-EXPORT-TRUTH, D918).
  *
- * The Dragonborn's "Damage Resistance" trait grants "Resistance to the damage
- * type determined by your Draconic Ancestry trait" (species-descriptions.txt:
- * 91-93), and the Tiefling's Fiendish Legacy grants "the level 1 benefit of
- * the chosen legacy" — a Resistance whose type the legacy table names
- * (:205-211, :233-238). Each species copies ONE untyped resistance effect, and
- * the species' configured choice declaring `damage_resistances` later inserts
- * ONE typed effect. Read side by side they said "Fire, plus one still
- * unchosen", so a Tiefling who had chosen Infernal could never be exported.
+ * The Dragonborn's "Damage Resistance" trait and the Tiefling's Fiendish
+ * Legacy each copy ONE untyped resistance effect, and the species' configured
+ * choice later inserts ONE typed effect. Read side by side they said "Fire,
+ * plus one still unchosen", so a Tiefling who had chosen Infernal could never
+ * be exported.
  *
- * When that choice is made, the untyped effect of the SAME source instance is
- * the one the typed effect names, and it is dropped from the list this
- * returns. Only the exact one-to-one case resolves: two untyped effects, or a
- * choice that inserted no typed effect, leave every row as it is, so the
- * sheet keeps refusing rather than guessing which grant a choice settled.
- * Nothing is deleted from the database; a reversed choice restores the
- * unchosen reading on the next build.
+ * When that choice is made, the untyped effect it NAMES — the copied effect of
+ * the trait `CHOICE_DETERMINED_RESISTANCE_TRAITS` states, by template ref —
+ * is dropped from the list this returns, and only when that choice's own
+ * rule inserted exactly one typed effect. Everything else stays: an unnamed
+ * resistance on another trait, an authored species' independent grant, a
+ * typed effect from a different rule. Nothing is deleted from the database;
+ * a reversed choice restores the unchosen reading on the next build.
  */
 export function resolveChoiceDeterminedResistances<Effect extends ChoiceResolvableEffect>(
   effects: readonly Effect[],
@@ -284,13 +338,13 @@ export function resolveChoiceDeterminedResistances<Effect extends ChoiceResolvab
   const fromSource = (effect: Effect): boolean =>
     effect.effect_kind === 'damage_resistance' &&
     effect.source_instance_id === choice.source_instance_id;
-  const chosen = (effect: Effect): boolean =>
-    effect.template_ref?.startsWith(CONFIGURED_CHOICE_TEMPLATE_PREFIX) === true;
-  const untyped = effects.filter((effect) =>
-    fromSource(effect) && !chosen(effect) && effect.damage_type === null);
+  const named = effects.filter((effect) =>
+    fromSource(effect) && effect.damage_type === null &&
+    effect.template_ref !== null && choice.determined_effect_refs.includes(effect.template_ref));
   const typed = effects.filter((effect) =>
-    fromSource(effect) && chosen(effect) && effect.damage_type !== null);
-  const [placeholder] = untyped;
-  if (untyped.length !== 1 || typed.length !== 1 || placeholder === undefined) return effects;
+    fromSource(effect) && effect.damage_type !== null &&
+    effect.template_ref?.startsWith(`${CONFIGURED_CHOICE_TEMPLATE_PREFIX}${choice.rule_key}:`) === true);
+  const [placeholder] = named;
+  if (named.length !== 1 || typed.length !== 1 || placeholder === undefined) return effects;
   return effects.filter((effect) => effect !== placeholder);
 }
