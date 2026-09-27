@@ -99,7 +99,20 @@ describe('catalog tagged error formatters', () => {
     [new CatalogDataMigrationDuplicateSourcePathError('fixture'), 'Catalog data migration "fixture" has duplicate checksum source paths.', { migration_id: 'fixture' }],
     [new CatalogDataMigrationChecksumMismatchError('fixture', 'old', 'new'), 'Catalog data migration "fixture" source checksum mismatch: expected old, got new.', { migration_id: 'fixture', expected_checksum: 'old', actual_checksum: 'new' }],
     [new CatalogDataMigrationUnregisteredMarkerError('fixture'), 'Applied catalog data migration "fixture" is not registered by this application.', { migration_id: 'fixture' }],
-    [new CatalogDataMigrationMarkerDisagreementError('fixture'), 'Applied catalog data migration "fixture" does not match the registered projector scheme and checksum.', { migration_id: 'fixture' }],
+    [
+      new CatalogDataMigrationMarkerDisagreementError(
+        'fixture',
+        { scheme: 'content-v1', checksum: 'aaaaaaaaaaaaffff' },
+        { scheme: 'content-v2', checksum: 'bbbbbbbbbbbbffff' },
+      ),
+      'This local database was prepared by an earlier build: its catalog data update "fixture" was applied as content-v1 aaaaaaaaaaaa, and this build registers content-v2 bbbbbbbbbbbb. This pre-alpha build does not migrate it: export the database if you want a copy, then reset the local database.',
+      {
+        migration_id: 'fixture',
+        stored: { scheme: 'content-v1', checksum: 'aaaaaaaaaaaaffff' },
+        registered: { scheme: 'content-v2', checksum: 'bbbbbbbbbbbbffff' },
+        remedy: 'reset_local_database',
+      },
+    ],
     [new CatalogDataMigrationForeignKeyError('fixture', 'table spells'), 'Catalog data migration "fixture" foreign-key check failed for table spells.', { migration_id: 'fixture', problem: 'table spells' }],
     [new ContentFingerprintInputDisagreementError(), 'Content fingerprint scheme, digest, and canonical bytes do not agree.', {}],
     [new ContentFingerprintSchemeUnregisteredError('content-v9'), 'Cannot promote an unregistered fingerprint scheme.', { scheme: 'content-v9' }],

@@ -73,12 +73,37 @@ export class CatalogDataMigrationUnregisteredMarkerError extends Error {
   }
 }
 
+/** One side of a marker comparison: the scheme and checksum a migration ran under. */
+export interface CatalogDataMigrationStamp {
+  readonly scheme: string;
+  readonly checksum: string;
+}
+
+/**
+ * An image whose applied marker disagrees with this build's registration.
+ *
+ * The marker's frozen sources changed after the image ran the migration, so
+ * this build cannot tell what the stored rows mean. There is no migration for
+ * that in this pre-alpha project: the owner accepted resetting the local
+ * database instead (D923 Q11). The error therefore NAMES the marker and the
+ * remedy, as fields the boot reports by type and in its message, rather than
+ * a sentence only a developer could act on.
+ */
 export class CatalogDataMigrationMarkerDisagreementError extends Error {
   override readonly name = 'CatalogDataMigrationMarkerDisagreementError' as const;
-  constructor(readonly migration_id: string) {
+  readonly remedy = 'reset_local_database' as const;
+  constructor(
+    readonly migration_id: string,
+    readonly stored: CatalogDataMigrationStamp,
+    readonly registered: CatalogDataMigrationStamp,
+  ) {
     super(
-      `Applied catalog data migration "${migration_id}" does not match the ` +
-        'registered projector scheme and checksum.',
+      `This local database was prepared by an earlier build: its catalog data ` +
+        `update "${migration_id}" was applied as ${stored.scheme} ` +
+        `${stored.checksum.slice(0, 12)}, and this build registers ` +
+        `${registered.scheme} ${registered.checksum.slice(0, 12)}. This ` +
+        'pre-alpha build does not migrate it: export the database if you ' +
+        'want a copy, then reset the local database.',
     );
   }
 }

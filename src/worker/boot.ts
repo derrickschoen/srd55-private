@@ -3,6 +3,7 @@ import type {
   DatabaseVerificationMode,
 } from '../db/database-lifecycle';
 import { DatabaseStoragePoolLockedError } from '../db/storage-pool-lock';
+import { CatalogDataMigrationMarkerDisagreementError } from '../catalog/catalog-data-migrations-errors';
 import { RpcError } from '../rpc/protocol';
 import type { HandlerContext, RuntimeEnvironment } from './handler';
 
@@ -32,7 +33,36 @@ export type DatabaseBoot =
       readonly status: 'schema_mismatch';
       readonly lifecycle: DatabaseLifecycle;
       readonly detail: string;
+      readonly reason: DatabaseBootFailure;
     };
+
+/**
+ * WHY a boot degraded, by type, so the remedy is data rather than a phrase in
+ * `detail`.
+ *
+ * `catalog_data_marker_disagreement`: the image ran a catalog data migration
+ * whose frozen sources this build changed. The owner accepted a local
+ * database reset for this in pre-alpha (D923 Q11), so the remedy is stated —
+ * `system.reset`, after an optional `system.exportDatabase`.
+ * `image_rejected`: any other refusal of the stored image.
+ */
+export type DatabaseBootFailure =
+  | {
+      readonly kind: 'catalog_data_marker_disagreement';
+      readonly migrationId: string;
+      readonly remedy: CatalogDataMigrationMarkerDisagreementError['remedy'];
+    }
+  | { readonly kind: 'image_rejected' };
+
+function bootFailure(error: unknown): DatabaseBootFailure {
+  return error instanceof CatalogDataMigrationMarkerDisagreementError
+    ? {
+        kind: 'catalog_data_marker_disagreement',
+        migrationId: error.migration_id,
+        remedy: error.remedy,
+      }
+    : { kind: 'image_rejected' };
+}
 
 /**
  * The only methods dispatchable while degraded.
@@ -60,6 +90,7 @@ export function bootDatabase(
       status: 'schema_mismatch',
       lifecycle,
       detail: error instanceof Error ? error.message : String(error),
+      reason: bootFailure(error),
     };
   }
 }
@@ -147,10 +178,25 @@ export function degradedRejection(
   if (!isDegraded(boot) || DEGRADED_SAFE_METHODS.has(method)) {
     return null;
   }
-  return new RpcError(
-    'schema_mismatch',
-    `The stored database does not match this build's schema, so "${method}" ` +
-      'is unavailable. Export the database to keep a copy, then reset it. ' +
-      `Details: ${boot.detail}`,
-  );
+  switch (boot.reason.kind) {
+    case 'catalog_data_marker_disagreement':
+      return new RpcError(
+        'schema_mismatch',
+        `The stored database predates this build's catalog data update ` +
+          `"${boot.reason.migrationId}", so "${method}" is unavailable. ` +
+          `Details: ${boot.detail}`,
+        {
+          reason: boot.reason.kind,
+          migration_id: boot.reason.migrationId,
+          remedy: boot.reason.remedy,
+        },
+      );
+    case 'image_rejected':
+      return new RpcError(
+        'schema_mismatch',
+        `The stored database does not match this build's schema, so "${method}" ` +
+          'is unavailable. Export the database to keep a copy, then reset it. ' +
+          `Details: ${boot.detail}`,
+      );
+  }
 }

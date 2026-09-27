@@ -373,7 +373,11 @@ export function runCatalogDataMigrations(
       marker.scheme !== migration.projectorScheme ||
       marker.checksum !== migration.checksum
     ) {
-      throw new CatalogDataMigrationMarkerDisagreementError(marker.id);
+      throw new CatalogDataMigrationMarkerDisagreementError(
+        marker.id,
+        { scheme: marker.scheme, checksum: marker.checksum },
+        { scheme: migration.projectorScheme, checksum: migration.checksum },
+      );
     }
     applied.set(marker.id, marker);
   }
