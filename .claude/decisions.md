@@ -2744,3 +2744,31 @@ OWNER, recorder question (x3 P3: the verdict-cache recorder audit shows 164 unde
 - The research runs after the quiet window (queue3/queue4), so its agents cannot void the gates.
 
 Next free id: D910.
+
+## D910 — 2026-09-26 21:36 — LUNA6 B1, B4, B2 and B6 LANDED after a whole gate on the new main; B6 V10 met on the quiet box
+
+GATES (run and read by me; void rule v2; all VALID; every verdict passed):
+- queue3, combined arm on the old main (84b862ed = 33880118 + B1 + B4 + B2 + B6 + my allowlist adaptation):
+  - tsc 0; check-command-outcomes 0;
+  - gate initial 302.0 s, retry 93.5 s, total 395.5 s (cold cache);
+  - 653 files, 11,602 tests; 3 files passed on retry, 0 failures.
+- B6 V10: T8 (tests/unit/tools/luna6-effort-study.test.ts) solo, --maxWorkers=1, 3 runs at load 2.40, 1.72 and 1.25: 4.49, 4.49 and 4.51 s wall, under the 5 s cap.
+- queue4, the landing arm dnd-gate-exp-luna6-onmain-59a4f523 (278074dd = main 59a4f523 with #3/#6 + the 21 LUNA6 commits):
+  - tsc 0; check-command-outcomes 0;
+  - gate initial 205.6 s, retry 12.7 s, total 218.4 s;
+  - 658 files, 11,657 tests; 0 failures after retry.
+  - Initial-phase timeouts that passed on retry: tests/unit/db/codec-slot-is-never-an-identity.test.ts "finds no passthrough codec…" at 5,820 ms, and tests/unit/tools/d583-contract-inventory.test.ts "…through the Git seam" at 5,187 ms. Both are on the TIMEOUT WATCH.
+
+LANDED: main = f0be3c93, 21 commits cherry-picked onto 6149fcc8.
+- The tree equals the gated arm except .claude/decisions.md (D909). Mirror verified.
+- LUNA6-01 B1 (gpt-6-luna lift and hang guard), B4 (historical Luna literal guard), B2 (generate-data v2) and B6 (effort-study operator + T8) are on main.
+- Landing-record items the reviews asked for:
+  - B6 has 86 distinct mutations: plan 22 + M86 + M6F01–M6F19 + M6G01–M6G44, batch-scoped ids.
+  - T8 pins the whole schedule by the sha256 of an independent oracle, an approved deviation from plan §4.1's "properties only", following review r2.
+  - Per-stratum output is kept as a labelled "supplementary, not preregistered" block.
+  - The secondary bootstrap seed convention is the implemented one: the decision uses seed 20260924, offset k = 0. It is to be bound in the S-SCHEDULE entry before the first cell.
+  - Plan V5's baseline literal is amended from 60249dad… to 700a277d… (the convsplit change, D894). V2 was already amended.
+  - B2: generate-data is single-writer (D906).
+- Next on the LUNA6 path: FOOTPRINT, MOVE-COST, SQUEEZE-COMBAT and SQUEEZE-THROUGH (D905–D907) change study-room behaviour and come first. Then the D898 pre-run amendment, S-SCHEDULE, the V18 dry run and the study cells.
+
+Next free id: D911.
