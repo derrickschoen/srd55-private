@@ -32,10 +32,10 @@ import { srdReadingOrder, type StreamRow } from './srd-columns.ts';
  *   backgrounds become their own kinds; every located heading is a span
  *   boundary.
  * - Glossary entries are the Title Case headings between "Rules Definitions"
- *   and "Gameplay Toolbox" that end the previous entry's sentence, start a
- *   sentence, and keep the glossary's alphabetical order (a table caption such
- *   as "Influence Checks" or "Object Armor Class" breaks the order or is
- *   followed by a table header, and is not an entry).
+ *   and "Gameplay Toolbox" that end the previous entry's sentence (or a table)
+ *   and start a sentence. A table caption such as "Influence Checks" or
+ *   "Object Armor Class" is followed by the table's header row, so it is not
+ *   an entry.
  * - Class and subclass features are the `Level N: Name` headings, attributed to
  *   the class or subclass section they are printed in. The one subclass per
  *   class is named by `docs/srd/source/subclasses.txt`, whose `Level N:` list
@@ -201,8 +201,9 @@ function alphabeticalKey(name: string): string {
 
 /**
  * The longest run of candidates in strictly increasing alphabetical order. The
- * glossary and the invocation list are printed alphabetically; a caption or a
- * sub-heading that happens to look like an entry falls out of that order.
+ * invocation list is printed alphabetically; each invocation's
+ * `Prerequisite: Level N+ Warlock` line also reads as a heading, and repeats,
+ * so it falls out of that order.
  */
 function alphabeticalRun(rows: readonly StreamRow[], candidates: readonly number[]): number[] {
   const keys = candidates.map((index) => alphabeticalKey(rows[index]?.text ?? ''));
@@ -541,7 +542,7 @@ function deriveDrafts(read: SrdCorpusReader): Derivation {
       throw new SrdRuleIndexError('"Rules Definitions" was not found.');
     }
     const end = sectionAnchor('rule_section.gameplay-toolbox');
-    for (const index of alphabeticalRun(rows, headingsBetween(rows, start + 1, end))) {
+    for (const index of headingsBetween(rows, start + 1, end)) {
       const text = rowAt(rows, index).text;
       const tagged = GLOSSARY_TAG.exec(text)?.groups;
       let kind: SrdRuleKind = 'glossary';
