@@ -2832,3 +2832,25 @@ READING AND SEQUENCING (mine; the owner can overturn):
 - D569 v5 (historical experiment, results sha 8c0bcb3c): its manifest must stay verifiable as history under the rule version it ran on, not be re-validated under sealed walls. The REGEN unit designs that.
 
 Next free id: D912.
+
+## D912 — 2026-09-27 05:49 — owner: no WASM (visibility is next); recorder design A plus the env fix; a new import-graph analysis to split common imports
+
+QUESTION 1 (the WASM-SIMD result, D911). OWNER, verbatim choice: "No WASM; go after visibility (Recommended)".
+- The experiment is closed and nothing lands; the clone dnd-probe-wasm-7dcb is kept until the quiet bench is recorded.
+- The next performance unit targets per-pair visibility (detectCombatant, 22.5% of capture busy time), using the flat-layout technique in TypeScript. It comes after COVER-EDGE, which changes the same verdict.
+- The flat-layout cover sweep in TS can follow as its own unit.
+
+QUESTION 2 (recorder research, D909/D911). OWNER, verbatim: "Do your recommendations. Also, analyze the common imports and brainstorm ways to refactor them into smaller independent units so that modules only import the parts they need and don’t pull in a bunch of code they don’t actually need along for the ride".
+- RECORDER-A: each engine-child test's declared inputs come from the bundle's sealed input list (from 165 undeclared toward the pre-x3 31).
+  - The derivation is an exported pure helper in tools/engine-child-bundle.ts.
+  - A drift test runs checkEngineChildBundle under a file-read spy and asserts both read sets are equal.
+- ENV-TRACE: env vars read by tests are traced (a recording Proxy, hashed by value). HASHED_ENVIRONMENT stays for variables read in native code (TZ, LANG, LC_ALL).
+  - This fixes the false green found by the research: the verdict cache ignored DND_LANE_INTEL_MODE.
+- The remaining pre-x3 31 get a later small declaration unit (research Q4).
+- IMPORT-SLIM (new analysis, then an owner decision on what to refactor):
+  - census the static import graph (fan-in, transitive closure size per importer, god modules, barrels, runtime vs type-only imports, side-effect imports, cycles);
+  - brainstorm splits into smaller independent modules, so a test or tool imports only what it uses;
+  - estimate the effect on test collection time, bundle size and the verdict cache's input sets;
+  - the output is a ranked proposal list for the owner. Nothing is refactored until the owner picks.
+
+Next free id: D913.
