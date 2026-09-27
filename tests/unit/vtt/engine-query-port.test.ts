@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import { canCombatantSee, createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import { traceCombatantLine } from '../../../src/combat/cover';
 import { monsterCombatantProfile } from '../../../src/combat/combatant';
@@ -9,6 +9,7 @@ import { terrainBlocking, terrainKindOfWireBlocking } from '../../../src/combat/
 import { armorClass, combatantId, statblockId, worldObjectId, type CombatantId } from '../../../src/combat/values';
 import { projectDmView } from '../../../src/combat/visibility';
 import { projectEncounterBoard } from '../../../src/vtt/encounter-board';
+import type { EnginePathResult } from '../../../src/vtt/engine-query-port';
 import {
   availableEngineActorOptions,
   createPureTurnProposalResolver,
@@ -120,8 +121,8 @@ describe('canonical engine query port', () => {
         // Seven ordinary entries cost 35 feet; Dash supplies the second 30-foot budget.
         expect(canonical).toMatchObject({ legal: true, costFeet: 35, budgetFeet: 60 });
       } else {
-        // A hostile living creature occupies the requested endpoint.
-        expect(canonical).toEqual({ legal: false, code: 'destination_unreachable' });
+        // A hostile living creature occupies the requested endpoint, so no route may end there at any budget.
+        expect(canonical).toEqual({ legal: false, code: 'unreachable_within_budget' });
       }
     }
   });
@@ -150,6 +151,42 @@ describe('canonical engine query port', () => {
       .toEqual({ legal: false, code: 'actor_not_placed' });
   });
 
+  it('D901 PATH-ONE refuses a destination beyond the budget and one walled off entirely with the same single code', () => {
+    // The failure union is exactly two codes; a third (an "insufficient movement" split) would not compile.
+    expectTypeOf<Extract<EnginePathResult, { readonly legal: false }>['code']>()
+      .toEqualTypeOf<'actor_not_placed' | 'unreachable_within_budget'>();
+    // One 18-column row, actor at column 0, a wall at column 5: every route east of it crosses the wall.
+    const generated = placedState(SEED, new Map<CombatantId, GridCell>([[ACTOR_ID, { column: 0, row: 0 }]]), [], 1);
+    expect(generated.bounds).toEqual({ columns: 18, rows: 1 });
+    const state: EncounterState = { ...generated, blockedCells: [{ column: 5, row: 0 }] };
+    const pathTo = (column: number, maximumFeet: number) => OFFER_ENVIRONMENT.queries.path(state, {
+      actorId: ACTOR_ID, destination: { column, row: 0 }, movement: 'normal', maximumFeet,
+    });
+    const refusal = { legal: false, code: 'unreachable_within_budget' };
+
+    // Column 3 is three ordinary 5-foot entries: 3 * 5 = 15 feet, so a 15-foot budget reaches it...
+    expect(pathTo(3, 15)).toEqual({
+      legal: true,
+      cells: [{ column: 1, row: 0 }, { column: 2, row: 0 }, { column: 3, row: 0 }],
+      costFeet: 15,
+      budgetFeet: 15,
+    });
+    // ...and column 7 stays refused at the whole-grid cost (18 * 1 * 10 = 180 feet) and past it.
+    expect(pathTo(7, 180)).toEqual(refusal);
+    expect(pathTo(7, Number.POSITIVE_INFINITY)).toEqual(refusal);
+
+    // Under a 10-foot budget both are refused, and the two refusals are indistinguishable.
+    const beyondBudget = pathTo(3, 10);
+    const walledOff = pathTo(7, 10);
+    expect(beyondBudget).toEqual(refusal);
+    expect(walledOff).toEqual(refusal);
+    expect(beyondBudget).toEqual(walledOff);
+    // The one-search reachable query agrees: 10 feet reaches columns 0, 1 and 2 (0, 5 and 10 feet) and nothing else.
+    const reachable = OFFER_ENVIRONMENT.queries.reachable(state, { actorId: ACTOR_ID, maximumFeet: 10 });
+    expect(reachable.legal ? reachable.destinations.map(({ destination, costFeet }) => [destination.column, costFeet]) : reachable)
+      .toEqual([[0, 0], [1, 5], [2, 10]]);
+  });
+
   it('withholds Dash when an enclosed actor has no endpoint closer to its target', () => {
     // The target stands on the last column of the 18-column room (it stood at column 20, off the
     // grid, before a token anchor became an in-bounds cell in the state type).
@@ -173,7 +210,7 @@ describe('canonical engine query port', () => {
       target: { column: 17, row: 0 },
       movement: 'dash',
       maximumFeet: 60,
-    })).toEqual({ legal: false, code: 'destination_unreachable' });
+    })).toEqual({ legal: false, code: 'unreachable_within_budget' });
     expect(availableEngineActorOptions(state, ACTOR_ID, OFFER_ENVIRONMENT).map(({ label }) => label))
       .toEqual(['Dodge', 'End Turn']);
     expect(engineActorOptionsForEnvironment(state, ACTOR_ID, OFFER_ENVIRONMENT).humanOnly)

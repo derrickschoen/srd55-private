@@ -155,9 +155,9 @@ export interface EngineReachableDestination {
 
 /**
  * Exactly the destinations `path` reports legal under the same `maximumFeet`,
- * with the same cells and cost, row-major, from one search. The failure union
- * has no `insufficient_movement` or `destination_unreachable`: a destination
- * outside the budget is simply absent, so no second whole-grid search exists.
+ * with the same cells and cost, row-major, from one search. A destination
+ * `path` refuses as `unreachable_within_budget` is simply absent here, so the
+ * only failure is an actor with no placement.
  */
 export type EngineReachableResult =
   | {
@@ -173,6 +173,16 @@ export interface EngineApproachRequest {
   readonly maximumFeet?: number;
 }
 
+/**
+ * The result of `path` and `approach`. A failure carries one of two codes:
+ * - `actor_not_placed`: the actor has no combatant or no token;
+ * - `unreachable_within_budget`: no legal route to the goal (for `approach`, to
+ *   any cell nearer the target) costs at most the searched budget.
+ *
+ * The second code deliberately does not say WHY. A goal walled off entirely and
+ * a goal merely beyond the budget are the same refusal, so a miss costs one
+ * bounded search and never a second, unbounded one to tell them apart (D901).
+ */
 export type EnginePathResult =
   | {
       readonly legal: true;
@@ -182,7 +192,7 @@ export type EnginePathResult =
     }
   | {
       readonly legal: false;
-      readonly code: 'actor_not_placed' | 'destination_unreachable' | 'insufficient_movement';
+      readonly code: 'actor_not_placed' | 'unreachable_within_budget';
     };
 
 export interface EngineReachRequest {
@@ -1160,16 +1170,7 @@ function path(state: EncounterState, request: EnginePathRequest): EnginePathResu
       budgetFeet: availableBudget,
     };
   }
-  if (request.maximumFeet !== undefined && request.maximumFeet < maximumPathCost(state)) {
-    const unbounded = findPath(encounterMovementWorld(state), {
-      actorId: request.actorId,
-      start,
-      goal: request.destination,
-      maximumCost: feet(maximumPathCost(state)),
-    });
-    if (unbounded.kind === 'found') return { legal: false, code: 'insufficient_movement' };
-  }
-  return { legal: false, code: 'destination_unreachable' };
+  return { legal: false, code: 'unreachable_within_budget' };
 }
 
 /** One search per call and nothing stored: the port deliberately does not memoize this query. */
@@ -1222,7 +1223,7 @@ function approach(state: EncounterState, request: EngineApproachRequest): Engine
   });
   return result.kind === 'found'
     ? { legal: true, cells: result.cells, costFeet: result.cost, budgetFeet: availableBudget }
-    : { legal: false, code: 'destination_unreachable' };
+    : { legal: false, code: 'unreachable_within_budget' };
 }
 
 function reach(state: EncounterState, request: EngineReachRequest): EngineReachResult {
