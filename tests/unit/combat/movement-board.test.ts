@@ -356,8 +356,9 @@ function outcome(run: () => unknown): string {
 
 describe('movement board: bounded differential against the frozen string-keyed world', () => {
   it('answers every step of every creature exactly as the frozen world, on fixture states and their synthetic variants', async () => {
-    // seed-6203009 carries a Huge creature whose footprint leaves the grid (an occupant cell the board
-    // drops). The exhaustive version over every fixture is tools/experiments/movement-board/differential.ts.
+    // seed-6203009 is a brutal room with two Huge creatures (the Archelon and the Skyspear Hunter). FOOTPRINT
+    // (D904) repaired its starts, so no body leaves the grid. The exhaustive version over every fixture is
+    // tools/experiments/movement-board/differential.ts.
     const base: NamedState = {
       name: 'brutal 6203009',
       state: await loadArenaFixture('tests/fixtures/arena-basis-brutal/seed-6203009.json'),

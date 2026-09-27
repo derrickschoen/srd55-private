@@ -28,6 +28,7 @@ import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-sta
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { declareTestInputs } from '../../helpers/test-inputs';
 import { onBoard } from '../../helpers/board-cell';
+import { FOOTPRINT_FIXTURE_MOVES, withFootprintMoves } from '../../helpers/footprint-fixture-moves';
 
 const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
@@ -67,10 +68,12 @@ const BRUTAL_BASIS_GENERATED_DIGESTS = {
   6_203_002: 'cdb567192800c4dbea964fbabf03d88013d7d6402da8b391cf2f60e19e69a0c9',
   6_203_003: '6c470c04fd6373f7fa999d5f0c66539c54eb71e6094e2b83a2ca972ab91720f8',
 } as const;
+// FOOTPRINT (D904; interim per D911) repaired the overlapping starts of all three: the typed fixture digests are
+// the repaired bytes' (tests/helpers/footprint-fixture-moves.ts).
 const BRUTAL_BASIS_FIXTURE_DIGESTS = {
-  6_203_001: '3f737f1ddf714b0381abdc0e822b3a07cda4c55287a4bc0b1a97cd4d7d71d63b',
-  6_203_002: '8a7738bd2606792bae65da8f39f709ffad5b0bb5487f8e5749cecac4f29f9860',
-  6_203_003: 'd54761b2864fcdc1a777f645ade96279da751b3247bca1e042fb997326dc060f',
+  6_203_001: '83f133343d10260bc42d5e713c803baa679ca94b0893eecf5ffcc6a421efd3b4',
+  6_203_002: '24b41ffd38355e6309f219dfa8c4c356302d8a873a3e7ba15fb1805fad8d160e',
+  6_203_003: 'bcd4989588f09075bc1965e63ffa232b702554b79b2b0dad3cf08cd84293ac38',
 } as const;
 const BRUTAL_PRODUCTIVITY_SEEDS = [
   6_203_001, 6_203_002, 6_203_003, 6_203_004, 6_203_005,
@@ -495,7 +498,11 @@ describe('seeded room generator', () => {
     const legacyGeneratedBytes = `${legacyCreatureSpaceProjection(
       generateRoom(seed, { difficulty: 'brutal' }),
     )}\n`;
-    if (seed === 6_203_001) expect(legacyGeneratedBytes).toBe(fixtureBytes);
+    // 6203001 had no D466 edit: its fixture is the legacy generation plus FOOTPRINT's two literal moves.
+    if (seed === 6_203_001) {
+      expect(withFootprintMoves(legacyGeneratedBytes, FOOTPRINT_FIXTURE_MOVES['tests/fixtures/arena-basis-brutal/seed-6203001.json'], 'apply'))
+        .toBe(fixtureBytes);
+    }
     expect(sha256(legacyGeneratedBytes),
       `seed ${String(seed)} pre-replacement generation changed`).toBe(
       BRUTAL_BASIS_GENERATED_DIGESTS[seed],

@@ -153,9 +153,14 @@ describe('loaded token anchors are decoded against the grid', () => {
   });
 
   it('keeps a Huge creature whose in-bounds anchor lets its footprint reach past the grid (seed-6203009)', () => {
-    const raw = JSON.parse(inputs.fixtures.readText(HUGE_OVERHANG)) as unknown;
-    const state = accepted(() => decodeArenaBasisEnvelopeV1(raw, { mode: 'legacy_basis' })).encounter.state;
+    // FOOTPRINT C1 repaired the committed fixture (the Skyspear Hunter now starts at (14, 6)), so the overhang is
+    // built as JSON: the Skyspear is moved back to its pre-repair anchor (17, 3) in the repaired raw fixture.
+    const repaired = JSON.parse(inputs.fixtures.readText(HUGE_OVERHANG)) as { encounter: { state: JsonState } };
     const monster = combatantId('combatant:generated-6203009-monster-3');
+    const skyspear = repaired.encounter.state.tokens.findIndex((token) => token['combatantId'] === monster);
+    expect(repaired.encounter.state.tokens[skyspear]?.['position']).toEqual({ column: 14, row: 6 });
+    const raw: unknown = { ...repaired, encounter: { ...repaired.encounter, state: moved(repaired.encounter.state, skyspear, { column: 17, row: 3 }) } };
+    const state = accepted(() => decodeArenaBasisEnvelopeV1(raw, { mode: 'legacy_basis' })).encounter.state;
     expect(state.bounds).toEqual({ columns: 19, rows: 20 });
     expect(state.tokens.find((token) => token.combatantId === monster)?.position).toEqual({ column: 17, row: 3 });
     expect(state.combatants.find((entry) => entry.profile.id === monster)?.profile.rules.sizeCategory).toBe('Huge');

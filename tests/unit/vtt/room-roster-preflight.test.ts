@@ -17,6 +17,14 @@ import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-sta
 import { generateRoom } from '../../../src/vtt/room-generator';
 import { engineActorOptions } from '../../../src/vtt/turn-option-registry';
 import { decodeArenaFixture } from '../../../src/vtt/mcp/entrypoint';
+import {
+  FOOTPRINT_FIXTURE_MOVES,
+  FOOTPRINT_REPAIRED_FIXTURE_DIGESTS,
+  FOOTPRINT_REPAIRED_FIXTURE_PATHS,
+  FOOTPRINT_SUPERSEDED_FIXTURE_DIGESTS,
+  withFootprintMoves,
+  type FootprintRepairedFixturePath,
+} from '../../helpers/footprint-fixture-moves';
 import { declareTestInputs } from '../../helpers/test-inputs';
 
 const BRUTAL_FIXTURE_PATHS = [
@@ -45,7 +53,22 @@ const HARD_FIXTURE_PATHS = [
   'tests/fixtures/arena-basis-hard/seed-5117010.json',
 ] as const;
 
-const inputs = declareTestInputs({ fixtures: [...BRUTAL_FIXTURE_PATHS, ...HARD_FIXTURE_PATHS] });
+const ARENA_BASIS_REPAIRED_PATH = 'tests/fixtures/arena-basis/seed-3943006.json';
+
+const inputs = declareTestInputs({ fixtures: [...BRUTAL_FIXTURE_PATHS, ...HARD_FIXTURE_PATHS, ARENA_BASIS_REPAIRED_PATH] });
+
+function isFootprintRepaired(path: string): path is FootprintRepairedFixturePath {
+  return Object.hasOwn(FOOTPRINT_FIXTURE_MOVES, path);
+}
+
+/**
+ * The fixture bytes as they were before FOOTPRINT's repair (D904): the committed bytes with the literal
+ * FOOTPRINT moves undone. A fixture FOOTPRINT did not touch is returned as committed.
+ */
+function preFootprintBytes(path: (typeof BRUTAL_FIXTURE_PATHS)[number] | (typeof HARD_FIXTURE_PATHS)[number]): string {
+  const bytes = inputs.fixtures.readText(path);
+  return isFootprintRepaired(path) ? withFootprintMoves(bytes, FOOTPRINT_FIXTURE_MOVES[path], 'revert') : bytes;
+}
 
 const AFFECTED_FIXTURE_DIGESTS = [
   {
@@ -99,11 +122,16 @@ const AFFECTED_FIXTURE_DIGESTS = [
   readonly current: string;
 }[];
 
-const UNCHANGED_FIXTURE_DIGESTS = {
+/** Fixtures D466 did not edit whose bytes FOOTPRINT repaired; their pre-FOOTPRINT digests. */
+const D466_UNCHANGED_FOOTPRINT_REPAIRED_DIGESTS = {
   'tests/fixtures/arena-basis-brutal/seed-6203001.json': '3f737f1ddf714b0381abdc0e822b3a07cda4c55287a4bc0b1a97cd4d7d71d63b',
+  'tests/fixtures/arena-basis-brutal/seed-6203008.json': 'b067b1aa081f368859979415c468d997b6fa504cad6ad70dc6998c90eeb3207c',
+  'tests/fixtures/arena-basis/seed-3943006.json': '39e33c47c0d3f5671b22466f4f605f48ac492bbf5ddd0c70a08604bd87422022',
+} as const;
+
+const UNCHANGED_FIXTURE_DIGESTS = {
   'tests/fixtures/arena-basis-brutal/seed-6203004.json': '6f9465eccac77eb60ffab2be1832f8f1bcd3290c655130c2ac752a38e6d75a20',
   'tests/fixtures/arena-basis-brutal/seed-6203005.json': '5b3be6abbdf2fcccff3243639d582bea2fb1098099fa91cf2208a0f143a2364e',
-  'tests/fixtures/arena-basis-brutal/seed-6203008.json': 'b067b1aa081f368859979415c468d997b6fa504cad6ad70dc6998c90eeb3207c',
   'tests/fixtures/arena-basis-hard/seed-5117001.json': 'fb5c2811fa4751b4e3e25f1f2aa4fac74c1235aee998f7a232f24b70164d132d',
   'tests/fixtures/arena-basis-hard/seed-5117002.json': '85daa5615a594cd3cc89f19d605946e33975954ecdae8204b5df216ce3e804ff',
   'tests/fixtures/arena-basis-hard/seed-5117003.json': '67e4ab39e3a7c89e8d96d1deadcb67820c848c78a0ca5fa0a3d8ed40b45007fb',
@@ -131,7 +159,7 @@ function hasAttackRoll(option: ReturnType<typeof engineActorOptions>['offerable'
 describe('D466 room roster preflight', () => {
   it('pins both fixture eras and proves each 6203 edit changed only the typed creature halves', () => {
     for (const expected of AFFECTED_FIXTURE_DIGESTS) {
-      const bytes = inputs.fixtures.readText(expected.path);
+      const bytes = preFootprintBytes(expected.path);
       expect(sha256(bytes), `${expected.path}: reverting only spec.monsterRoster must fail`).toBe(expected.current);
       expect(expected.current).not.toBe(expected.old);
       const room = JSON.parse(bytes) as GeneratedRoom;
@@ -188,7 +216,36 @@ describe('D466 room roster preflight', () => {
     }
   });
 
-  it('pins all fourteen fixtures that must remain byte-identical', () => {
+  it('FOOTPRINT layer: each repaired fixture rebuilds its pre-repair sha from its bytes and the literal move table', () => {
+    // D904 repaired 19 illegal starts in these 8 fixtures with 16 moves (2+1+3+3+1+3+2+1; the plan's "13" was a
+    // miscount). The chain per fixture is: the committed bytes
+    // hash to the repaired digest; undoing the literal moves gives the pre-FOOTPRINT digest; that digest is the
+    // D466-era digest (D466 current for 6203002/003/006/009/010, the D466-unchanged digest for 6203001/008 and the
+    // arena-basis 3943006 digest), which the first test above carries on to the pre-D466 digest.
+    expect(FOOTPRINT_REPAIRED_FIXTURE_PATHS).toHaveLength(8);
+    expect(Object.values(FOOTPRINT_FIXTURE_MOVES).flat()).toHaveLength(16);
+    const d466Era = new Map<string, string>([
+      ...AFFECTED_FIXTURE_DIGESTS.map((row) => [row.path, row.current] as const),
+      ...Object.entries(D466_UNCHANGED_FOOTPRINT_REPAIRED_DIGESTS),
+    ]);
+    for (const path of FOOTPRINT_REPAIRED_FIXTURE_PATHS) {
+      const bytes = inputs.fixtures.readText(path);
+      expect(sha256(bytes), `${path}: the committed repaired bytes changed`).toBe(FOOTPRINT_REPAIRED_FIXTURE_DIGESTS[path]);
+      const tokens = (JSON.parse(bytes) as GeneratedRoom).encounter.state.tokens;
+      for (const move of FOOTPRINT_FIXTURE_MOVES[path]) {
+        expect(tokens.find((token) => token.combatantId === move.combatantId)?.position, `${path} ${move.combatantId} repaired anchor`)
+          .toEqual(move.to);
+      }
+      const reverted = withFootprintMoves(bytes, FOOTPRINT_FIXTURE_MOVES[path], 'revert');
+      expect(sha256(reverted), `${path}: undoing the literal FOOTPRINT moves must give the superseded bytes`)
+        .toBe(FOOTPRINT_SUPERSEDED_FIXTURE_DIGESTS[path]);
+      expect(d466Era.get(path), `${path}: the superseded digest is the D466-era digest`)
+        .toBe(FOOTPRINT_SUPERSEDED_FIXTURE_DIGESTS[path]);
+      expect(withFootprintMoves(reverted, FOOTPRINT_FIXTURE_MOVES[path], 'apply'), `${path}: the moves round-trip`).toBe(bytes);
+    }
+  });
+
+  it('pins all twelve fixtures that must remain byte-identical', () => {
     for (const [path, expected] of Object.entries(UNCHANGED_FIXTURE_DIGESTS)) {
       expect(
         sha256(inputs.fixtures.readText(path as keyof typeof UNCHANGED_FIXTURE_DIGESTS)),

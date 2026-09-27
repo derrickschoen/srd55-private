@@ -1988,24 +1988,28 @@ describe('AI-DM engine MCP conversation runner', () => {
         state.combatants.some((combatant) => combatant.profile.id === token.combatantId &&
           combatant.profile.kind === 'player_character')).map((token) => token.position),
     }).toEqual({
-      actor: { column: 16, row: 3 },
+      // FOOTPRINT C1 (D904) moved the Gloom Weaver off the Dire Wolf's squares: (16,3) -> (15,2).
+      actor: { column: 15, row: 2 },
       actorSize: 'Large',
       speed: 34,
-      // Chebyshev separations are 15, 14, and 15 cells before accounting for
-      // the wall whose only gap is at row 6.
+      // From footprint cells 15-16 x 2-3, Chebyshev separations are 14, 13, and 14 cells before
+      // accounting for the wall whose only gap is at row 6.
       targets: [{ column: 1, row: 2 }, { column: 2, row: 4 }, { column: 1, row: 6 }],
     });
     const playerIds = state.combatants.flatMap((combatant) =>
       combatant.profile.kind === 'player_character' ? [combatant.profile.id] : []);
-    // Hand tracing the Large 2x2 source against the column-9 wall: its row-6
-    // gap leaves two rays open to Fighter/Cleric and one ray open to Wizard.
+    // Traced against the column-9 wall under the cover rule the engine has today, by an independent
+    // oracle (FOOTPRINT plan r3, monster4-trace.py; it first reproduces this test's committed trace at
+    // (16,3)). The open Fighter and Cleric lines run along y=2 and y=4, the shared edges of column-9
+    // wall cells: the seam defect D908 routed to COVER-EDGE, which re-derives this trace under sealed
+    // walls (there every line is blocked). The Wizard has total cover.
     expect(playerIds.map((targetId) => {
       const trace = traceCombatantLine(state, fourthActorId, targetId);
       return { sourceCorner: trace.sourceCorner, blocked: trace.lines.map((line) => line.blocksSight) };
     })).toEqual([
-      { sourceCorner: { column: 16, row: 3 }, blocked: [true, true, false, false] },
-      { sourceCorner: { column: 16, row: 5 }, blocked: [true, true, false, false] },
-      { sourceCorner: { column: 18, row: 5 }, blocked: [true, true, true, false] },
+      { sourceCorner: { column: 15, row: 2 }, blocked: [false, false, true, true] },
+      { sourceCorner: { column: 15, row: 4 }, blocked: [false, false, true, true] },
+      { sourceCorner: { column: 15, row: 2 }, blocked: [true, true, true, true] },
     ]);
     const runtime = createEngineMcpRuntime(state, { toolProfile: 'dm', requestedActorIds: actorIds });
     const capsule = runtime.feed.current();
@@ -2017,11 +2021,18 @@ describe('AI-DM engine MCP conversation runner', () => {
       intel_mode: 'full',
     });
 
+    // The Weaver gains one unresolved frontier option, Web -> Cleric (a Dex save with no damage, whose
+    // outcome the evaluator does not resolve). Hand derivation, today's cover rule: Web reaches 40 ft
+    // (30 + 5 x the Weaver's arachnid index 2), so the Large body must stand in column 10 (column 9 is
+    // wall except the 1-square gap at row 6); of those anchors only rows 2, 3, 4, 5 and 7 leave the Cleric
+    // without total cover, and each holds a difficult square. From (16,3) that is >= 6 steps with >= 1
+    // difficult step: >= 35 ft against speed 34. From (15,2), (14,3) (13,4) (12,4) (11,3) (10,3) costs
+    // 5+5+5+10+5 = 30 ft. The Fighter and Wizard (column 1) stay out of range from column 10.
     expect(beforeRender).toEqual([
       'fully_resolved',
       'fully_resolved',
       'fully_resolved',
-      'fully_resolved',
+      'contains_unresolved',
     ]);
     expect(resolutions()).toEqual(beforeRender);
   });

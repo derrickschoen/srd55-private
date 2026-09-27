@@ -133,7 +133,17 @@ const EXPECTED_V4_AMENDMENTS = [
   },
 ] as const;
 
+// FOOTPRINT C1 (D907 Q7): the 7 repaired brutal fixtures' shas changed in place, and the interim amendment added the
+// superseded manifest sha and the 7 superseded fixture shas, which the visit reaches first: 32 + 8 = 40.
 const EXPECTED_V4_FROZEN_INPUT_HASHES = [
+  ['preregistrationAmendments[5].supersededManifestSha256', '8c0bcb3c0afa8358c26129efbef82d0d2882135389d8dd8040fe7e4b6451e13a'],
+  ['preregistrationAmendments[5].supersededFixtures[0].sha256', '3f737f1ddf714b0381abdc0e822b3a07cda4c55287a4bc0b1a97cd4d7d71d63b'],
+  ['preregistrationAmendments[5].supersededFixtures[1].sha256', '8a7738bd2606792bae65da8f39f709ffad5b0bb5487f8e5749cecac4f29f9860'],
+  ['preregistrationAmendments[5].supersededFixtures[2].sha256', 'd54761b2864fcdc1a777f645ade96279da751b3247bca1e042fb997326dc060f'],
+  ['preregistrationAmendments[5].supersededFixtures[3].sha256', '3e6818fe70e276e9ee7407d76b01e3afab7254cc1c27e649d5f445a5f6a6480c'],
+  ['preregistrationAmendments[5].supersededFixtures[4].sha256', 'b067b1aa081f368859979415c468d997b6fa504cad6ad70dc6998c90eeb3207c'],
+  ['preregistrationAmendments[5].supersededFixtures[5].sha256', '9780276cdec0ee71c99cc13217d73376990866f5ab3ab471c7a793196665f7ce'],
+  ['preregistrationAmendments[5].supersededFixtures[6].sha256', '2ec7f3c1298e7b6f3519cf765bcb88f36be3426e02cf7572730a77af9e32114d'],
   ['sharedKb.combinedStartupHash', '9a20176b897ca67233c9402b0dbbb8806dc9f7f12c00c91326942737563b99a5'],
   ['sharedKb.componentHashes.root', '19f66c81a0a1c8641a7cc4a3844e5cdd0b49ce72cd056ad72b8932d37085f260'],
   ['sharedKb.componentHashes.tactics', '4b78bdf95f86bc1a8f7078e96bfb2b2485d0cd35babe1871adbfdfcb8d34f2f7'],
@@ -155,16 +165,16 @@ const EXPECTED_V4_FROZEN_INPUT_HASHES = [
   ['primaryCohorts[0].fixtures[7].sha256', 'b59c2a1f6360b80db375363faad7e2212ffaa3db09ed25428c9d8f91ad580805'],
   ['primaryCohorts[0].fixtures[8].sha256', 'b679f1135883166b7a151e95ac969cc4b7d474d10cd180cac85a9a416eb6898a'],
   ['primaryCohorts[0].fixtures[9].sha256', '6388153ab3eec04b77475f328d38b837de1f571c41aeaf6cfcf8a5fd62b44e94'],
-  ['primaryCohorts[1].fixtures[0].sha256', '3f737f1ddf714b0381abdc0e822b3a07cda4c55287a4bc0b1a97cd4d7d71d63b'],
-  ['primaryCohorts[1].fixtures[1].sha256', '8a7738bd2606792bae65da8f39f709ffad5b0bb5487f8e5749cecac4f29f9860'],
-  ['primaryCohorts[1].fixtures[2].sha256', 'd54761b2864fcdc1a777f645ade96279da751b3247bca1e042fb997326dc060f'],
+  ['primaryCohorts[1].fixtures[0].sha256', '83f133343d10260bc42d5e713c803baa679ca94b0893eecf5ffcc6a421efd3b4'],
+  ['primaryCohorts[1].fixtures[1].sha256', '24b41ffd38355e6309f219dfa8c4c356302d8a873a3e7ba15fb1805fad8d160e'],
+  ['primaryCohorts[1].fixtures[2].sha256', 'bcd4989588f09075bc1965e63ffa232b702554b79b2b0dad3cf08cd84293ac38'],
   ['primaryCohorts[1].fixtures[3].sha256', '6f9465eccac77eb60ffab2be1832f8f1bcd3290c655130c2ac752a38e6d75a20'],
   ['primaryCohorts[1].fixtures[4].sha256', '5b3be6abbdf2fcccff3243639d582bea2fb1098099fa91cf2208a0f143a2364e'],
-  ['primaryCohorts[1].fixtures[5].sha256', '3e6818fe70e276e9ee7407d76b01e3afab7254cc1c27e649d5f445a5f6a6480c'],
+  ['primaryCohorts[1].fixtures[5].sha256', '43e1f490ec237ba37ce890b9d094046a0db30fa7be626b20d4451fddea9473fd'],
   ['primaryCohorts[1].fixtures[6].sha256', 'e6215e5b6388a79bc850e7ff97867f2618733acbb434526a77133e382cba2d1b'],
-  ['primaryCohorts[1].fixtures[7].sha256', 'b067b1aa081f368859979415c468d997b6fa504cad6ad70dc6998c90eeb3207c'],
-  ['primaryCohorts[1].fixtures[8].sha256', '9780276cdec0ee71c99cc13217d73376990866f5ab3ab471c7a793196665f7ce'],
-  ['primaryCohorts[1].fixtures[9].sha256', '2ec7f3c1298e7b6f3519cf765bcb88f36be3426e02cf7572730a77af9e32114d'],
+  ['primaryCohorts[1].fixtures[7].sha256', '63f1de5c69c2ee5c230de166cef02c6f79b8ed449766caa0287d2811a9a8a1ff'],
+  ['primaryCohorts[1].fixtures[8].sha256', 'a87abda8ae7af70814a562d0484161ec9c090195d7f95b7a01eaed48cc1701dd'],
+  ['primaryCohorts[1].fixtures[9].sha256', '1a24ee6939e4fde3c55b9773b1054d5aa758afca96e9f007acadee576e8e2a4d'],
   ['secondFamily.manifestSha256', '83daa7ea3ca89b270e5149368d09fa97074124dfe438cf95b346e996996026c8'],
 ] as const;
 
@@ -216,6 +226,22 @@ const EXPECTED_V5_AMENDMENTS = [
     timing: 'pre-opus-4-8-player-run-and-new-panel-scoring',
     date: '2026-09-08',
     reason: 'Owner rulings replace every active claude-opus-5 use with claude-opus-4-8 and set claude-fable-5-1, gpt-6-astra, and gpt-5.6-sol at high effort as the scoring panel; claude-opus-4-8 supplies labelled notes only and never participates in analysis or decisions.',
+  },
+  {
+    id: 'footprint-whole-body-fixture-repair',
+    timing: 'pre-repaired-room-runs',
+    date: '2026-09-27',
+    reason: 'Owner rulings D900, D904 and D907 (Q7): a creature\'s whole body must be on the map at placement. The starting placements of seven evaluation-brutal fixtures overhang the map (6203009) or overlap (6203001, 6203002, 6203003, 6203006, 6203008, 6203009, 6203010) and are repaired in place by the D514 rule: the nearest free anchor that fits the whole body, by Chebyshev distance then row-major; tokens legal at the start stay; the others, in token order, keep their anchor when legal against the tokens already fixed, else relocate. Interim (D911): the brutal cohort is to be regenerated under the final rules; this entry registers nothing for any study. Results recorded before this amendment stay identified by the superseded manifest and fixture sha256 values below; their bytes remain in git history.',
+    supersededManifestSha256: '8c0bcb3c0afa8358c26129efbef82d0d2882135389d8dd8040fe7e4b6451e13a',
+    supersededFixtures: [
+      { seed: 6203001, sha256: '3f737f1ddf714b0381abdc0e822b3a07cda4c55287a4bc0b1a97cd4d7d71d63b' },
+      { seed: 6203002, sha256: '8a7738bd2606792bae65da8f39f709ffad5b0bb5487f8e5749cecac4f29f9860' },
+      { seed: 6203003, sha256: 'd54761b2864fcdc1a777f645ade96279da751b3247bca1e042fb997326dc060f' },
+      { seed: 6203006, sha256: '3e6818fe70e276e9ee7407d76b01e3afab7254cc1c27e649d5f445a5f6a6480c' },
+      { seed: 6203008, sha256: 'b067b1aa081f368859979415c468d997b6fa504cad6ad70dc6998c90eeb3207c' },
+      { seed: 6203009, sha256: '9780276cdec0ee71c99cc13217d73376990866f5ab3ab471c7a793196665f7ce' },
+      { seed: 6203010, sha256: '2ec7f3c1298e7b6f3519cf765bcb88f36be3426e02cf7572730a77af9e32114d' },
+    ],
   },
 ] as const;
 
@@ -422,7 +448,7 @@ describe('D569 preregistered experiment manifest and dry runner', () => {
     expect(D569_SCORING_PANEL_IDENTITIES).toEqual(EXPECTED_V5_SCORING_SEATS);
     expect(frozen.judgePanel.advisoryNotesStage).toEqual(EXPECTED_V5_ADVISORY_NOTES_STAGE);
     expect(D569_ADVISORY_NOTES_SOURCE).toEqual(EXPECTED_V5_ADVISORY_NOTES_STAGE.source);
-    expect(frozen.preregistrationAmendments).toHaveLength(5);
+    expect(frozen.preregistrationAmendments).toHaveLength(6);
     expect(frozen.coreArms).toHaveLength(8);
     expect(frozen.hintArms).toHaveLength(3);
     expect(frozen.analysisComparisons).toHaveLength(13);
@@ -618,8 +644,8 @@ describe('D569 preregistered experiment manifest and dry runner', () => {
     expect(codes(aggregation)).toContain('manifest_shape');
   });
 
-  it('preserves all 32 committed input hash pins across Amendment 2', () => {
-    expect(EXPECTED_V4_FROZEN_INPUT_HASHES).toHaveLength(32);
+  it('preserves all 40 committed input hash pins across Amendment 2 and the FOOTPRINT interim amendment', () => {
+    expect(EXPECTED_V4_FROZEN_INPUT_HASHES).toHaveLength(40);
     expect(frozenInputHashes(manifest())).toEqual(EXPECTED_V4_FROZEN_INPUT_HASHES);
     const changedPin = structuredClone(manifest());
     changedPin.sharedKb.componentHashes['actions'] = '0'.repeat(64);

@@ -523,8 +523,11 @@ describe('renderer profile', () => {
       terrain_feature_count: 31,
       blocked_cell_fraction: 16 / (19 * 17),
       difficult_cell_fraction: 30 / (19 * 17),
-      mean_pairwise_engagement_distance: 910 / 12,
-      minimum_pairwise_engagement_distance: 70,
+      // FOOTPRINT C1 (D904) moved the Large monster-2 (16,1) -> (15,0) and monster-4 (16,3) -> (15,2). Minimum
+      // footprint Chebyshev x 5 ft, PCs Fighter (1,2), Cleric (2,4), Wizard (1,6) against m1 (17,1), m2 (15,0),
+      // m3 (17,3), m4 (15,2), each 2x2: Fighter 80+70+80+70, Cleric 75+65+75+65, Wizard 80+70+80+70 = 880.
+      mean_pairwise_engagement_distance: 880 / 12,
+      minimum_pairwise_engagement_distance: 65,
       challenge_budget_spent_eighths: 72,
       granularity: 'full',
       pre_trim_bytes: 1_000,
