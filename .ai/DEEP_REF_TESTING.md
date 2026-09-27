@@ -154,6 +154,7 @@ property of the repository still holds, asked of the thing itself:
 | `tests/unit/schema-generation.test.ts` | that `src/db/schema.sql` still matches what the composer would produce |
 | `tests/unit/contracts/column-facts-generation.test.ts` | the same, for the generated column facts |
 | `tests/unit/contracts/table-scopes.test.ts` | the table classification |
+| `scripts/check-import-boundaries.mjs` (a step of `scripts/check-command-outcomes.mjs`, so of `npm run typecheck` and `npm run test:gate`) | the runtime import graph, with the one runtime-edge definition in `scripts/runtime-import-edges.mjs`: no `import { type X }` side-effect import (R1), the SRD corpora imported only by the listed modules (R2), forbidden reachability such as `open-db.ts` to `bootstrap.ts` (R3), exactly the allowed cycles (R4), closure budgets in `scripts/import-budgets.json` (R5) |
 
 Two properties every guard here has, and yours should too:
 

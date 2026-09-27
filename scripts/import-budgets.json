@@ -1,0 +1,29 @@
+{
+  "about": "Guard rule R5 (scripts/check-import-boundaries.mjs): the static closure of each sentinel, in modules and source bytes, may not exceed its budget. `node scripts/check-import-boundaries.mjs --update` lowers a budget to ceil(measured x (100 + marginPercent) / 100) and never raises one; raising a budget is a hand edit, visible in review. Set 2026-09-27 at measured + 10%.",
+  "marginPercent": {
+    "files": 10,
+    "bytes": 10
+  },
+  "sentinels": {
+    "tools/engine-mcp-server.ts": {
+      "files": 114,
+      "bytes": 5101684
+    },
+    "src/combat/encounter.ts": {
+      "files": 84,
+      "bytes": 5018571
+    },
+    "tests/helpers/open-db.ts": {
+      "files": 207,
+      "bytes": 2544992
+    },
+    "src/main.ts": {
+      "files": 389,
+      "bytes": 7211413
+    },
+    "src/db/worker.ts": {
+      "files": 489,
+      "bytes": 8972320
+    }
+  }
+}

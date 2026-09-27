@@ -20,6 +20,8 @@ const steps = [
   ],
   ['node', ['scripts/check-offer-environment-architecture.mjs', '--self-test']],
   ['node', ['scripts/check-offer-environment-architecture.mjs']],
+  ['node', ['scripts/check-import-boundaries.mjs', '--self-test']],
+  ['node', ['scripts/check-import-boundaries.mjs']],
 ];
 
 for (const [command, args] of steps) {
