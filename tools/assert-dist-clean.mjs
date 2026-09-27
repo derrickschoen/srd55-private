@@ -62,6 +62,13 @@ import { basename, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
+const SRD_CORPUS_MARKERS = {
+  fullSrd: 'die and add your Constitution modifier to it. You',
+  spellDescriptions:
+    '--- Verbatim extract: SRD 5.2.1 printed pages 107-175, Spell Descriptions. ---',
+  classLevelTables:
+    'of the twelve classes, including spell-slot columns where printed. ---',
+};
 const FORBIDDEN = [
   'AI_BRIDGE_SENTINEL',
   '/__ai/',
@@ -80,6 +87,15 @@ const FORBIDDEN = [
   // tests/unit/ai-bridge/build-boundary.test.ts import the constant and assert
   // it appears in this array, so the two copies cannot drift apart silently.
   'NOT-FREE-LICENSED-DO-NOT-COMMIT',
+  // The raw SRD corpora are read at BUILD time (npm run srd:artifacts) and
+  // never shipped: before that they were imported as ?raw strings and parsed at
+  // runtime, and the 2.1 MB full SRD rode in three app chunks. Each literal
+  // below occurs in exactly one raw corpus file and in no parsed or generated
+  // data (asserted by tests/unit/ai-bridge/assert-dist-clean.test.ts). All
+  // three are ASCII, because this scan reads the bytes as latin1.
+  SRD_CORPUS_MARKERS.fullSrd,
+  SRD_CORPUS_MARKERS.spellDescriptions,
+  SRD_CORPUS_MARKERS.classLevelTables,
 ];
 const CONTROL = 'staticApp';
 const MIGRATION_CONTROL = 'migration-bundle-control:0000';
@@ -277,6 +293,10 @@ for (const path of files) {
         pattern === 'NOT-FREE-LICENSED-DO-NOT-COMMIT'
           ? 'Scraped, non-free-licensed content leaked into the build output. ' +
             'Nothing under scraped/ may be committed or copied into public/.'
+          : Object.values(SRD_CORPUS_MARKERS).includes(pattern)
+            ? 'Raw SRD corpus text leaked into the build output. The runtime reads ' +
+              'the generated artifacts (npm run srd:artifacts); no shipped module ' +
+              'may import a docs/srd corpus.'
           : pattern === '__SRD55_BROWSER_CAPABILITY_PROBE_FAILURE__'
             ? 'The dev-only browser capability probe seam leaked into the build output.'
           : pattern === 'PENDING_D153_WEBKIT_IOS_NOTICE_VARIANT' ||

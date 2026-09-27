@@ -17,6 +17,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import bundledSrd521 from '../../../docs/srd/full/srd-5.2.1.txt?raw';
+import bundledSpellDescriptions from '../../../docs/srd/source/spell-descriptions.txt?raw';
+import classLevelTables from '../../../docs/srd/source/class-level-tables.txt?raw';
+import scannerSource from '../../../tools/assert-dist-clean.mjs?raw';
+import generatedClassLevelFeatures from '../../../src/rules/generated/class-level-features-srd.ts?raw';
+import generatedClassResources from '../../../src/rules/generated/class-resources-srd.ts?raw';
+import generatedSpells from '../../../src/rules/generated/spells-srd.ts?raw';
+import generatedCoverageSource from '../../../src/simulation/generated/coverage-source.ts?raw';
 import { SCRAPE_SENTINEL } from '../../../tools/scrape/provenance';
 import { BUNDLED_LICENSE_FILES } from '../../../tools/licenses/bundled-license-files';
 import {
@@ -248,6 +256,57 @@ describe('the dist guard passes only a genuinely clean build', () => {
       expect(guard).toContain(file.sha256);
     }
   });
+});
+
+/**
+ * The raw SRD corpora are read at build time and must never ship. The scanner
+ * is plain .mjs and cannot import the corpora, so it carries one marker per
+ * corpus; these pin that each marker is text of exactly that raw corpus and of
+ * nothing the runtime legitimately ships (the generated artifacts).
+ */
+describe('the dist guard FAILS when a raw SRD corpus ships', () => {
+  const markers = Object.fromEntries(
+    [...(/const SRD_CORPUS_MARKERS = \{([^}]*)\}/u.exec(scannerSource)?.[1] ?? '')
+      .matchAll(/(\w+):\s*'([^']+)'/gu)]
+      .map((match) => [match[1] ?? '', match[2] ?? '']),
+  );
+  const corpora: Readonly<Record<string, string>> = {
+    fullSrd: bundledSrd521,
+    spellDescriptions: bundledSpellDescriptions,
+    classLevelTables,
+  };
+
+  it('carries one ASCII marker per raw corpus, found once in it and in no generated artifact', () => {
+    expect(Object.keys(markers)).toEqual(Object.keys(corpora));
+    for (const [corpus, marker] of Object.entries(markers)) {
+      expect(marker, corpus).toMatch(/^[\x20-\x7e]+$/u);
+      expect(corpora[corpus]?.split(marker), corpus).toHaveLength(2);
+      for (const other of Object.keys(corpora).filter((name) => name !== corpus)) {
+        expect(corpora[other]?.includes(marker), `${corpus} in ${other}`).toBe(false);
+      }
+      for (const artifact of [
+        generatedClassLevelFeatures,
+        generatedClassResources,
+        generatedSpells,
+        generatedCoverageSource,
+      ]) {
+        expect(artifact.includes(marker), corpus).toBe(false);
+      }
+    }
+  });
+
+  for (const corpus of ['fullSrd', 'spellDescriptions', 'classLevelTables']) {
+    it(`rejects the raw ${corpus} text in a chunk`, async () => {
+      const marker = markers[corpus];
+      expect(marker).toBeDefined();
+      const run = await scan(
+        distWith({ 'assets/worker-entry.js': `${CLEAN}\nconst corpus=${JSON.stringify(`x ${String(marker)} y`)};` }),
+      );
+      expect(run.code).toBe(1);
+      expect(run.stderr).toContain('Raw SRD corpus text leaked into the build output.');
+      expect(run.stderr).toContain('assets/worker-entry.js');
+    });
+  }
 });
 
 describe('the dist guard FAILS on every way the bridge could leak', () => {
