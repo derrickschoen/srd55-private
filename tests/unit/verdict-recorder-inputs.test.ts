@@ -37,6 +37,9 @@ import {
 const repositoryRoot = realpathSync(process.cwd());
 const vitestExecutable = join(repositoryRoot, 'node_modules/vitest/vitest.mjs');
 const LANE_INTEL = 'DND_LANE_INTEL_MODE';
+/** Read only by an `in` test and by Object.hasOwn, so each names one proxy trap. */
+const PRESENCE_READ = 'DND_VERDICT_PROBE_PRESENCE';
+const OWN_READ = 'DND_VERDICT_PROBE_OWN';
 
 const PROBES = {
   environment: [
@@ -44,6 +47,8 @@ const PROBES = {
     '',
     "it('runs with lane intel on', () => {",
     `  expect(process.env['${LANE_INTEL}']).not.toBe('off');`,
+    `  expect('${PRESENCE_READ}' in process.env).toBe(false);`,
+    `  expect(Object.hasOwn(process.env, '${OWN_READ}')).toBe(false);`,
     '});',
   ],
   enumeration: [
@@ -90,7 +95,7 @@ const repositoryName = (path: string): string => relative(repositoryRoot, path).
 
 function recordOf(probe: Probe): ObservationRecord {
   const record = observationRecord(records.get(probe));
-  if (record === undefined) throw new Error(`The recorder wrote no well-formed record for the ${probe} probe.\n${output}`);
+  if (record === undefined) expect.fail(`The recorder wrote no well-formed record for the ${probe} probe.\n${output}`);
   return record;
 }
 
@@ -107,7 +112,7 @@ beforeAll(() => {
     VERDICT_FS_OBSERVATIONS_DIR: observationsDirectory,
     VERDICT_REPOSITORY_ROOT: repositoryRoot,
   };
-  delete env[LANE_INTEL];
+  for (const name of [LANE_INTEL, PRESENCE_READ, OWN_READ]) delete env[name];
   const result = spawnSync(
     process.execPath,
     [
@@ -134,7 +139,7 @@ afterAll(() => {
 describe('recorder design A: declared engine children', () => {
   it('passes the audit of a file that declares engine children, having observed exactly what the check reads', () => {
     const offer = process.env[ENGINE_CHILD_BUNDLE_ENV];
-    if (offer === undefined) throw new Error(`${ENGINE_CHILD_BUNDLE_ENV} is unset: the global setup offered no bundle.`);
+    if (offer === undefined) expect.fail(`${ENGINE_CHILD_BUNDLE_ENV} is unset: the global setup offered no bundle.`);
     const reads = engineChildSealedReads(repositoryRoot, offer);
     const derived = [
       ...reads.contents.map((path) => `file:${repositoryName(path)}`),
@@ -180,10 +185,24 @@ describe('ENV-TRACE: environment reads key the verdict', () => {
     expect(cachedVerdict(probe, globalSalt(), cacheRoot)?.testCount).toBe(1);
   });
 
+  it('keys the verdict on the value, not on whether the variable is set', () => {
+    const probe = probePath('environment');
+    const record = recordOf('environment');
+    const cacheRoot = mkdtempSync(join(tmpdir(), 'dnd-verdict-cache-witness-'));
+    cacheRoots.push(cacheRoot);
+    vi.stubEnv(LANE_INTEL, 'full');
+
+    expect(storeVerdict({ testFile: probe, graph: buildClosure(probe), record, testCount: 1, salt: globalSalt(), cacheRoot }))
+      .toBeTypeOf('string');
+    expect(cachedVerdict(probe, globalSalt(), cacheRoot)?.testCount).toBe(1);
+    vi.stubEnv(LANE_INTEL, 'off');
+    expect(cachedVerdict(probe, globalSalt(), cacheRoot)).toBeUndefined();
+  });
+
   it('records the variables a test reads, by name', () => {
     const record = recordOf('environment');
 
-    expect(record.environmentInputs).toContain(LANE_INTEL);
+    expect(record.environmentInputs).toEqual(expect.arrayContaining([LANE_INTEL, PRESENCE_READ, OWN_READ]));
     expect(record.environmentEnumerated).toBe(false);
   });
 

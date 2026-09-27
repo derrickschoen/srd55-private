@@ -81,7 +81,7 @@ function checkReads(checkout: string, bundlePath: string) {
 describe('engineChildCheckReads (recorder design A)', () => {
   it('names exactly what the check reads for the bundle the Vitest global setup offers in this checkout', () => {
     const offer = process.env[ENGINE_CHILD_BUNDLE_ENV];
-    if (offer === undefined) throw new Error(`${ENGINE_CHILD_BUNDLE_ENV} is unset: the global setup offered no bundle.`);
+    if (offer === undefined) expect.fail(`${ENGINE_CHILD_BUNDLE_ENV} is unset: the global setup offered no bundle.`);
     const reads = checkReads(root, offer);
     const declared = engineChildCheckReads(root, offer, sidecarOf(offer));
 
