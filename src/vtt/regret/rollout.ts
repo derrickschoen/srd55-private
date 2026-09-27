@@ -12,7 +12,13 @@ import {
 } from '../../combat/encounter';
 import { TurnCoordinator, type DurableCoordinatorTransition } from '../../combat/coordinator';
 import type { EncounterCommand } from '../../combat/events';
-import { decodeTokenAnchors, gridDistance } from '../../combat/grid';
+import { gridDistance } from '../../combat/grid';
+import {
+  assembleDecodedState,
+  decodeAbsentTokens,
+  decodeBoardTokens,
+  type DecodedStateRest,
+} from '../../combat/token-placement';
 import { assertSupportedGrid } from '../../combat/grid-size';
 import { decodeProjectedCreatureSpace, minimumSpaceDistance } from '../../combat/creature-space';
 import { mulberry32 } from '../../combat/random';
@@ -84,14 +90,16 @@ export function reconstructEncounterState(capture: RolloutInputCapture): Encount
   if (!isRecord(parsed.bounds)) throw new TypeError(`Rollout capture ${capture.logicalCallId} has malformed encounter bounds.`);
   const grid = { columns: parsed.bounds.columns, rows: parsed.bounds.rows };
   assertSupportedGrid(grid);
-  // The reconstructed state holds the minted anchors, not the parsed ones (D895).
-  const anchors = {
-    tokens: decodeTokenAnchors(grid, parsed.tokens, `Rollout capture ${capture.logicalCallId} tokens`),
-    ...(Object.hasOwn(parsed, 'absentTokens')
-      ? { absentTokens: decodeTokenAnchors(grid, parsed.absentTokens, `Rollout capture ${capture.logicalCallId} absentTokens`) }
-      : {}),
-  };
-  return { ...parsed, ...anchors } as unknown as EncounterState;
+  // The reconstructed state holds minted tokens, not the parsed ones (D895, D900): each board body is
+  // checked whole against the grid and the effective sizes; an absent token keeps an anchor-only origin.
+  const rest = parsed as unknown as DecodedStateRest;
+  return assembleDecodedState(
+    rest,
+    decodeBoardTokens({ ...rest, bounds: grid }, parsed.tokens, `Rollout capture ${capture.logicalCallId} tokens`),
+    Object.hasOwn(parsed, 'absentTokens')
+      ? decodeAbsentTokens(grid, parsed.absentTokens, `Rollout capture ${capture.logicalCallId} absentTokens`)
+      : undefined,
+  );
 }
 
 function visibleSubject(state: DmVisibleEncounterState, id: CombatantId) {

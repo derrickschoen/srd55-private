@@ -40,7 +40,12 @@ import {
 } from '../combat/values';
 import { sha256 } from '../crypto/sha256';
 import type { DatabaseContext } from '../db/database';
-import { decodeTokenAnchors } from '../combat/grid';
+import {
+  assembleDecodedState,
+  decodeAbsentTokens,
+  decodeBoardTokens,
+  type DecodedStateRest,
+} from '../combat/token-placement';
 import { assertSupportedGrid } from '../combat/grid-size';
 import { decodeWildShapeOverlay, decodeWildShapeUseState } from '../combat/wild-shape';
 import {
@@ -976,13 +981,6 @@ function decodeRevision(value: unknown): SessionRevision {
   if (!isRecord(bounds)) throw new TypeError('Persisted encounter bounds are malformed.');
   const grid = { columns: bounds.columns, rows: bounds.rows };
   assertSupportedGrid(grid);
-  // The decoded state holds the minted anchors, not the loaded ones (D895).
-  const anchors = {
-    tokens: decodeTokenAnchors(grid, value.encounterState.tokens, 'Persisted encounter tokens'),
-    ...(Object.hasOwn(value.encounterState, 'absentTokens')
-      ? { absentTokens: decodeTokenAnchors(grid, value.encounterState.absentTokens, 'Persisted encounter absentTokens') }
-      : {}),
-  };
   const transition = decodeTransition(value.transition);
   const partyState = value.partyState === null
     ? null
@@ -1035,19 +1033,29 @@ function decodeRevision(value: unknown): SessionRevision {
   if (orderedObservationKeys.some((key, index) => index > 0 && key.localeCompare(orderedObservationKeys[index - 1]!) < 0)) {
     throw new TypeError('Persisted combatant observations are not canonical.');
   }
-  const encounterState = {
+  // The decoded state holds minted tokens, not the loaded ones (D895, D900): each board body is checked
+  // whole against the grid and the decoded combatants' effective sizes; an absent token keeps an
+  // anchor-only return origin. The rest holds no token field, so it is the only cast.
+  const rest = {
     ...value.encounterState,
-    ...anchors,
     combatants: encounterCombatants,
     observationHistory,
-  } as unknown as EncounterState;
-  if (
-    branchRngStateFingerprint(value.encounterState as unknown as EncounterState) !==
-    value.branchRngStateFingerprint
-  ) {
+  } as unknown as DecodedStateRest;
+  const encounterState = assembleDecodedState(
+    rest,
+    decodeBoardTokens({ ...rest, bounds: grid }, value.encounterState.tokens, 'Persisted encounter tokens'),
+    Object.hasOwn(value.encounterState, 'absentTokens')
+      ? decodeAbsentTokens(grid, value.encounterState.absentTokens, 'Persisted encounter absentTokens')
+      : undefined,
+  );
+  if (branchRngStateFingerprint(encounterState) !== value.branchRngStateFingerprint) {
     throw new Error('Persisted VTT branch RNG state fingerprint mismatch.');
   }
-  const revision = { ...value, transition, encounterState, partyState } as unknown as SessionRevision;
+  // Every other field was checked above; it holds no token, so its record is the only cast here.
+  const revisionRest = value as unknown as Omit<SessionRevisionBody, 'transition' | 'encounterState' | 'partyState'> & {
+    readonly checksum: string;
+  };
+  const revision: SessionRevision = { ...revisionRest, transition, encounterState, partyState };
   const { checksum: _checksum, ...body } = revision;
   if (revisionChecksum(body) !== revision.checksum) {
     throw new Error('VTT session revision checksum mismatch.');

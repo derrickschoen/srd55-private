@@ -1,7 +1,7 @@
 import { abilities, creatureSizes, skills, type Ability, type KnownCreatureSize, type Skill } from '../domain/enums';
 import type { CharacterSheet } from '../queries/character-sheet-builder';
 import type { CombatFeatureEffect } from './effects';
-import type { BoardCell, GridCell } from './grid';
+import type { BoardCell, FootprintAnchor, GridCell } from './grid';
 import {
   normalPlacementFor,
   serializedPlacementMode,
@@ -134,7 +134,8 @@ export interface CombatTokenSetup {
 /**
  * A token of an EncounterState (on the board or absent). Its anchor is a BoardCell: a cell of the
  * state's own grid, minted only by createEncounter, the reducers' checked mints and the state
- * decoders (grid.ts decodeTokenAnchors), so an off-grid anchor does not compile into a state.
+ * decoders (token-placement.ts decodeBoardTokens, decodeAbsentTokens), so an off-grid anchor does not
+ * compile into a state.
  */
 export interface CombatToken {
   readonly id: TokenId;
@@ -142,6 +143,25 @@ export interface CombatToken {
   readonly position: BoardCell;
   readonly placementMode: SerializedPlacementMode;
 }
+
+/** The side of the square a creature of `Size` controls (D511; SRD 5.2.1 Creature Size table). */
+export type FootprintSideOf<Size extends KnownCreatureSize> =
+  Size extends 'Tiny' | 'Small' | 'Medium' ? 1 : Size extends 'Large' ? 2 : Size extends 'Huge' ? 3 : 4;
+
+/** The size a placement mode controls: its `sizedFor` when squeezed (creature-space.ts), else its actual size. */
+export type ControlledSizeOf<M extends SerializedPlacementMode> =
+  M extends { readonly kind: 'squeezed'; readonly sizedFor: infer F extends KnownCreatureSize } ? F : M['actual'];
+
+/**
+ * A token on the board in placement mode `M`: its anchor carries the whole-body proof for the square that
+ * mode controls, so a mode and an anchor that do not belong together do not compile (owner D900).
+ */
+export type TokenFor<M extends SerializedPlacementMode> = M extends unknown ? {
+  readonly id: TokenId;
+  readonly combatantId: CombatantId;
+  readonly placementMode: M;
+  readonly position: FootprintAnchor<FootprintSideOf<ControlledSizeOf<M>>>;
+} : never;
 
 export interface CharacterCombatantIdentity {
   readonly combatantId: string;

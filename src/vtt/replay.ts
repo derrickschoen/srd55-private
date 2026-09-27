@@ -5,7 +5,12 @@ import {
   type EncounterConfig,
   type EncounterState,
 } from '../combat/encounter';
-import { decodeTokenAnchors, type DecodedAnchorToken, type GridBounds } from '../combat/grid';
+import type { CombatToken } from '../combat/combatant';
+import {
+  decodeAbsentTokens,
+  decodeBoardTokens,
+  type PlacementContext,
+} from '../combat/token-placement';
 import { assertSupportedGrid } from '../combat/grid-size';
 import { restoreMulberry32, type SerializableRngState } from '../combat/random';
 import {
@@ -496,36 +501,39 @@ export function validateReplayMigrationRegistry(): void {
 }
 
 /**
- * A replay revision's token anchors (board and absent) checked against its own grid, as minted
- * BoardCells: OffGridAnchorError names the first one that is not a cell of it.
+ * A replay revision's tokens checked against its own state by the shared decoder (token-placement.ts):
+ * each board body whole on the grid and of its combatant's effective size, each absent token's return
+ * origin a cell of the grid. OffGridAnchorError, OffGridBodyError or CreatureSizeRuleError names the first
+ * token that fails.
  */
-function revisionAnchors(
-  bounds: GridBounds,
+function revisionTokens(
+  context: PlacementContext,
   state: { readonly tokens?: unknown; readonly absentTokens?: unknown },
   index: number,
-): { readonly tokens: readonly DecodedAnchorToken[]; readonly absentTokens?: readonly DecodedAnchorToken[] } {
+): { readonly tokens: readonly CombatToken[]; readonly absentTokens?: readonly CombatToken[] } {
   const label = `Replay revision ${String(index + 1)}`;
   return {
-    tokens: decodeTokenAnchors(bounds, state.tokens, `${label} tokens`),
+    tokens: decodeBoardTokens(context, state.tokens, `${label} tokens`),
     ...(Object.hasOwn(state, 'absentTokens')
-      ? { absentTokens: decodeTokenAnchors(bounds, state.absentTokens, `${label} absentTokens`) }
+      ? { absentTokens: decodeAbsentTokens(context.bounds, state.absentTokens, `${label} absentTokens`) }
       : {}),
   };
 }
 
 /**
- * The decoded bundle holds minted anchors, not the parsed ones (D895): every revision whose state
- * has a grid gets its anchors checked and installed here. A revision too malformed to have a grid
- * is left as it is, for replayBundle to refuse in its own order.
+ * The decoded bundle holds minted tokens, not the parsed ones (D895, D900): every revision whose state
+ * has a grid, combatants and effects gets its tokens checked and installed here. A revision too malformed
+ * for that is left as it is, for replayBundle to refuse in its own order.
  */
-function withMintedAnchors(revisions: readonly unknown[]): readonly unknown[] {
+function withMintedTokens(revisions: readonly unknown[]): readonly unknown[] {
   return revisions.map((entry, index) => {
     if (!record(entry) || !record(entry.revision) || !record(entry.revision.encounterState)) return entry;
     const state = entry.revision.encounterState;
-    if (!record(state.bounds)) return entry;
+    if (!record(state.bounds) || !Array.isArray(state.combatants) || !Array.isArray(state.effects)) return entry;
     const bounds = { columns: state.bounds.columns, rows: state.bounds.rows };
     assertSupportedGrid(bounds);
-    const encounterState = { ...state, ...revisionAnchors(bounds, state, index) };
+    const context = { ...state, bounds } as unknown as PlacementContext;
+    const encounterState = { ...state, ...revisionTokens(context, state, index) };
     return { ...entry, revision: { ...entry.revision, encounterState } };
   });
 }
@@ -561,7 +569,7 @@ function migrateReplayBundle(value: unknown): ReplayBundle {
   ) {
     throw new TypeError('Replay bundle is malformed.');
   }
-  return { ...migrated, revisions: withMintedAnchors(migrated.revisions) } as unknown as ReplayBundle;
+  return { ...migrated, revisions: withMintedTokens(migrated.revisions) } as unknown as ReplayBundle;
 }
 
 export function exportReplayBundle(bundle: ReplayBundle): string {
@@ -823,7 +831,7 @@ export function replayBundle(
     const revision = replayRecord.revision;
     assertSupportedGrid(revision.encounterState.bounds);
     // A typed bundle can still be built or spread together in memory, so every revision is checked here too.
-    revisionAnchors(revision.encounterState.bounds, revision.encounterState, index);
+    revisionTokens(revision.encounterState, revision.encounterState, index);
     assertEqual(
       'bundle', index, 'encounterConfig', bundle.encounterConfig, revision.encounterState.config,
     );

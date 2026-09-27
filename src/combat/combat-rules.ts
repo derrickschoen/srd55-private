@@ -30,12 +30,23 @@ function combatant(state: EncounterState, id: CombatantId): EncounterCombatantSt
   return found;
 }
 
+/**
+ * What the rules and size lenses read: each combatant's profile and Wild Shape overlay, and the effects.
+ * An EncounterState is one; so is a placement check's context before the state exists (createEncounter,
+ * the decoders, the v13 session migration).
+ */
+export interface SizeLensContext {
+  readonly combatants: readonly Pick<EncounterCombatantState, 'profile' | 'wildShape'>[];
+  readonly effects: readonly EncounterEffect[];
+}
+
 /** The only combatant-state -> active-rules lens. */
 export function effectiveCombatRules(
-  state: EncounterState,
+  state: Pick<SizeLensContext, 'combatants'>,
   id: CombatantId,
 ): CombatRulesProfile {
-  const subject = combatant(state, id);
+  const subject = state.combatants.find((candidate) => candidate.profile.id === id);
+  if (subject === undefined) throw new EncounterRuleError('validation', `Unknown combatant ${id}.`);
   return subject.wildShape === undefined
     ? subject.profile.rules
     : wildShapeRulesLens(subject.profile.rules, subject.wildShape);
@@ -53,7 +64,7 @@ export class CreatureSizeRuleError extends EncounterRuleError {
 }
 
 /** The sole encounter-state lens for sourced/replacement/effect-derived size. */
-export function effectiveCreatureSize(state: EncounterState, id: CombatantId): KnownCreatureSize {
+export function effectiveCreatureSize(state: SizeLensContext, id: CombatantId): KnownCreatureSize {
   const rules = effectiveCombatRules(state, id);
   if (rules.sizeCategory === undefined) {
     throw new CreatureSizeRuleError('mechanical_size_required', id);

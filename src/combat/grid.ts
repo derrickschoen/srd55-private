@@ -1,3 +1,4 @@
+import type { KnownCreatureSize } from '../domain/enums';
 import type { Brand } from '../domain/ids';
 import { EncounterRuleError } from './encounter-rule-error';
 import { feet, type Feet } from './values';
@@ -46,8 +47,57 @@ function isWholeNumber(value: number): boolean {
  */
 export type BoardCell = Brand<GridCell, 'BoardCell'>;
 
+/** Side of a creature's square footprint in cells: Tiny, Small and Medium 1, Large 2, Huge 3, Gargantuan 4 (D511). */
+export type FootprintSide = 1 | 2 | 3 | 4;
+
+type SidesThrough<S extends FootprintSide> =
+  S extends 1 ? 'FootprintSide1'
+    : S extends 2 ? 'FootprintSide1' | 'FootprintSide2'
+      : S extends 3 ? 'FootprintSide1' | 'FootprintSide2' | 'FootprintSide3'
+        : 'FootprintSide1' | 'FootprintSide2' | 'FootprintSide3' | 'FootprintSide4';
+
+/**
+ * A BoardCell whose side x side square lies wholly on its grid: the anchor of a creature's whole body
+ * (owner D900: a body past the edge is impossible to express). A proof for a larger side is also one for
+ * every smaller side, so a FootprintAnchor<3> is a FootprintAnchor<2>, a FootprintAnchor<1> and a
+ * BoardCell; the converse does not compile. Only `footprintAnchor` here and the checked mints of
+ * token-placement.ts produce one.
+ */
+export type FootprintAnchor<S extends FootprintSide> = Brand<BoardCell, SidesThrough<S>>;
+
 function mintBoardCell(column: number, row: number): BoardCell {
   return Object.freeze({ column, row }) as BoardCell;
+}
+
+/**
+ * The whole-body check: a fresh frozen anchor when the side x side square at `cell` lies inside
+ * `bounds`, otherwise null (an off-grid anchor included).
+ */
+export function footprintAnchor<S extends FootprintSide>(bounds: GridBounds, cell: GridCell, side: S): FootprintAnchor<S> | null {
+  if (!isCellInside(bounds, cell)) return null;
+  if (!(cell.column + side <= bounds.columns)) return null;
+  if (!(cell.row + side <= bounds.rows)) return null;
+  return mintBoardCell(cell.column, cell.row) as FootprintAnchor<S>;
+}
+
+/**
+ * A creature body that must lie on its grid and does not: its anchor is a cell of the grid, but the
+ * side x side square it anchors reaches past an edge (owner D900).
+ */
+export class OffGridBodyError extends EncounterRuleError {
+  override readonly name = 'OffGridBodyError' as const;
+
+  constructor(
+    readonly label: string,
+    readonly anchor: GridCell,
+    readonly side: FootprintSide,
+    readonly size: KnownCreatureSize,
+    readonly bounds: GridBounds,
+  ) {
+    super('validation',
+      `${label}: a ${size} body (${String(side)} x ${String(side)}) anchored at ${String(anchor.column)},${String(anchor.row)} ` +
+      `leaves the ${String(bounds.columns)} x ${String(bounds.rows)} grid.`);
+  }
 }
 
 /** The decode-time bounds check: a fresh frozen copy of the cell when it lies inside `bounds`, otherwise null. */
@@ -83,28 +133,6 @@ export function requireBoardCell(bounds: GridBounds, position: unknown, label: s
     : null;
   if (decoded === null) throw new OffGridAnchorError(label, position, bounds);
   return decoded;
-}
-
-/** A loaded token whose anchor passed the decode-time check; every other field is as loaded. */
-export type DecodedAnchorToken = { readonly [field: string]: unknown; readonly position: BoardCell };
-
-/**
- * The decode-time anchor check of loaded tokens (D895: a malformed position is unconstructible):
- * every token must stand on a cell of its state's own grid. It returns each token with its
- * position replaced by the minted BoardCell, so a decoder installs the checked value and never
- * casts the loaded one. A footprint may still reach past the grid from an in-bounds anchor, as a
- * Huge creature's does on the last two columns; the movement board answers that step by step.
- * Throws OffGridAnchorError naming the first token that is off the grid or has no anchor,
- * TypeError when `tokens` is not an array.
- */
-export function decodeTokenAnchors(bounds: GridBounds, tokens: unknown, label: string): readonly DecodedAnchorToken[] {
-  if (!Array.isArray(tokens)) throw new TypeError(`${label} must be an array.`);
-  return tokens.map((token: unknown, index): DecodedAnchorToken => {
-    const loaded = typeof token === 'object' && token !== null ? token as { readonly [field: string]: unknown } : {};
-    // A token that is not an object has no anchor, and requireBoardCell refuses it.
-    const position = requireBoardCell(bounds, loaded['position'], `${label}[${String(index)}] anchor`);
-    return { ...loaded, position };
-  });
 }
 
 export function isCellInside(bounds: GridBounds, cell: GridCell): boolean {

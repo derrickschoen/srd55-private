@@ -2,7 +2,7 @@ import { combatantsAreAllies } from './allies';
 import { combatantConditions, combatantSpace, combatantSpaceAt } from './combat-rules';
 import { isIncapacitated } from './conditions';
 import type { EncounterCombatantState, EncounterState } from './encounter';
-import type { BoardCell, GridCell } from './grid';
+import type { BoardCell, FootprintSide, GridCell } from './grid';
 import {
   buildMovementBoard,
   openingCovers,
@@ -10,7 +10,6 @@ import {
   squareCell,
   NO_OPENING,
   type CellIndex,
-  type FootprintSide,
 } from './movement-board';
 import type { CellTraversal, MovementWorld } from './movement';
 import { persistentAreaContains } from './persistent-areas';

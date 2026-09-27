@@ -1,6 +1,11 @@
 import { canonicalJson } from '../commands/canonical-json';
 import { evaluateMonsterTacticalAttack, type EncounterState } from '../combat/encounter';
-import { decodeTokenAnchors } from '../combat/grid';
+import {
+  assembleDecodedState,
+  decodeAbsentTokens,
+  decodeBoardTokens,
+  type DecodedStateRest,
+} from '../combat/token-placement';
 import type { EncounterCommand } from '../combat/events';
 import { monsterAttackCommand, monsterSavingThrowCommand } from '../combat/monster-commands';
 import { restoreMulberry32, type SerializableRng } from '../combat/random';
@@ -139,9 +144,10 @@ export interface CanonicalEncounterState {
 
 /**
  * The state after a canonical JSON round trip (sorted keys, plain values), for fixtures that must
- * match byte for byte. JSON parsing forgets every brand, so the token anchors are re-minted
- * against the state's grid (decodeTokenAnchors) rather than cast: a state spread onto a grid its
- * anchors are not on is refused here with OffGridAnchorError. Exported for its direct witness.
+ * match byte for byte. JSON parsing forgets every brand, so the tokens are re-minted by the shared
+ * decoder (token-placement.ts decodeBoardTokens) rather than cast: a state spread onto a grid its
+ * anchors or bodies are not on is refused here with OffGridAnchorError or OffGridBodyError. Exported
+ * for its direct witness.
  */
 export function canonicalEncounterState(state: EncounterState): CanonicalEncounterState {
   const fixtureJson = canonicalJson({ encounter: { state } });
@@ -160,13 +166,15 @@ export function canonicalEncounterState(state: EncounterState): CanonicalEncount
     typeof Reflect.get(canonicalState, 'revision') !== 'number') {
     throw new TypeError('Canonical engine fixture state is incomplete.');
   }
-  const anchors = {
-    tokens: decodeTokenAnchors(state.bounds, Reflect.get(canonicalState, 'tokens'), 'Canonical engine state tokens'),
-    ...(Object.hasOwn(canonicalState, 'absentTokens')
-      ? { absentTokens: decodeTokenAnchors(state.bounds, Reflect.get(canonicalState, 'absentTokens'), 'Canonical engine state absentTokens') }
-      : {}),
-  };
-  return { state: { ...canonicalState, ...anchors } as unknown as EncounterState, fixtureJson };
+  const rest = canonicalState as unknown as DecodedStateRest;
+  const decodedState = assembleDecodedState(
+    rest,
+    decodeBoardTokens({ ...rest, bounds: state.bounds }, Reflect.get(canonicalState, 'tokens'), 'Canonical engine state tokens'),
+    Object.hasOwn(canonicalState, 'absentTokens')
+      ? decodeAbsentTokens(state.bounds, Reflect.get(canonicalState, 'absentTokens'), 'Canonical engine state absentTokens')
+      : undefined,
+  );
+  return { state: decodedState, fixtureJson };
 }
 
 function livingMonsterIds(state: EncounterState): readonly CombatantId[] {

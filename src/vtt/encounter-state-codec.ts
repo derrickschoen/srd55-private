@@ -9,15 +9,19 @@ import {
   type CombatantId,
 } from '../combat/values';
 import type { EncounterEnvironment } from '../combat/world-objects';
-import { decodeTokenAnchors } from '../combat/grid';
 import { assertSupportedGrid } from '../combat/grid-size';
 import {
   creatureSpace,
   placementFromSerialized,
   sizedCombatantState,
-  spaceFitsBounds,
   spacesIntersect,
 } from '../combat/creature-space';
+import {
+  assembleDecodedState,
+  decodeAbsentTokens,
+  decodeBoardTokens,
+  type DecodedStateRest,
+} from '../combat/token-placement';
 
 export type EncounterStateDecodeMode = 'legacy_basis' | 'session' | 'challenge';
 
@@ -281,7 +285,7 @@ function decodeProfiles(values: unknown[]): readonly CombatantProfile[] {
   return profiles as unknown as readonly CombatantProfile[];
 }
 
-/** The loaded tokens with every field but the anchor checked; decodeTokenAnchors checks and mints the anchor. */
+/** The loaded tokens with every field but the placement checked; decodeBoardTokens checks and mints the placement. */
 function decodeTokens(values: unknown[], profiles: readonly CombatantProfile[]): readonly CombatTokenSetup[] {
   const tokens = values.map((entry, index) => {
     const token = record(entry, `state.tokens[${String(index)}]`);
@@ -404,13 +408,6 @@ export function decodeEncounterStateV1(value: unknown, mode: EncounterStateDecod
   if (combatants.length === 0) throw new TypeError('Encounter state requires at least one combatant.');
   const profiles = decodeProfiles(combatants);
   const tokens = decodeTokens(array(state['tokens'], 'state.tokens'), profiles);
-  // The state gets the minted anchors, not the loaded ones (D895); absent tokens return to the board.
-  const anchors = {
-    tokens: decodeTokenAnchors(decodedBounds, tokens, 'state.tokens'),
-    ...(own(state, 'absentTokens')
-      ? { absentTokens: decodeTokenAnchors(decodedBounds, state['absentTokens'], 'state.absentTokens') }
-      : {}),
-  };
   decodeEnvironment(state['environment']);
   const cells = (key: 'blockedCells' | 'foggedCells') => array(state[key], `state.${key}`).map((entry, index) =>
     decodeCell(entry, `state.${key}[${String(index)}]`));
@@ -425,6 +422,14 @@ export function decodeEncounterStateV1(value: unknown, mode: EncounterStateDecod
     'sharedSpaceRelations', 'adjudicationPending', 'effects', 'persistentAreas', 'eventLog',
     'hiddenCombatants', 'observationHistory', 'pendingDecisions', 'reactionPolicies',
   ] as const) assertRecordArray(state[key], `state.${key}`);
+  // The state gets the minted tokens, not the loaded ones (D895, D900): every board body is checked whole
+  // against the grid and the effective size (token-placement.ts); an absent token keeps an anchor-only
+  // return origin. The rest holds no token field, so this is its only cast.
+  const rest = state as unknown as DecodedStateRest;
+  const boardTokens = decodeBoardTokens({ ...rest, bounds: decodedBounds }, tokens, 'state.tokens');
+  const absentTokens = own(state, 'absentTokens')
+    ? decodeAbsentTokens(decodedBounds, state['absentTokens'], 'state.absentTokens')
+    : undefined;
   for (const key of ['nextEventSequence', 'nextDecisionSequence', 'nextEffectSequence', 'nextWorldObjectSequence', 'nextPersistentAreaSequence'] as const) {
     safeInteger(state[key], `state.${key}`, 1);
   }
@@ -440,7 +445,7 @@ export function decodeEncounterStateV1(value: unknown, mode: EncounterStateDecod
         anchor: token.position,
         mode: token.placementMode,
       }));
-      if (!spaceFitsBounds(space, decodedBounds) || space.cells.some((cell) =>
+      if (space.cells.some((cell) =>
         blockedCells.some((blocked) => blocked.column === cell.column && blocked.row === cell.row))) {
         throw new TypeError(`Challenge token ${String(token.id)} has an illegal footprint.`);
       }
@@ -456,5 +461,5 @@ export function decodeEncounterStateV1(value: unknown, mode: EncounterStateDecod
       }
     }
   }
-  return { ...state, ...anchors } as unknown as EncounterState;
+  return assembleDecodedState(rest, boardTokens, absentTokens);
 }

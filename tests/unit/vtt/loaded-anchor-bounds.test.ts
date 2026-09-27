@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { canonicalJson } from '../../../src/commands/canonical-json';
-import { combatantSpace, createEncounter, type EncounterState } from '../../../src/combat/encounter';
+import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
+import { CreatureSizeRuleError } from '../../../src/combat/combat-rules';
+import { combatToken } from '../../../src/combat/combatant';
 import { EncounterRuleError } from '../../../src/combat/encounter-rule-error';
-import { OffGridAnchorError, type GridCell } from '../../../src/combat/grid';
+import { OffGridAnchorError, OffGridBodyError, type GridCell } from '../../../src/combat/grid';
 import type { CombatToken } from '../../../src/combat/combatant';
 import { mulberry32 } from '../../../src/combat/random';
 import { combatantId, encounterBranchId, encounterSessionId, feet, type CombatantId } from '../../../src/combat/values';
@@ -38,6 +40,7 @@ import {
 import { declareTestInputs } from '../../helpers/test-inputs';
 import { onBoard } from '../../helpers/board-cell';
 import { statedPlainMemberFields } from '../../helpers/party-pack-stated';
+import { monsterProfile, playerProfile } from '../combat/fixtures';
 
 // PERF-02 board3 fix 1 (codex r1 P1; owner D895: a malformed position is unconstructible through an
 // in-bounds type checked at decode). Every decoder that turns stored or transmitted bytes into an
@@ -111,6 +114,15 @@ function thrown(action: () => unknown): unknown {
   return undefined;
 }
 
+/** The refusal names the body it refused: the token, its anchor, its side and size, and the grid. */
+function offGridBody(
+  error: unknown, label: string, anchor: GridCell, side: number, size: string, columns: number, rows: number,
+): boolean {
+  return error instanceof OffGridBodyError && error instanceof EncounterRuleError && error.refusalClass === 'validation' &&
+    error.label === label && canonicalJson(error.anchor) === canonicalJson(anchor) && error.side === side &&
+    error.size === size && error.bounds.columns === columns && error.bounds.rows === rows;
+}
+
 /** The refusal names the anchor it refused and the grid it was checked against. */
 function offGrid(error: unknown, label: string, position: GridCell, columns: number, rows: number): boolean {
   return error instanceof OffGridAnchorError && error instanceof EncounterRuleError && error.refusalClass === 'validation' &&
@@ -152,23 +164,21 @@ describe('loaded token anchors are decoded against the grid', () => {
     expect(accepted(() => decodeEncounterStateV1(moved(session, 0, lastCell), 'session')).tokens[0]?.position).toEqual(lastCell);
   });
 
-  it('keeps a Huge creature whose in-bounds anchor lets its footprint reach past the grid (seed-6203009)', () => {
+  it('refuses a Huge creature whose in-bounds anchor would put its body past the grid (seed-6203009, D900)', () => {
     // FOOTPRINT C1 repaired the committed fixture (the Skyspear Hunter now starts at (14, 6)), so the overhang is
     // built as JSON: the Skyspear is moved back to its pre-repair anchor (17, 3) in the repaired raw fixture.
     const repaired = JSON.parse(inputs.fixtures.readText(HUGE_OVERHANG)) as { encounter: { state: JsonState } };
     const monster = combatantId('combatant:generated-6203009-monster-3');
     const skyspear = repaired.encounter.state.tokens.findIndex((token) => token['combatantId'] === monster);
     expect(repaired.encounter.state.tokens[skyspear]?.['position']).toEqual({ column: 14, row: 6 });
+    const decodedRepaired = accepted(() => decodeArenaBasisEnvelopeV1(repaired, { mode: 'legacy_basis' })).encounter.state;
+    expect(decodedRepaired.combatants.find((entry) => entry.profile.id === monster)?.profile.rules.sizeCategory).toBe('Huge');
     const raw: unknown = { ...repaired, encounter: { ...repaired.encounter, state: moved(repaired.encounter.state, skyspear, { column: 17, row: 3 }) } };
-    const state = accepted(() => decodeArenaBasisEnvelopeV1(raw, { mode: 'legacy_basis' })).encounter.state;
-    expect(state.bounds).toEqual({ columns: 19, rows: 20 });
-    expect(state.tokens.find((token) => token.combatantId === monster)?.position).toEqual({ column: 17, row: 3 });
-    expect(state.combatants.find((entry) => entry.profile.id === monster)?.profile.rules.sizeCategory).toBe('Huge');
-    // Huge is 3 x 3 (SRD 5.2.1 Creature Size table): columns 17-19, rows 3-5. Column 19 is off the grid.
-    expect(combatantSpace(state, monster).cells.filter((cell) => cell.column === 19))
-      .toEqual([{ column: 19, row: 3 }, { column: 19, row: 4 }, { column: 19, row: 5 }]);
-    const index = (raw as { encounter: { state: JsonState } }).encounter.state.tokens
-      .findIndex((token) => token['combatantId'] === monster);
+    // Huge is 3 x 3 (SRD 5.2.1 Creature Size table): columns 17-19, rows 3-5. Column 19 is off the 19-column grid.
+    const overhang = thrown(() => decodeArenaBasisEnvelopeV1(raw, { mode: 'legacy_basis' }));
+    expect(offGridBody(overhang, `state.tokens[${String(skyspear)}]`, { column: 17, row: 3 }, 3, 'Huge', 19, 20), String(overhang))
+      .toBe(true);
+    const index = skyspear;
     const shifted = thrown(() => decodeArenaBasisEnvelopeV1({
       ...(raw as Record<string, unknown>),
       encounter: { ...(raw as { encounter: object }).encounter, state: moved((raw as { encounter: { state: JsonState } }).encounter.state, index, { column: 19, row: 3 }) },
@@ -496,5 +506,136 @@ describe('the movement callers refuse an off-grid actor loudly instead of listin
     expect(accepted(() => adjacentOpenCell(state, fighter))).toEqual({ column: 2, row: 4 });
     const error = thrown(() => adjacentOpenCell({ ...state, bounds: { columns: 2, rows: 7 } }, fighter));
     expect(offGrid(error, 'Combatant combatant:fighter anchor', { column: 2, row: 3 }, 2, 7), String(error)).toBe(true);
+  });
+});
+
+// FOOTPRINT W3 (owner D900): an isolated 8 x 6 room, a Huge monster at (5, 3) (columns 5-7, rows 3-5: flush with
+// both far edges) and a Medium PC at (0, 0), built by createEncounter and rolled into initiative. Every decoder
+// accepts it; the same JSON with the Huge anchor moved one column (6, 3) or one row (5, 4) is refused with
+// OffGridBodyError; a placement mode of another size is refused with placement_size_mismatch; an absent Huge
+// token at (6, 3) is accepted, because an absent token's anchor is a return origin, not a placed body.
+describe('FOOTPRINT W3: every decoder places whole bodies only', () => {
+  const HUGE = combatantId('combatant:w3-huge');
+
+  function isolated(): EncounterState {
+    const base = monsterProfile('w3-huge');
+    const huge = { ...base, rules: { ...base.rules, sizeCategory: 'Huge' as const } };
+    const pc = playerProfile('w3-pc');
+    const created = createEncounter({
+      bounds: { columns: 8, rows: 6 },
+      combatants: [huge, pc],
+      tokens: [combatToken(huge, { column: 5, row: 3 }), combatToken(pc, { column: 0, row: 0 })],
+    });
+    return reduceEncounter(created, { type: 'roll_initiative' }, () => 0.5).state;
+  }
+
+  /** The isolated state's JSON with the Huge token changed by `change`. */
+  function hugeEdited(change: (token: Readonly<Record<string, unknown>>) => Record<string, unknown>): JsonState {
+    const loaded = json(isolated());
+    return { ...loaded, tokens: loaded.tokens.map((token) => token['combatantId'] === HUGE ? change(token) : token) };
+  }
+
+  const refusals = [
+    { name: 'one column past (6, 3)', edit: (token: Readonly<Record<string, unknown>>) => ({ ...token, position: { column: 6, row: 3 } }), body: { column: 6, row: 3 } },
+    { name: 'one row past (5, 4)', edit: (token: Readonly<Record<string, unknown>>) => ({ ...token, position: { column: 5, row: 4 } }), body: { column: 5, row: 4 } },
+    { name: 'a Large mode for the Huge', edit: (token: Readonly<Record<string, unknown>>) => ({ ...token, placementMode: { kind: 'normal', actual: 'Large' } }), body: null },
+  ] as const;
+
+  function refusedAs(error: unknown, label: string, body: GridCell | null): boolean {
+    return body === null
+      ? error instanceof CreatureSizeRuleError && error.code === 'placement_size_mismatch' && error.combatantId === HUGE
+      : offGridBody(error, label, body, 3, 'Huge', 8, 6);
+  }
+
+  function sessionExport(state: EncounterState, id: string): string {
+    return EncounterSessionJournal.create({
+      sessionId: encounterSessionId(`session:w3-${id}`),
+      branchId: encounterBranchId('branch:main'),
+      encounterState: state,
+      coordinatorState: { requestSequence: 1, pendingRequest: null, pendingCommand: null, continuation: { kind: 'idle' }, pause: null },
+      controllers: [],
+      rng: mulberry32(6_203_009),
+      store: new MemoryBrowserSessionStore(),
+      mirror: new MemoryMirrorSink(),
+    }).export();
+  }
+
+  function rollout(state: JsonState): RolloutInputCapture {
+    const serializedEncounterState = canonicalJson(state);
+    return {
+      logicalCallId: 'w3:call:0', stateHash: sha256(serializedEncounterState),
+      legalActionSetHash: sha256(canonicalJson(['w3'])), selectedAction: [], input: {},
+      serializedEncounterState, candidateTurnK: 1, candidateTurns: [],
+    };
+  }
+
+  let recorded: ReplayBundle | null = null;
+  /** The scripted skirmish bundle with revision 1's state replaced by `state` (its placement check comes first). */
+  function replayWith(state: JsonState): ReplayBundle {
+    recorded ??= recordScriptedReferenceSkirmish().bundle;
+    const bundle = recorded;
+    const candidate = structuredClone(bundle) as unknown as { revisions: Array<{ revision: { encounterState: unknown } }> };
+    candidate.revisions[0]!.revision.encounterState = { ...state, config: bundle.encounterConfig };
+    return candidate as unknown as ReplayBundle;
+  }
+
+  it('the codec (legacy_basis, session and challenge modes) accepts the flush Huge and refuses each edit', () => {
+    const loaded = json(isolated());
+    for (const mode of ['legacy_basis', 'session', 'challenge'] as const) {
+      expect(accepted(() => decodeEncounterStateV1(loaded, mode)).tokens[0]).toMatchObject({ position: { column: 5, row: 3 } });
+      for (const refusal of refusals) {
+        const error = thrown(() => decodeEncounterStateV1(hugeEdited(refusal.edit), mode));
+        expect(refusedAs(error, 'state.tokens[0]', refusal.body), `${mode} ${refusal.name}: ${String(error)}`).toBe(true);
+      }
+    }
+    const absent = { ...loaded, absentTokens: [{ ...loaded.tokens[0], position: { column: 6, row: 3 } }] };
+    expect(accepted(() => decodeEncounterStateV1(absent, 'session')).absentTokens?.[0]?.position).toEqual({ column: 6, row: 3 });
+  });
+
+  it('a saved session accepts the flush Huge and refuses each edit at import', () => {
+    const state = isolated();
+    const store = new MemoryBrowserSessionStore();
+    const sessionId = accepted(() => importSavedSession(store, sessionExport(state, 'accepted')));
+    expect(store.revisions(sessionId).at(-1)?.encounterState.tokens[0]?.position).toEqual({ column: 5, row: 3 });
+    for (const refusal of refusals) {
+      // The export checksums what it is given, so an edited save is built as a corrupted state (the only cast).
+      const edited = hugeEdited(refusal.edit) as unknown as EncounterState;
+      const error = thrown(() => importSavedSession(new MemoryBrowserSessionStore(), sessionExport(edited, refusal.name)));
+      expect(refusedAs(error, 'Persisted encounter tokens[0]', refusal.body), `${refusal.name}: ${String(error)}`).toBe(true);
+    }
+    const absent = { ...state, absentTokens: [{ ...state.tokens[0]!, position: onBoard(state.bounds, { column: 6, row: 3 }) }] };
+    const absentStore = new MemoryBrowserSessionStore();
+    const absentId = accepted(() => importSavedSession(absentStore, sessionExport(absent, 'absent')));
+    expect(absentStore.revisions(absentId).at(-1)?.encounterState.absentTokens?.[0]?.position).toEqual({ column: 6, row: 3 });
+  });
+
+  it('a rollout capture accepts the flush Huge and refuses each edit', () => {
+    expect(accepted(() => reconstructEncounterState(rollout(json(isolated())))).tokens[0]?.position).toEqual({ column: 5, row: 3 });
+    for (const refusal of refusals) {
+      const error = thrown(() => reconstructEncounterState(rollout(hugeEdited(refusal.edit))));
+      expect(refusedAs(error, 'Rollout capture w3:call:0 tokens[0]', refusal.body), `${refusal.name}: ${String(error)}`).toBe(true);
+    }
+  });
+
+  it('a replay bundle passes the flush Huge to its next check and refuses each edit', () => {
+    // The flush state is not the bundle's own, so replay goes on to refuse it at a later, non-placement check.
+    const later = thrown(() => replayBundle(replayWith(json(isolated()))));
+    expect(later instanceof OffGridBodyError || later instanceof OffGridAnchorError || later instanceof CreatureSizeRuleError, String(later))
+      .toBe(false);
+    expect(later).toBeInstanceOf(Error);
+    for (const refusal of refusals) {
+      const error = thrown(() => replayBundle(replayWith(hugeEdited(refusal.edit))));
+      expect(refusedAs(error, 'Replay revision 1 tokens[0]', refusal.body), `${refusal.name}: ${String(error)}`).toBe(true);
+    }
+  });
+
+  it('the engine round session re-mints the flush Huge and refuses a state whose Huge body leaves the grid', () => {
+    const state = isolated();
+    expect(accepted(() => canonicalEncounterState(state)).state.tokens[0]?.position).toEqual({ column: 5, row: 3 });
+    for (const refusal of refusals) {
+      const edited = hugeEdited(refusal.edit) as unknown as EncounterState;
+      const error = thrown(() => canonicalEncounterState(edited));
+      expect(refusedAs(error, 'Canonical engine state tokens[0]', refusal.body), `${refusal.name}: ${String(error)}`).toBe(true);
+    }
   });
 });

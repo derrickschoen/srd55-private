@@ -107,6 +107,7 @@ import {
   type GridCell,
 } from './grid';
 import { assertSupportedGrid } from './grid-size';
+import { placedToken, type PlacementContext } from './token-placement';
 import {
   applySizeSteps,
   autoRelocatePlacement,
@@ -1214,23 +1215,48 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
   ) {
     throw new EncounterRuleError('validation', 'The alerting sound-propagation model is unsupported.');
   }
-  // The only place an authored anchor becomes a state's anchor: checked against the grid and minted.
+  const initialEffects: EncounterEffect[] = [];
+  let nextEffectSequence = 1;
+  for (const profile of setup.combatants) {
+    for (const feature of profile.rules.featureEffects ?? []) {
+      if (
+        feature.trigger !== 'always_on' ||
+        feature.payload.kind === 'temporary_hit_points' ||
+        feature.payload.kind === 'reckless_attack_mode' ||
+        isTypedCombatFeaturePayload(feature.payload) ||
+        isAttackFormSubstitutionPayload(feature.payload)
+      ) continue;
+      initialEffects.push({
+        id: encounterEffectId(`effect:${String(nextEffectSequence)}`),
+        source: profile.id,
+        targets: [profile.id],
+        createdRevision: 0,
+        duration: { kind: 'permanent' },
+        concentrationOwner: null,
+        stackingIdentity: effectStackingIdentity(`feature:${feature.id}`),
+        stacking: 'coexist',
+        repeatedSave: null,
+        payload: feature.payload,
+      });
+      nextEffectSequence += 1;
+    }
+  }
+
+  // The only place an authored anchor becomes a state's anchor: every token is minted by the placement
+  // checks (token-placement.ts): the anchor on the grid, the mode of the effective size, the whole body on
+  // the grid (owner D900). The always-on feature effects are the only effects a new encounter has.
+  const placementContext: PlacementContext = {
+    bounds: setup.bounds,
+    combatants: setup.combatants.map((profile) => ({ profile })),
+    effects: initialEffects,
+  };
   const placedTokens: CombatToken[] = [];
   for (const token of setup.tokens) {
     const profile = setup.combatants.find((candidate) => candidate.id === token.combatantId);
     if (profile?.tokenId !== token.id) {
       throw new EncounterRuleError('validation', 'A token must match its profile token identity.');
     }
-    placedTokens.push({
-      ...token,
-      position: requireBoardCell(setup.bounds, token.position, `Token ${token.id} anchor`),
-      placementMode: { ...token.placementMode },
-    });
-    const size = profile.rules.sizeCategory;
-    if (size === undefined) throw new CreatureSizeRuleError('mechanical_size_required', profile.id);
-    if (token.placementMode.actual !== size) {
-      throw new CreatureSizeRuleError('placement_size_mismatch', profile.id);
-    }
+    placedTokens.push(placedToken(placementContext, token, token.position, token.placementMode, `Token ${token.id}`));
   }
 
   const reactionPolicies = setup.reactionPolicies ?? [];
@@ -1289,9 +1315,6 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
       anchor: placed.position,
       mode: placed.placementMode,
     }));
-    if (!spaceFitsBounds(space, setup.bounds)) {
-      throw new EncounterRuleError('validation', `Token ${placed.id} footprint is outside the encounter grid.`);
-    }
     if (space.cells.some((cell) => blockedCells.some((blocked) => cellKey(blocked) === cellKey(cell)))) {
       throw new EncounterRuleError('validation', `Token ${placed.id} footprint intersects a blocked cell.`);
     }
@@ -1365,33 +1388,6 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
       if (effect.resourcePoolId !== null && !resourceIds.has(effect.resourcePoolId)) {
         throw new EncounterRuleError('validation', `Effect ${effect.id} references unknown resource pool ${effect.resourcePoolId}.`);
       }
-    }
-  }
-
-  const initialEffects: EncounterEffect[] = [];
-  let nextEffectSequence = 1;
-  for (const profile of setup.combatants) {
-    for (const feature of profile.rules.featureEffects ?? []) {
-      if (
-        feature.trigger !== 'always_on' ||
-        feature.payload.kind === 'temporary_hit_points' ||
-        feature.payload.kind === 'reckless_attack_mode' ||
-        isTypedCombatFeaturePayload(feature.payload) ||
-        isAttackFormSubstitutionPayload(feature.payload)
-      ) continue;
-      initialEffects.push({
-        id: encounterEffectId(`effect:${String(nextEffectSequence)}`),
-        source: profile.id,
-        targets: [profile.id],
-        createdRevision: 0,
-        duration: { kind: 'permanent' },
-        concentrationOwner: null,
-        stackingIdentity: effectStackingIdentity(`feature:${feature.id}`),
-        stacking: 'coexist',
-        repeatedSave: null,
-        payload: feature.payload,
-      });
-      nextEffectSequence += 1;
     }
   }
 

@@ -1,7 +1,7 @@
 import { creatureSizes, type KnownCreatureSize } from '../domain/enums';
 import type { Brand } from '../domain/ids';
 import type { EncounterState } from './encounter';
-import { isCellInside, type BoardCell, type GridCell } from './grid';
+import { isCellInside, type BoardCell, type FootprintSide, type GridCell } from './grid';
 import { assertSupportedGrid } from './grid-size';
 import { terrainPassabilityAt } from './terrain';
 
@@ -31,9 +31,6 @@ import { terrainPassabilityAt } from './terrain';
  * indices it stored from squareCell (its entered-cell scratch).
  */
 export type CellIndex = Brand<number, 'CellIndex'>;
-
-/** Side of a creature's square footprint in cells (SRD Creature Size table: 1, 2, 3 or 4). */
-export type FootprintSide = 1 | 2 | 3 | 4;
 
 /** A cell no narrow opening covers; creature-size ordinals are 0 (Tiny) to 5 (Gargantuan). */
 export const NO_OPENING = 127;
