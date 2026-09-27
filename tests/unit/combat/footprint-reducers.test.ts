@@ -19,7 +19,7 @@ import { declareTestInputs } from '../../helpers/test-inputs';
 import { monsterProfile, playerProfile } from './fixtures';
 
 // FOOTPRINT (owner D900): the reducers mint every token they move or place, so a body past the edge is never built
-// (W6-W10, W12, W12b, W12c). Every expected anchor is hand-derived: D514 orders candidates by Chebyshev distance
+// (W6-W10, W9b, W12, W12b, W12c). Every expected anchor is hand-derived: D514 orders candidates by Chebyshev distance
 // from the previous anchor, then by row, then by column; a Large body is 2 x 2 and a Huge one 3 x 3 (D511).
 
 const PACK = 'tests/fixtures/content-pack-v1-homebrew.json';
@@ -168,6 +168,40 @@ describe('FOOTPRINT: the reducers place whole bodies only', () => {
     expect(() => reduceEncounter(started, skip(9), () => 0.5)).toThrowError(EncounterRuleError);
     expect(() => reduceEncounter(started, skip(9), () => 0.5)).toThrow(/unoccupied, occupiable destination/u);
     expect(tokenOf(accepted(() => reduceEncounter(started, skip(8), () => 0.5).state), teleporter.id)?.position).toEqual({ column: 8, row: 0 });
+  });
+
+  it('W9b: a Large summoned where its body would leave the grid is refused with the summon destination refusal', () => {
+    // 10 x 4, the caster at (5,1). A Large at (9,1) would cover column 10; (8,1) covers 8-9 x 1-2, free, 15 ft away.
+    const source = JSON.parse(inputs.fixtures.readText(PACK)) as Record<string, unknown> & { monsters: { statblock: Record<string, unknown> }[] };
+    const monster = source.monsters[0];
+    if (monster === undefined) throw new Error('The homebrew pack fixture has no monster.');
+    monster.statblock = { ...monster.statblock, sizeCategory: 'Large' };
+    const pack = homebrewSpellPack(source, 'footprint-summon', [{
+      recordId: 'call-large', concentration: true,
+      targeting: { kind: 'utility', rangeFeet: 30 },
+      operation: {
+        kind: 'summon', monsterId: 'brassleaf-mote', count: { kind: 'fixed', count: 1 }, placementRangeFeet: 30,
+        lifecycle: { concentration: true, durationRounds: 10, expiresAt: 'source_start' },
+      },
+    }]);
+    const caster = playerProfile('w9b-caster', { initiativeBonus: 100, spellSlots: [{ level: 1, maximum: 4 }] });
+    const other = sized('w9b-other', 'Medium');
+    const created = createEncounter({
+      bounds: { columns: 10, rows: 4 }, contentPacks: [pack], combatants: [caster, other],
+      tokens: [combatToken(caster, { column: 5, row: 1 }), combatToken(other, { column: 0, row: 3 })],
+    });
+    const started = reduceEncounter(created, { type: 'roll_initiative' }, () => 0.5).state;
+    const summon = (column: number): SpellCastCommand => ({
+      type: 'cast_spell', actor: caster.id, spellId: 'greenforge:call-large', slotLevel: 1, castAsRitual: false,
+      casterLevel: 5, attackBonus: 6, saveDc: 14, spellcastingModifier: 3, targets: [], area: null,
+      weaponAttack: null, selectedOption: null, summonDestinations: [{ column, row: 1 }],
+    });
+    expect(() => reduceEncounter(started, summon(9), () => 0.5)).toThrowError(EncounterRuleError);
+    expect(() => reduceEncounter(started, summon(9), () => 0.5)).toThrow(/summon destination is not an occupiable cell/u);
+    const summoned = accepted(() => reduceEncounter(started, summon(8), () => 0.5).state);
+    expect(summoned.tokens.filter((token) => token.combatantId !== caster.id && token.combatantId !== other.id)).toEqual([
+      expect.objectContaining({ position: { column: 8, row: 1 }, placementMode: { kind: 'normal', actual: 'Large' } }),
+    ]);
   });
 
   it('W10: a Large actor one column from the east edge has 5 whole-body movement candidates of its 8 neighbours', () => {
