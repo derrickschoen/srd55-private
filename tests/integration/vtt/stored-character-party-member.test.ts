@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { applyGuidedOrigin, listGuidedOriginOptions } from '../../../src/builder/guided-creation';
 import type { DatabaseContext } from '../../../src/db/database';
 import { loadExternalPartyPack } from '../../../src/vtt/party-pack';
 import { StoredCharacterPartyPackExporter } from '../../../src/vtt/stored-character-party-member';
@@ -13,17 +14,26 @@ import {
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 
+/**
+ * The bundled SRD Human, applied through the catalog so the copy records its
+ * provenance: a character's senses are sourced from its species (PC-EXPORT-
+ * TRUTH), and a hand-inserted species row has none. `speed: null` then blanks
+ * the copied Speed, as a half-entered species would.
+ */
 function addSpecies(
   db: DatabaseContext,
   characterId: number,
-  speed: number | null = 30,
+  speed: 30 | null = 30,
 ): void {
-  db.exec(
-    `INSERT INTO character_species (
-       character_id, name, creature_type, size, base_speed_feet
-     ) VALUES (?, 'Human', 'Humanoid', 'Medium', ?)`,
-    [characterId, speed],
-  );
+  const human = listGuidedOriginOptions(db, 'species').find((option) => option.name === 'Human');
+  if (human === undefined) throw new Error('The bundled Human is missing.');
+  applyGuidedOrigin(db, { character_id: characterId, kind: 'species', content_key: human.content_key });
+  if (speed === null) {
+    db.exec(
+      'UPDATE character_species SET base_speed_feet = NULL WHERE character_id = ?',
+      [characterId],
+    );
+  }
 }
 
 function exportable(

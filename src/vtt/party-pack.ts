@@ -49,6 +49,12 @@ import {
   type EncounterEffectId,
 } from '../combat/values';
 import type { WorldOperation } from '../combat/world-objects';
+import type { CombatSense } from '../combat/statblock';
+import {
+  sourcedNotExecutedMastery,
+  type ExecutedWeaponMastery,
+  type SourcedNotExecutedWeaponMastery,
+} from '../rules/weapon-mastery-status';
 import { abilities, creatureSizes, damageTypes, skills, weaponMasteryProperties, type Ability, type KnownCreatureSize, type Skill } from '../domain/enums';
 import { hitDieSizes, type HitDieSize } from '../domain/enums';
 import { exactValues } from '../domain/exact-table';
@@ -1138,6 +1144,41 @@ const passivesSchema = z.strictObject({
   conditionImmunities: z.array(z.enum(conditionNames)).max(conditionNames.length).optional(),
 });
 
+/**
+ * PC-EXPORT-TRUTH (D918): a member may STATE all eighteen skill check
+ * modifiers and its standing senses. A stored-character export always states
+ * both, from the sheet (skills-table.txt; sheet-math.txt Passive Perception)
+ * and the sourced species/feature senses. Both stay optional on the wire so a
+ * pack written before them loads unchanged; the loaded member records which
+ * reading it got (`LoadedPartySkills`, `LoadedPartySenses`).
+ */
+const skillBonusRecordShape = Object.fromEntries(
+  skills.map((skill) => [skill, modifierSchema]),
+) as Record<Skill, typeof modifierSchema>;
+const RANGED_SENSE_KINDS = exactValues<'blindsight' | 'darkvision' | 'tremorsense' | 'truesight'>()(
+  'blindsight', 'darkvision', 'tremorsense', 'truesight',
+);
+const senseSchema = z.union([
+  z.strictObject({ kind: z.literal('normal_sight') }),
+  z.strictObject({
+    kind: z.enum(RANGED_SENSE_KINDS),
+    rangeFeet: integerSchema.min(1).max(1_000),
+  }),
+]);
+type SenseWireInput = z.infer<typeof senseSchema>;
+const SENSES_RULES = [
+  (senses: readonly SenseWireInput[]): readonly PartyPackValidationIssue[] => issueWhen(
+    new Set(senses.map((sense) => sense.kind)).size !== senses.length,
+    'Senses must use unique kinds.',
+  ),
+] as const satisfies readonly PartyPackRule<readonly SenseWireInput[]>[];
+const sensesSchema = z.array(senseSchema).min(1).max(RANGED_SENSE_KINDS.length + 1)
+  .superRefine(refinementFromRules(SENSES_RULES));
+const statedMemberShape = {
+  skillBonuses: z.strictObject(skillBonusRecordShape).optional(),
+  senses: sensesSchema.optional(),
+} as const;
+
 const manifestSpellIdSchema = z.custom<SpellManifestId>(
   isSpellManifestId,
   'Spell selection must use a manifest spell id.',
@@ -1212,12 +1253,14 @@ const v2MemberCoreSchema = z.strictObject({
   ...memberBaseShape,
   sizeCategory: z.enum(creatureSizes),
   hitDice: z.array(hitDicePoolSchema).min(1).max(12).optional(),
+  ...statedMemberShape,
 });
 
 const v2MemberObjectSchema = z.strictObject({
   ...memberBaseShape,
   sizeCategory: z.enum(creatureSizes),
   hitDice: z.array(hitDicePoolSchema).min(1).max(12).optional(),
+  ...statedMemberShape,
   ...memberSharedShape,
   spellcasting: z.union([
     legacySpellcastingSchema,
@@ -1298,10 +1341,13 @@ export interface LoadedPartyAttack {
   readonly criticalFloor: number;
   /** Every attack command built from this attack carries it as its tacticalRange. */
   readonly delivery: LoadedPartyAttackDelivery;
-  readonly mastery:
-    | { readonly property: 'Slow' }
-    | { readonly property: 'Topple'; readonly saveDc: number }
-    | null;
+  /**
+   * The attack's stated weapon mastery; `null` only when the pack states none.
+   * A mastery the engine runs is its command rider; the others are carried as
+   * "sourced, not executed" with the capability they await
+   * (`src/rules/weapon-mastery-status.ts`), never dropped to `null`.
+   */
+  readonly mastery: LoadedPartyAttackMastery | null;
   readonly damage: readonly {
     readonly type: DamageType;
     readonly count: number;
@@ -1309,6 +1355,23 @@ export interface LoadedPartyAttack {
     readonly modifier: number;
   }[];
 }
+
+export type LoadedPartyAttackMastery = ExecutedWeaponMastery | SourcedNotExecutedWeaponMastery;
+
+/**
+ * What the pack STATED about a member's skills (PC-EXPORT-TRUTH). A stored-
+ * character export states all eighteen; a pack that states none is read as the
+ * wire always read it — its only skill modifiers are its passives — and the
+ * member says so rather than passing that reading off as sourced.
+ */
+export type LoadedPartySkills =
+  | { readonly kind: 'stated'; readonly bonuses: Readonly<Record<Skill, number>> }
+  | { readonly kind: 'unstated_by_pack' };
+
+/** What the pack STATED about a member's standing senses; see `LoadedPartySkills`. */
+export type LoadedPartySenses =
+  | { readonly kind: 'stated'; readonly senses: readonly CombatSense[] }
+  | { readonly kind: 'unstated_by_pack' };
 
 export interface LoadedPartyCondition {
   readonly effectId: EncounterEffectId;
@@ -1339,6 +1402,8 @@ export interface LoadedPartySpellcastingSource {
 export interface LoadedPartyMember {
   readonly source: ExternalPartyPackMember;
   readonly profile: Extract<CombatantProfile, { readonly kind: 'player_character' }>;
+  readonly skills: LoadedPartySkills;
+  readonly senses: LoadedPartySenses;
   readonly attacks: readonly LoadedPartyAttack[];
   readonly spells: readonly SpellManifestEntry[];
   readonly spellcasting: readonly LoadedPartySpellcastingSource[];
@@ -1504,7 +1569,16 @@ const V2_MEMBER_FIELDS = {
   resources: true,
   passives: true,
   worldOperations: true,
+  skillBonuses: true,
+  senses: true,
 } as const satisfies ExactFields<ExternalPartyPackV2['members'][number]>;
+const SKILL_FIELDS = Object.fromEntries(
+  skills.map((skill) => [skill, true]),
+) as ExactFields<Record<Skill, number>>;
+const SENSE_FIELDS = {
+  kind: true,
+  rangeFeet: true,
+} as const satisfies ExactFields<Extract<SenseWireInput, { readonly rangeFeet: number }>>;
 const CLASS_FIELDS = {
   classId: true,
   level: true,
@@ -1794,6 +1868,28 @@ function parsedV2Core(
           ),
         }
       : {}),
+    ...(hasV2MemberField(value, 'skillBonuses')
+      ? {
+          skillBonuses: sanitizedRecord(
+            value.skillBonuses,
+            SKILL_FIELDS,
+            partyEntry,
+            ['members', memberIndex, 'skillBonuses'],
+            gaps,
+          ),
+        }
+      : {}),
+    ...(hasV2MemberField(value, 'senses')
+      ? {
+          senses: sanitizedArrayRecords(
+            value.senses,
+            SENSE_FIELDS,
+            partyEntry,
+            ['members', memberIndex, 'senses'],
+            gaps,
+          ),
+        }
+      : {}),
   };
 }
 
@@ -1893,24 +1989,50 @@ function loadedAttackDelivery(attack: ExternalPartyPackAttack): LoadedPartyAttac
   }
 }
 
+function loadedAttackMastery(attack: ExternalPartyPackAttack): LoadedPartyAttackMastery | null {
+  switch (attack.masteryProperty) {
+    case undefined:
+      return null;
+    case 'Topple':
+      return { property: 'Topple', saveDc: attack.masterySaveDc };
+    case 'Slow':
+      return { property: 'Slow' };
+    case 'Cleave':
+    case 'Graze':
+    case 'Nick':
+    case 'Push':
+    case 'Sap':
+    case 'Vex':
+      return sourcedNotExecutedMastery(attack.masteryProperty);
+  }
+  // Every stated property is a case above, so no attack reaches here.
+  const unhandled: never = attack;
+  throw new TypeError(`Unhandled weapon mastery on ${JSON.stringify(unhandled)}.`);
+}
+
+/**
+ * The rider an attack command carries: exactly the executed masteries. A
+ * sourced-but-not-executed mastery stays on the loaded attack, typed, and
+ * the command resolves without it until WEAPON-EXEC runs it.
+ */
+function commandWeaponMastery(mastery: LoadedPartyAttackMastery | null): ExecutedWeaponMastery | null {
+  if (mastery === null) return null;
+  switch (mastery.property) {
+    case 'Slow':
+    case 'Topple':
+      return mastery;
+    case 'Cleave':
+    case 'Graze':
+    case 'Nick':
+    case 'Push':
+    case 'Sap':
+    case 'Vex':
+      return null;
+  }
+}
+
 function loadedAttack(attack: ExternalPartyPackAttack): LoadedPartyAttack {
-  const mastery = (() => {
-    switch (attack.masteryProperty) {
-      case 'Topple':
-        return { property: 'Topple' as const, saveDc: attack.masterySaveDc };
-      case 'Slow':
-        return { property: 'Slow' as const };
-      case 'Cleave':
-      case 'Graze':
-      case 'Nick':
-      case 'Push':
-      case 'Sap':
-      case 'Vex':
-      case undefined:
-        return null;
-    }
-    return attack;
-  })();
+  const mastery = loadedAttackMastery(attack);
   return {
     attackId: attack.attackId,
     attackBonus: attack.attackBonus,
@@ -2496,6 +2618,78 @@ function v2MemberExtensions(member: ExternalPartyPackMember): {
   };
 }
 
+/** SRD sheet-math.txt: "Passive Perception = 10 + Wisdom (Perception) check modifier". */
+const PASSIVE_PERCEPTION_BASE = 10;
+
+function statedSkills(member: ExternalPartyPackMember): LoadedPartySkills {
+  const stated = hasV2MemberField(member, 'skillBonuses')
+    ? (member as ExternalPartyPackV2Member).skillBonuses
+    : undefined;
+  return stated === undefined ? { kind: 'unstated_by_pack' } : { kind: 'stated', bonuses: stated };
+}
+
+function statedSenses(member: ExternalPartyPackMember): LoadedPartySenses {
+  const stated = hasV2MemberField(member, 'senses')
+    ? (member as ExternalPartyPackV2Member).senses
+    : undefined;
+  return stated === undefined ? { kind: 'unstated_by_pack' } : { kind: 'stated', senses: stated };
+}
+
+/**
+ * The skill rules the engine reads. `passives.skillBonuses` is an ADDITIVE list
+ * that names only the skills it adjusts, so every skill it does not name is
+ * adjusted by exactly zero — the same reading as every other passive.
+ *
+ * A pack that STATES its skills gets exactly those, plus its passives, and
+ * Passive Perception from the SRD formula. A pack that states none keeps the
+ * one reading the wire has always given it — its passives are its only skill
+ * modifiers — made here, once, and recorded on the member as
+ * `unstated_by_pack`, so no consumer mistakes it for a sourced value. Packs
+ * written before PC-EXPORT-TRUTH therefore load byte-identically.
+ */
+function loadedSkillRules(
+  statement: LoadedPartySkills,
+  passive: z.infer<typeof passivesSchema> | null,
+): {
+  readonly skillBonuses: Readonly<Partial<Record<Skill, number>>> | null;
+  readonly passivePerception: number;
+} {
+  const listed = passive?.skillBonuses;
+  const adjustments = Object.fromEntries(skills.map((skill) => [skill, 0])) as Record<Skill, number>;
+  for (const entry of listed ?? []) adjustments[entry.skillId] = entry.bonus;
+  switch (statement.kind) {
+    case 'stated': {
+      const totals = Object.fromEntries(skills.map((skill) => [
+        skill,
+        statement.bonuses[skill] + adjustments[skill],
+      ])) as Record<Skill, number>;
+      return {
+        skillBonuses: totals,
+        passivePerception: PASSIVE_PERCEPTION_BASE + totals.perception,
+      };
+    }
+    case 'unstated_by_pack':
+      return {
+        skillBonuses: listed === undefined
+          ? null
+          : Object.fromEntries(listed.map((entry) => [entry.skillId, entry.bonus])) as Partial<Record<Skill, number>>,
+        passivePerception: PASSIVE_PERCEPTION_BASE + adjustments.perception,
+      };
+  }
+}
+
+/** The one reading of a pack that states no senses; see `loadedSkillRules`. */
+const UNSTATED_PACK_SENSES: readonly CombatSense[] = [{ kind: 'normal_sight' }];
+
+function loadedSenseRules(senses: LoadedPartySenses): readonly CombatSense[] {
+  switch (senses.kind) {
+    case 'stated':
+      return senses.senses;
+    case 'unstated_by_pack':
+      return UNSTATED_PACK_SENSES;
+  }
+}
+
 function loadedMember(
   member: ExternalPartyPackMember,
   spells: readonly SpellManifestEntry[],
@@ -2513,11 +2707,13 @@ function loadedMember(
   ) as Record<Ability, number>;
   const totalLevel = member.classes.reduce((sum, heldClass) => sum + heldClass.level, 0);
   const effects = extensions.effects.map((effect) => loadedFeatureEffect(effect, totalLevel));
-  const skillBonuses = Object.fromEntries(
-    (passive?.skillBonuses ?? []).map((entry) => [entry.skillId, entry.bonus]),
-  ) as Partial<Record<Skill, number>>;
+  const skillStatement = statedSkills(member);
+  const senseStatement = statedSenses(member);
+  const skillRules = loadedSkillRules(skillStatement, passive);
   return {
     source: member,
+    skills: skillStatement,
+    senses: senseStatement,
     profile: {
       kind: 'player_character',
       id: combatantId(member.combatantId),
@@ -2541,8 +2737,8 @@ function loadedMember(
         })),
         conditionImmunities: [...(passive?.conditionImmunities ?? [])],
         usesDeathSaves: true,
-        senses: [{ kind: 'normal_sight' }],
-        passivePerception: 10 + (skillBonuses.perception ?? 0),
+        senses: [...loadedSenseRules(senseStatement)],
+        passivePerception: skillRules.passivePerception,
         detectionTraits: [],
         contactMedium: 'surface',
         ...(extensions.sizeCategory === null ? {} : { sizeCategory: extensions.sizeCategory }),
@@ -2567,7 +2763,7 @@ function loadedMember(
             }
           : {}),
         ...(hasV2MemberField(member, 'effects') ? { featureEffects: effects } : {}),
-        ...(passive?.skillBonuses === undefined ? {} : { skillBonuses }),
+        ...(skillRules.skillBonuses === null ? {} : { skillBonuses: skillRules.skillBonuses }),
       },
     },
     attacks: member.attacks.map(loadedAttack),
@@ -2745,6 +2941,7 @@ export function loadedPartyAttackCommand(
       throw new PartyAttackError();
     }
   }
+  const weaponMastery = commandWeaponMastery(attack.mastery);
   return {
     type: 'attack',
     actor: member.profile.id,
@@ -2764,7 +2961,7 @@ export function loadedPartyAttackCommand(
       responses: [],
     },
     attackId: attack.attackId,
-    ...(attack.mastery === null ? {} : { weaponMastery: attack.mastery }),
+    ...(weaponMastery === null ? {} : { weaponMastery }),
     ...(options.recklessAttackEffectId === undefined
       ? {}
       : { recklessAttackEffectId: options.recklessAttackEffectId }),

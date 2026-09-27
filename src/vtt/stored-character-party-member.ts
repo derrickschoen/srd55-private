@@ -4,9 +4,11 @@ import {
   abilities,
   creatureSizes,
   damageTypes,
+  skills,
   type Ability,
   type KnownCreatureSize,
   type KnownDamageType,
+  type Skill,
 } from '../domain/enums';
 import type { WeaponsPanel } from '../domain/read-models';
 import type { AttackProfile, AbilityOption } from '../rules/attack-profiles';
@@ -17,7 +19,9 @@ import {
   CharacterSheetBuilder,
   type CharacterSheet,
 } from '../queries/character-sheet-builder';
+import { readCharacterSenses } from '../queries/character-senses';
 import { WeaponQueries } from '../queries/weapons';
+import type { CharacterSenses } from '../rules/character-senses';
 import { SPELL_MANIFEST, type SpellManifestId } from '../combat/spells/manifest';
 import type {
   ExternalPartyPackAttack,
@@ -26,6 +30,13 @@ import type {
 } from './party-pack';
 
 type ExternalPartyPackV2Member = ExternalPartyPackV2['members'][number];
+/**
+ * What this exporter emits: a v2 member that ALWAYS states its skills and
+ * senses (PC-EXPORT-TRUTH). The wire keeps both optional for packs written
+ * before them; an export that forgot either would not compile.
+ */
+type StoredCharacterPartyPackMember = ExternalPartyPackV2Member &
+  Required<Pick<ExternalPartyPackV2Member, 'skillBonuses' | 'senses'>>;
 type PartyPackSpellcastingSources = Extract<
   NonNullable<ExternalPartyPackV2Member['spellcasting']>,
   readonly unknown[]
@@ -192,19 +203,73 @@ function attacks(
         modifier: ability.damage_modifier,
       }],
     } satisfies Omit<ExternalPartyPackAttack, 'masteryProperty' | 'masterySaveDc'>;
-    if (weapon.mastery_selected && weapon.mastery_property === 'Topple') {
-      exported.push({
-        ...attackBase,
-        masteryProperty: 'Topple',
-        masterySaveDc: 8 + ability.attack_bonus,
-      });
-    } else if (weapon.mastery_selected && weapon.mastery_property === 'Slow') {
-      exported.push({ ...attackBase, masteryProperty: 'Slow' });
-    } else {
+    if (!weapon.mastery_selected) {
       exported.push(attackBase);
+      continue;
+    }
+    // EVERY selected mastery is stated, whether or not the engine runs it yet;
+    // the loader carries the ones it cannot run as "sourced, not executed"
+    // (src/rules/weapon-mastery-status.ts). Only Topple carries a number.
+    switch (weapon.mastery_property) {
+      case null:
+        return {
+          status: 'refused',
+          field: `attacks.weapon.${String(weapon.id)}.masteryProperty`,
+          detail: `${weapon.name} selects a weapon mastery without naming the property.`,
+        };
+      case 'Topple':
+        exported.push({
+          ...attackBase,
+          masteryProperty: 'Topple',
+          masterySaveDc: 8 + ability.attack_bonus,
+        });
+        break;
+      case 'Cleave':
+      case 'Graze':
+      case 'Nick':
+      case 'Push':
+      case 'Sap':
+      case 'Slow':
+      case 'Vex':
+        exported.push({ ...attackBase, masteryProperty: weapon.mastery_property });
+        break;
     }
   }
   return { status: 'exported', attacks: exported };
+}
+
+/**
+ * All eighteen skill check modifiers, exactly as the sheet computes them
+ * (skills-table.txt; the sheet's `skillModifier`), and the proof that the
+ * sheet's Passive Perception is the SRD formula over them (sheet-math.txt:
+ * "Passive Perception = 10 + Wisdom (Perception) check modifier"), which is
+ * how the loader derives it.
+ */
+function skillBonuses(
+  sheet: CharacterSheet,
+):
+  | { readonly status: 'exported'; readonly bonuses: Record<Skill, number> }
+  | { readonly status: 'refused'; readonly field: string; readonly detail: string } {
+  const bonuses = {} as Record<Skill, number>;
+  for (const skill of skills) {
+    const row = sheet.skills.find((candidate) => candidate.skill === skill);
+    if (row === undefined || row.value === null) {
+      return {
+        status: 'refused',
+        field: `skillBonuses.${skill}`,
+        detail: `The ${skill} check modifier is undetermined.`,
+      };
+    }
+    bonuses[skill] = row.value;
+  }
+  if (sheet.passive_perception.value !== 10 + bonuses.perception) {
+    return {
+      status: 'refused',
+      field: 'skillBonuses.perception',
+      detail: 'The sheet\'s Passive Perception is not 10 + its Perception check modifier.',
+    };
+  }
+  return { status: 'exported', bonuses };
 }
 
 function spellSlotPools(
@@ -323,6 +388,7 @@ function spellcasting(
 export function projectStoredCharacterPartyPackMember(
   sheet: CharacterSheet,
   weapons: WeaponsPanel,
+  senses: CharacterSenses,
 ): StoredCharacterPartyPackExport {
   const size = knownSize(sheet);
   if (size === null) {
@@ -361,6 +427,16 @@ export function projectStoredCharacterPartyPackMember(
   }
   if (sheet.walking_speed.kind === 'unknown') {
     return refused('walkingSpeedFeet', sheet.walking_speed.detail);
+  }
+  switch (senses.status) {
+    case 'undetermined':
+      return refused(senses.field, senses.detail);
+    case 'sourced':
+      break;
+  }
+  const exportedSkills = skillBonuses(sheet);
+  if (exportedSkills.status === 'refused') {
+    return refused(exportedSkills.field, exportedSkills.detail);
   }
   const savingThrowBonuses = {} as Record<Ability, number>;
   for (const ability of abilities) {
@@ -412,7 +488,7 @@ export function projectStoredCharacterPartyPackMember(
     (total, bonus) => total + bonus.amount,
     0,
   );
-  const member: ExternalPartyPackV2Member = {
+  const member: StoredCharacterPartyPackMember = {
     combatantId: `combatant:character-${String(sheet.character_id)}`,
     tokenId: `token:character-${String(sheet.character_id)}`,
     characterId: sheet.character_id,
@@ -423,6 +499,8 @@ export function projectStoredCharacterPartyPackMember(
     walkingSpeedFeet: sheet.walking_speed.value,
     initiativeBonus: sheet.initiative.value,
     savingThrowBonuses,
+    skillBonuses: exportedSkills.bonuses,
+    senses: senses.senses.map((sense) => ({ ...sense })),
     attacksPerAction: sheet.attacks_per_action.count,
     sizeCategory: size,
     hitDice: [...hitDiceBySides]
@@ -472,6 +550,10 @@ export class StoredCharacterPartyPackExporter {
         proficiency_bonus: sheet.proficiency_bonus.value,
       }),
     };
-    return projectStoredCharacterPartyPackMember(sheet, panel);
+    return projectStoredCharacterPartyPackMember(
+      sheet,
+      panel,
+      readCharacterSenses(this.db, characterId, sheet),
+    );
   }
 }

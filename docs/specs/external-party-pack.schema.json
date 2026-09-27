@@ -105,8 +105,51 @@
         "criticalFloor": { "type": "integer", "minimum": 2, "maximum": 20 },
         "reachFeet": { "type": "integer", "minimum": 0, "maximum": 1000 },
         "rangeFeet": { "type": "integer", "minimum": 0, "maximum": 1000 },
-        "damage": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "$ref": "#/$defs/damage" } }
+        "longRangeFeet": { "type": "integer", "minimum": 0, "maximum": 1000 },
+        "damage": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "$ref": "#/$defs/damage" } },
+        "masteryProperty": {
+          "description": "The weapon's selected mastery. Slow and Topple are executed; the other six load as sourced, not executed (src/rules/weapon-mastery-status.ts), never dropped.",
+          "enum": ["Cleave", "Graze", "Nick", "Push", "Sap", "Slow", "Topple", "Vex"]
+        },
+        "masterySaveDc": { "description": "Topple only.", "type": "integer", "minimum": 1, "maximum": 50 }
       }
+    },
+    "skillBonuses": {
+      "description": "All eighteen skill check modifiers, stated together; Passive Perception is 10 + perception. A member that omits them loads with its passives as its only skill modifiers.",
+      "type": "object", "additionalProperties": false,
+      "required": ["acrobatics", "animal_handling", "arcana", "athletics", "deception", "history", "insight", "intimidation", "investigation", "medicine", "nature", "perception", "performance", "persuasion", "religion", "sleight_of_hand", "stealth", "survival"],
+      "properties": {
+        "acrobatics": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "animal_handling": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "arcana": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "athletics": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "deception": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "history": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "insight": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "intimidation": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "investigation": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "medicine": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "nature": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "perception": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "performance": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "persuasion": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "religion": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "sleight_of_hand": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "stealth": { "type": "integer", "minimum": -30, "maximum": 30 },
+        "survival": { "type": "integer", "minimum": -30, "maximum": 30 }
+      }
+    },
+    "sense": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "normal_sight" } } },
+        {
+          "type": "object", "additionalProperties": false, "required": ["kind", "rangeFeet"],
+          "properties": {
+            "kind": { "enum": ["blindsight", "darkvision", "tremorsense", "truesight"] },
+            "rangeFeet": { "type": "integer", "minimum": 1, "maximum": 1000 }
+          }
+        }
+      ]
     },
     "spellSlot": {
       "type": "object",
@@ -866,7 +909,12 @@
         "effects": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/featureEffect" } },
         "resources": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/resourcePool" } },
         "passives": { "$ref": "#/$defs/passives" },
-        "worldOperations": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/worldOperation" } }
+        "worldOperations": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/worldOperation" } },
+        "skillBonuses": { "$ref": "#/$defs/skillBonuses" },
+        "senses": {
+          "description": "The member's standing senses, each kind at most once. A member that omits them loads with normal sight only.",
+          "type": "array", "minItems": 1, "maxItems": 5, "items": { "$ref": "#/$defs/sense" }
+        }
       }
     }
   }
