@@ -637,12 +637,16 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
       bySession.set(revision.sessionId, current);
     }
     const migratedStreams: SessionRevision[][] = [];
+    // A stream whose history v13 cannot express migrates to ONE archived root revision (FOOTPRINT, D919): the
+    // stored revisions past it are deleted, since the root's archive holds them verbatim.
+    const staleRevisionKeys: string[] = [];
     for (const stream of bySession.values()) {
       stream.sort((left, right) => left.revision - right.revision);
       const migrated = [...migrateStoredSessionRevisions(stream)];
       nextMemory.appendAll(migrated);
       if (stream.some((revision, index) => revision.schemaVersion !== migrated[index]?.schemaVersion)) {
         migratedStreams.push(migrated);
+        for (const stale of stream.slice(migrated.length)) staleRevisionKeys.push(revisionKey(stale.sessionId, stale.revision));
       }
     }
     this.#memory = nextMemory;
@@ -660,6 +664,7 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
       for (const revision of encoded) {
         migration.objectStore(revisionStoreName()).put(revision.value, revision.key);
       }
+      for (const key of staleRevisionKeys) migration.objectStore(revisionStoreName()).delete(key);
       for (const stream of migratedStreams) {
         const sessionId = stream[0]?.sessionId;
         if (sessionId === undefined) continue;

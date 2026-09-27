@@ -430,18 +430,26 @@ export function projectDmBoard(input: {
     ? (() => {
         const phase = input.view.state.phase;
         const record = phase.originatingRecord;
+        // A footprint record fixes its size (the creature's effective size); an overlap record uses the
+        // current effective size; the legacy records ask the DM for one.
         const sizes = record.kind === 'overlap_adjudication_pending'
           ? [effectiveCreatureSize(input.view.state, record.combatant)]
-          : creatureSizes;
+          : record.kind === 'whole_body_placement_pending'
+            ? [record.size]
+            : creatureSizes;
         const suggestedAnchor = record.kind === 'overlap_adjudication_pending'
           ? record.formerAnchors[1]
-          : record.suggestedAnchor;
+          : record.kind === 'whole_body_placement_pending'
+            ? record.formerAnchor
+            : record.suggestedAnchor;
         return {
           combatantId: record.combatant,
           combatantName: names.get(record.combatant) ?? String(record.combatant),
           reason: record.kind,
           suggestedAnchor: suggestedAnchor === null ? null : { ...suggestedAnchor },
-          sizeInput: record.kind === 'overlap_adjudication_pending' ? 'fixed' : 'required',
+          sizeInput: record.kind === 'overlap_adjudication_pending' || record.kind === 'whole_body_placement_pending'
+            ? 'fixed'
+            : 'required',
           sizeOptions: sizes.map((size) => ({
             size,
             legalAnchors: pendingPlacementLegalAnchors(input.view.state, size),

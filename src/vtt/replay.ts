@@ -7,6 +7,7 @@ import {
 } from '../combat/encounter';
 import type { CombatToken } from '../combat/combatant';
 import {
+  assertV13Checkpoints,
   decodeAbsentTokens,
   decodeBoardTokens,
   type PlacementContext,
@@ -29,7 +30,7 @@ import {
 } from './generated-encounter-fixtures';
 import {
   deriveBranchRng,
-  migrateStoredSessionRevisions,
+  migrateReplayEmbeddedRevision,
   replayPacingTransition,
   sessionHistory,
   type SessionRevision,
@@ -56,7 +57,7 @@ export {
   type FleetTokenCounts,
 } from './fleet-telemetry';
 
-export const VTT_REPLAY_SCHEMA_VERSION = 7 as const;
+export const VTT_REPLAY_SCHEMA_VERSION = 8 as const;
 export const VTT_REPLAY_MINIMUM_SCHEMA_VERSION = 1 as const;
 
 export interface ReplayControllerIdentity {
@@ -352,6 +353,8 @@ const V5_TO_V6_SOURCE = 'vtt-replay-v5-to-v6:migrate-embedded-session-11-and-reh
 const V5_TO_V6_CHECKSUM = 'db9297b92a422ecf32b6ea85e5ab4d5b180ca5e9c39e7e1f36e9831529028cce';
 const V6_TO_V7_SOURCE = 'vtt-replay-v6-to-v7:migrate-embedded-session-12-and-rehash-state-projections:1';
 const V6_TO_V7_CHECKSUM = '919c1010a9f2a8ec897399653a21e1994dc200dc26fbb2a9b890eedb92f1a5f8';
+const V7_TO_V8_SOURCE = 'vtt-replay-v7-to-v8:migrate-embedded-session-13-and-rehash-state-projections:1';
+const V7_TO_V8_CHECKSUM = 'a047051bfc9915fcfb5cfd4574caf133cc47b560817d66315fe15988f9b0039f';
 
 function migratedEncounterConfig(bundle: Readonly<Record<string, unknown>>): EncounterConfig {
   const revisions = bundle.revisions;
@@ -440,8 +443,7 @@ export const VTT_REPLAY_MIGRATIONS = Object.freeze([
             if (!record(entry) || !record(entry.revision)) {
               throw new TypeError('VTT replay v5 revision record is malformed.');
             }
-            const revision = migrateStoredSessionRevisions([entry.revision])[0];
-            if (revision === undefined) throw new TypeError('VTT replay v5 revision migration produced no revision.');
+            const revision = migrateReplayEmbeddedRevision(entry.revision);
             return {
               ...entry,
               revision,
@@ -466,8 +468,34 @@ export const VTT_REPLAY_MIGRATIONS = Object.freeze([
             if (!record(entry) || !record(entry.revision)) {
               throw new TypeError('VTT replay v6 revision record is malformed.');
             }
-            const revision = migrateStoredSessionRevisions([entry.revision])[0];
-            if (revision === undefined) throw new TypeError('VTT replay v6 revision migration produced no revision.');
+            const revision = migrateReplayEmbeddedRevision(entry.revision);
+            return {
+              ...entry,
+              revision,
+              stateHash: sha256(canonicalJson(revision.encounterState)),
+              projectionHashes: hashProjections(projectReplayViews(revision.encounterState)),
+            };
+          })
+        : bundle.revisions,
+    }),
+  }),
+  Object.freeze({
+    // FOOTPRINT (D900, D919): embedded session revisions to schema 13. A replay is history: a revision v13
+    // cannot express is refused (ReplayHistoryNotExpressibleError), never repaired.
+    id: 'vtt_replay_v7_to_v8',
+    from: 7,
+    to: 8,
+    source: V7_TO_V8_SOURCE,
+    checksum: V7_TO_V8_CHECKSUM,
+    migrate: (bundle: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> => ({
+      ...bundle,
+      schemaVersion: 8,
+      revisions: Array.isArray(bundle.revisions)
+        ? bundle.revisions.map((entry) => {
+            if (!record(entry) || !record(entry.revision)) {
+              throw new TypeError('VTT replay v7 revision record is malformed.');
+            }
+            const revision = migrateReplayEmbeddedRevision(entry.revision);
             return {
               ...entry,
               revision,
@@ -512,6 +540,7 @@ function revisionTokens(
   index: number,
 ): { readonly tokens: readonly CombatToken[]; readonly absentTokens?: readonly CombatToken[] } {
   const label = `Replay revision ${String(index + 1)}`;
+  assertV13Checkpoints(Reflect.get(context, 'pendingDecisions'), label);
   return {
     tokens: decodeBoardTokens(context, state.tokens, `${label} tokens`),
     ...(Object.hasOwn(state, 'absentTokens')
@@ -843,6 +872,14 @@ export function replayBundle(
     let expectedState: EncounterState;
     let expectedRng: SerializableRngState;
     switch (revision.transition.kind) {
+      case 'session_migrated':
+        // D919: a migrated save's root; its archived history is not replayed.
+        if (index !== 0 || revision.parentRevision !== null) {
+          throw new ReplayDivergenceError('bundle', index, 'transition.kind', 'first session_migrated', revision.transition.kind);
+        }
+        expectedState = revision.encounterState;
+        expectedRng = revision.rngState;
+        break;
       case 'session_started':
         if (index !== 0 || revision.parentRevision !== null) {
           throw new ReplayDivergenceError('bundle', index, 'transition.kind', 'first session_started', revision.transition.kind);

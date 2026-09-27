@@ -407,6 +407,14 @@ const SCHEMA_BEFORE_SPECIES_TEMPLATE_SENSES = DATABASE_MIGRATIONS
   .map((entry) => entry.sql)
   .join('\n');
 const SPECIES_TEMPLATE_SENSES_MIGRATION = DATABASE_MIGRATIONS[SPECIES_TEMPLATE_SENSES_INDEX]!;
+const VTT_FOOTPRINT_PLACEMENT_INDEX = DATABASE_MIGRATIONS.findIndex(
+  (entry) => entry.id === '0067_vtt_footprint_placement',
+);
+const SCHEMA_BEFORE_VTT_FOOTPRINT_PLACEMENT = DATABASE_MIGRATIONS
+  .slice(0, VTT_FOOTPRINT_PLACEMENT_INDEX)
+  .map((entry) => entry.sql)
+  .join('\n');
+const VTT_FOOTPRINT_PLACEMENT_MIGRATION = DATABASE_MIGRATIONS[VTT_FOOTPRINT_PLACEMENT_INDEX]!;
 
 /**
  * One character, three source instances (one of them deleted so the
@@ -4567,6 +4575,55 @@ describe('database migration chain', () => {
       expect(db.selectValue('SELECT count(*) FROM species_template_senses')).toBe(0);
       expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
         SPECIES_TEMPLATE_SENSES_MIGRATION.resultSchemaChecksum,
+      );
+      expect(databaseSchemaSignature(db)).toBe(schemaSignature(SCHEMA_BEFORE_VTT_FOOTPRINT_PLACEMENT));
+    } finally {
+      db.close();
+    }
+  });
+
+  it('0067 preserves schema-twelve journal bytes and admits schema-thirteen whole-body placement', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(SCHEMA_BEFORE_VTT_FOOTPRINT_PLACEMENT);
+      db.exec(`
+        INSERT INTO vtt_session_revisions (
+          session_id, revision, schema_version, payload_json, payload_checksum
+        ) VALUES (
+          'session:footprint-survivor', 1, 12,
+          '{"journal":"unchanged","schemaVersion":12}',
+          '${'56'.repeat(32)}'
+        )
+      `);
+      expect(() => db.exec(`
+        INSERT INTO vtt_session_revisions (
+          session_id, revision, schema_version, payload_json, payload_checksum
+        ) VALUES ('session:footprint-too-early', 1, 13, '{}', '${'57'.repeat(32)}')
+      `)).toThrow(/vtt_session_revisions_schema_version_check/u);
+
+      db.exec(VTT_FOOTPRINT_PLACEMENT_MIGRATION.sql);
+
+      expect(db.selectObjects(
+        `SELECT session_id, revision, schema_version, payload_json, payload_checksum
+         FROM vtt_session_revisions`,
+      )).toEqual([{
+        session_id: 'session:footprint-survivor',
+        revision: 1,
+        schema_version: 12,
+        payload_json: '{"journal":"unchanged","schemaVersion":12}',
+        payload_checksum: '56'.repeat(32),
+      }]);
+      db.exec(`
+        INSERT INTO vtt_session_revisions (
+          session_id, revision, schema_version, payload_json, payload_checksum
+        ) VALUES (
+          'session:footprint-v13', 1, 13,
+          '{"transition":{"kind":"session_migrated"},"schemaVersion":13}',
+          '${'57'.repeat(32)}'
+        )
+      `);
+      expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
+        VTT_FOOTPRINT_PLACEMENT_MIGRATION.resultSchemaChecksum,
       );
       expect(databaseSchemaSignature(db)).toBe(schemaSignature(schema));
     } finally {

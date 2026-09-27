@@ -131,6 +131,7 @@ import {
   serializedPlacementMode,
   spacesIntersect,
   type CreatureSpace,
+  type SerializedPlacementMode,
   type SharedSpaceRelation,
   type SizeStepOperation,
 } from './creature-space';
@@ -392,6 +393,20 @@ export type MigrationAdjudicationPending =
       readonly overlappingCombatant: CombatantId;
       readonly formerAnchors: readonly [GridCell, GridCell];
       readonly originatingToken: MigrationOriginatingToken;
+    }
+  | {
+      /**
+       * FOOTPRINT (owner D900, D907 Q6, D919): a creature the v12->v13 session migration cannot place whole
+       * (no legal anchor for its body), or whose placement mode no recorded fact decides (an LR checkpoint
+       * saved in v12). Its size is known and fixed; the DM places it (D514's nonspatial recovery).
+       */
+      readonly kind: 'whole_body_placement_pending';
+      readonly combatant: CombatantId;
+      readonly reason: 'no_whole_body_anchor' | 'placement_mode_unknown';
+      readonly formerAnchor: GridCell;
+      readonly size: KnownCreatureSize;
+      readonly candidateModes: readonly SerializedPlacementMode[];
+      readonly originatingToken: MigrationOriginatingToken;
     };
 
 export type ResumableEncounterPhase =
@@ -423,7 +438,7 @@ export function isEncounterPhase(value: unknown): value is EncounterPhase {
     return Object.keys(value).length === 5 &&
       typeof Reflect.get(value, 'combatantId') === 'string' &&
       (reason === 'legacy_size_required' || reason === 'effect_adjudication_pending' ||
-        reason === 'overlap_adjudication_pending') &&
+        reason === 'overlap_adjudication_pending' || reason === 'whole_body_placement_pending') &&
       typeof record === 'object' && record !== null && !Array.isArray(record) &&
       Reflect.get(record, 'kind') === reason &&
       Reflect.get(record, 'combatant') === Reflect.get(value, 'combatantId') &&
@@ -727,7 +742,8 @@ export type PendingDecision =
       };
       readonly checkpoint: {
         readonly subject: EncounterCombatantState;
-        readonly tokenPosition: GridCell | null;
+        /** Null when the creature was off the board at the failed save. */
+        readonly tokenPlacement: CheckpointPlacement | null;
         readonly effects: readonly EncounterEffect[];
       };
     })
@@ -735,6 +751,22 @@ export type PendingDecision =
       readonly kind: 'adjudication_prompt';
       readonly refusal: import('../vtt/refusal-handling').NonBoundaryActionRefusal;
     });
+
+/**
+ * Where a Legendary Resistance spend puts the creature back (§6.3 of the FOOTPRINT plan): the anchor AND the
+ * placement mode of its token at the failed save, because the failure's effect (a Polymorph) may change both.
+ * The reducer records only `recorded`. Only the v12->v13 session migration (session-v13-migration.ts) builds
+ * `unknown_v12`: a v12 checkpoint held the anchor alone, and when geometry leaves more than one mode possible
+ * the mode is not guessed; a spend then hands the creature to the DM (whole_body_placement_pending).
+ */
+export type CheckpointPlacement =
+  | { readonly kind: 'recorded'; readonly anchor: GridCell; readonly placementMode: SerializedPlacementMode }
+  | {
+      readonly kind: 'unknown_v12';
+      readonly anchor: GridCell;
+      readonly size: KnownCreatureSize;
+      readonly candidateModes: readonly SerializedPlacementMode[];
+    };
 
 export interface CombatantReactionPolicy {
   readonly combatant: CombatantId;
@@ -1508,6 +1540,7 @@ const MIGRATION_PENDING_REASON_ORDER: Readonly<Record<MigrationAdjudicationPendi
   legacy_size_required: 0,
   effect_adjudication_pending: 1,
   overlap_adjudication_pending: 2,
+  whole_body_placement_pending: 3,
 };
 
 export function orderedMigrationPlacementQueue(
@@ -1656,6 +1689,8 @@ function sizeAllowedForPendingRecord(
       return true;
     case 'overlap_adjudication_pending':
       return effectiveCreatureSize(state, record.combatant) === size;
+    case 'whole_body_placement_pending':
+      return record.size === size && effectiveCreatureSize(state, record.combatant) === size;
     case 'effect_adjudication_pending': {
       const payload = record.originalEffect.payload;
       if (payload.kind !== 'size_alteration' || 'delta' in payload ||
@@ -3719,7 +3754,14 @@ function resolveTargetSave(
       failedSave: { source, ability, dc, original: save, effectId },
       checkpoint: {
         subject: structuredClone(afterRoll),
-        tokenPosition: subjectToken === undefined ? null : { ...subjectToken.position },
+        // The token as it is at the failed save: anchor and mode, since the failure's effect may change both.
+        tokenPlacement: subjectToken === undefined
+          ? null
+          : {
+              kind: 'recorded',
+              anchor: { column: subjectToken.position.column, row: subjectToken.position.row },
+              placementMode: { ...subjectToken.placementMode },
+            },
         effects: structuredClone(checkpointEffects),
       },
     };
@@ -3733,6 +3775,40 @@ function resolveTargetSave(
     });
   }
   return save;
+}
+
+/**
+ * A v12 checkpoint whose mode no recorded fact decides (session-v13-migration.ts D3): the spend restores the
+ * creature's effects and statistics, and its token leaves the board for the DM to place at its known size.
+ */
+function checkpointPlacementPending(
+  state: EncounterState,
+  onBoard: CombatToken,
+  placement: Extract<CheckpointPlacement, { readonly kind: 'unknown_v12' }>,
+): EncounterState {
+  const record: MigrationAdjudicationPending = {
+    kind: 'whole_body_placement_pending',
+    combatant: onBoard.combatantId,
+    reason: 'placement_mode_unknown',
+    formerAnchor: { column: placement.anchor.column, row: placement.anchor.row },
+    size: placement.size,
+    candidateModes: placement.candidateModes.map((mode) => ({ ...mode })),
+    originatingToken: {
+      id: onBoard.id,
+      combatantId: onBoard.combatantId,
+      position: { column: placement.anchor.column, row: placement.anchor.row },
+    },
+  };
+  const adjudicationPending = orderedMigrationPlacementQueue([...state.adjudicationPending, record], state.initiative);
+  const resumePhase: ResumableEncounterPhase = state.phase.kind === 'awaiting_placement' ? state.phase.resumePhase : state.phase;
+  return {
+    ...state,
+    tokens: state.tokens.filter((candidate) => candidate.combatantId !== onBoard.combatantId),
+    sharedSpaceRelations: state.sharedSpaceRelations.filter((relation) =>
+      relation.first !== onBoard.combatantId && relation.second !== onBoard.combatantId),
+    adjudicationPending,
+    phase: awaitingPlacementPhase(adjudicationPending, state.initiative, resumePhase),
+  };
 }
 
 function spendLegendaryResistance(
@@ -3756,10 +3832,6 @@ function spendLegendaryResistance(
         ...context.state.effects.filter((effect) => !touchesTarget(effect)),
         ...structuredClone(checkpoint.effects),
       ].sort((left, right) => left.createdRevision - right.createdRevision || String(left.id).localeCompare(String(right.id))),
-      tokens: context.state.tokens.map((candidate) =>
-        candidate.combatantId === target && checkpoint.tokenPosition !== null
-          ? { ...candidate, position: requireBoardCell(context.state.bounds, checkpoint.tokenPosition, `Combatant ${target} checkpoint anchor`) }
-          : candidate),
     };
   }
   const restored = checkpoint?.subject ?? current;
@@ -3770,6 +3842,19 @@ function spendLegendaryResistance(
     ...restored,
     legendary: { ...restoredLegendary, resistanceUsesRemaining: remaining },
   });
+  // The effects and the combatant are restored first, so the token's mode is minted against the restored size.
+  const placement = checkpoint?.tokenPlacement ?? null;
+  const onBoard = context.state.tokens.find((candidate) => candidate.combatantId === target);
+  if (placement !== null && onBoard !== undefined) {
+    context.state = placement.kind === 'recorded'
+      ? {
+          ...context.state,
+          tokens: context.state.tokens.map((candidate) => candidate.combatantId === target
+            ? placedToken(context.state, candidate, placement.anchor, placement.placementMode, `Combatant ${target} checkpoint`)
+            : candidate),
+        }
+      : checkpointPlacementPending(context.state, onBoard, placement);
+  }
   emit(context, {
     type: 'legendary_resistance_used', combatant: target, source, ability,
     originalOutcome: 'failure', convertedOutcome: 'success', remaining,

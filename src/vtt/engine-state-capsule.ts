@@ -498,7 +498,8 @@ function decodeProjectionCombatant(value: unknown): EngineProjectionCombatant {
   if (pending) {
     if (record['pendingReason'] !== 'legacy_size_required' &&
       record['pendingReason'] !== 'effect_adjudication_pending' &&
-      record['pendingReason'] !== 'overlap_adjudication_pending') {
+      record['pendingReason'] !== 'overlap_adjudication_pending' &&
+      record['pendingReason'] !== 'whole_body_placement_pending') {
       throw new EngineStateCapsuleDecodeError('invalid_schema', 'Pending combatant reason is invalid.');
     }
     return structuredClone(record) as unknown as EngineProjectionPlacementPendingCombatant;

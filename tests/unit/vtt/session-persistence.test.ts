@@ -410,7 +410,7 @@ describe('event-sourced encounter persistence', () => {
     const migrated = store.revisions(importedId);
 
     expect(migrated).toHaveLength(1);
-    expect(migrated[0]?.schemaVersion).toBe(12);
+    expect(migrated[0]?.schemaVersion).toBe(13);
     expect(migrated[0]?.encounterState).toMatchObject({
       tokens: [],
       sharedSpaceRelations: [],
@@ -443,7 +443,7 @@ describe('event-sourced encounter persistence', () => {
     const migrated = store.revisions(importedId);
 
     expect(migrated).toHaveLength(1);
-    expect(migrated[0]?.schemaVersion).toBe(12);
+    expect(migrated[0]?.schemaVersion).toBe(13);
     expect(migrated[0]?.encounterState.observationHistory).toEqual([]);
     expect(migrated[0]?.encounterState.dmNotes).toEqual([
       'hand-authored schema-11 save predating observation history',
@@ -506,7 +506,7 @@ describe('event-sourced encounter persistence', () => {
       ...migratedUnrelated
     } = migratedRevision;
     expect(new TextEncoder().encode(canonicalJson(migratedUnrelated))).toEqual(legacyUnrelatedBytes);
-    expect(migratedRevision.schemaVersion).toBe(12);
+    expect(migratedRevision.schemaVersion).toBe(13);
     expect(migratedEncounterState.tokens).toEqual([]);
     expect(migratedEncounterState.sharedSpaceRelations).toEqual([]);
     expect(migratedEncounterState.environment.narrowOpeningRegions).toEqual([]);
@@ -1306,11 +1306,11 @@ describe('event-sourced encounter persistence', () => {
          ORDER BY revision`,
       );
       expect(rows).toEqual([
-        { revision: 1, schema_version: 12 },
-        { revision: 2, schema_version: 12 },
-        { revision: 3, schema_version: 12 },
-        { revision: 4, schema_version: 12 },
-        { revision: 5, schema_version: 12 },
+        { revision: 1, schema_version: 13 },
+        { revision: 2, schema_version: 13 },
+        { revision: 3, schema_version: 13 },
+        { revision: 4, schema_version: 13 },
+        { revision: 5, schema_version: 13 },
       ]);
       expect(
         EncounterSessionJournal.resume(

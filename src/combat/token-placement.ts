@@ -3,6 +3,7 @@ import { CreatureSizeRuleError, effectiveCreatureSize, type SizeLensContext } fr
 import type { CombatToken, TokenFor } from './combatant';
 import type { SerializedPlacementMode } from './creature-space';
 import type { EncounterState } from './encounter';
+import { EncounterRuleError } from './encounter-rule-error';
 import {
   footprintAnchor,
   OffGridAnchorError,
@@ -177,6 +178,49 @@ export function decodeAbsentTokens(bounds: GridBounds, tokens: unknown, label: s
   });
 }
 
+/**
+ * A pending Legendary Resistance decision saved by v12: its checkpoint holds the token's anchor alone, and a
+ * spend could not restore a mode it never recorded (FOOTPRINT §6.3). Only the v12 -> v13 session migration reads
+ * one (session-v13-migration.ts); every decoder refuses it.
+ */
+export class V12CheckpointError extends EncounterRuleError {
+  override readonly name = 'V12CheckpointError' as const;
+
+  constructor(readonly label: string, readonly decisionId: string) {
+    super('validation',
+      `${label}: pending decision ${decisionId} holds a v12 legendary-resistance checkpoint (an anchor without its placement mode).`);
+  }
+}
+
+function isCell(value: unknown): boolean {
+  return typeof value === 'object' && value !== null &&
+    Number.isSafeInteger(Reflect.get(value, 'column')) && Number.isSafeInteger(Reflect.get(value, 'row'));
+}
+
+/**
+ * Every legendary_resistance checkpoint of `pendingDecisions` carries a v13 tokenPlacement: null, `recorded`
+ * (an anchor and a placement mode) or `unknown_v12` (an anchor, a size and the candidate modes). Throws
+ * V12CheckpointError for a v12 checkpoint, TypeError for any other shape.
+ */
+export function assertV13Checkpoints(pendingDecisions: unknown, label: string): void {
+  if (!Array.isArray(pendingDecisions)) throw new TypeError(`${label} pending decisions must be an array.`);
+  for (const decision of pendingDecisions) {
+    if (typeof decision !== 'object' || decision === null || Reflect.get(decision, 'kind') !== 'legendary_resistance') continue;
+    const id = String(Reflect.get(decision, 'id'));
+    const checkpoint: unknown = Reflect.get(decision, 'checkpoint');
+    if (typeof checkpoint !== 'object' || checkpoint === null) throw new TypeError(`${label}: decision ${id} has no checkpoint.`);
+    if (Object.hasOwn(checkpoint, 'tokenPosition')) throw new V12CheckpointError(label, id);
+    const placement: unknown = Reflect.get(checkpoint, 'tokenPlacement');
+    if (placement === null) continue;
+    const kind = typeof placement === 'object' ? Reflect.get(placement, 'kind') : undefined;
+    const valid = typeof placement === 'object' && isCell(Reflect.get(placement, 'anchor')) && (
+      (kind === 'recorded' && typeof Reflect.get(placement, 'placementMode') === 'object') ||
+      (kind === 'unknown_v12' && creatureSizes.includes(Reflect.get(placement, 'size') as KnownCreatureSize) &&
+        Array.isArray(Reflect.get(placement, 'candidateModes'))));
+    if (!valid) throw new TypeError(`${label}: decision ${id} has a malformed checkpoint placement.`);
+  }
+}
+
 /** A decoded state without its token lists: a decoder's validated rest, which holds no placement proof. */
 export type DecodedStateRest = Omit<EncounterState, 'tokens' | 'absentTokens'>;
 
@@ -190,6 +234,7 @@ export function assembleDecodedState(
   tokens: readonly CombatToken[],
   absentTokens: readonly CombatToken[] | undefined,
 ): EncounterState {
+  assertV13Checkpoints(rest.pendingDecisions, 'Decoded encounter state');
   const assembled: Record<string, unknown> = { ...rest, tokens };
   if (absentTokens === undefined) delete assembled['absentTokens'];
   else assembled['absentTokens'] = absentTokens;

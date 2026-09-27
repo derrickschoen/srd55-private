@@ -1,0 +1,34 @@
+{
+  "baseCommit": "0d3ef2916e7fc4cd44eb7aca295850a3cd03ca6e",
+  "sessionSchemaVersion": 12,
+  "generator": ".tmp/runs/footprint/impl/w21-generator.ts",
+  "generatorSha256": "929ef86542a085c0cc99842069312eb5977ea10f9b01f6f5c45d4e1f9cf1698c",
+  "files": {
+    "overhang.dag.v12.json": "8ebff85a54437b1171c219da73e3a4ad19764e337990358bf497c4a456e59128",
+    "overhang.revisions.v12.json": "41bf4a624a4d1cfdd11fc1103b253b5a61bce6f629fe91a71fc3b94c0166f3a9",
+    "mixed.stored-stream.v11-v12.json": "2069eaa6e89587c06d70487c40adf2e7deffef382d7b1a6f8060cb5a835a46b0",
+    "no-anchor.dag.v12.json": "a6c21caec2fe98564958b754932ff88e739d7919b2a7fd695c52bcb662624deb",
+    "no-anchor.revisions.v12.json": "ef9bd617cbd6bdd9548c611fca2f46fafaebd482a11c402e4665db5cddc8a1ff",
+    "lr-squeezed.dag.v12.json": "459afce2b412a0280d2056c393bebfa20ffeb51cd26c2dcf0752dc38d146cceb",
+    "lr-squeezed.revisions.v12.json": "7b1e07516a410190004080b9deb3fdf39f13d0e6cccc5e3e6f74f766e138ea18",
+    "lr-ambiguous.dag.v12.json": "2e20492b1e0f08cdc829c76c2ba2950028a918ae0b4ac39ed47c7fa0c18f0962",
+    "lr-ambiguous.revisions.v12.json": "aa87db12ae2aa04e3157549795fd1b8ae1fdda1f0b577aab1a6d842367163af0",
+    "mismatch.stored-stream.v12.json": "805a2f75a84bb16ca7885662939005bbc81a0ff6348a58ca69d38e6b9ce57b79"
+  },
+  "pass": [
+    "overhang.dag.v12.json: v12 import + replay PASS (revisions 1, head 1)",
+    "overhang.revisions.v12.json: v12 import + replay PASS (revisions 1, head 1)",
+    "mixed.stored-stream.v11-v12.json: v12 migrateStoredSessionRevisions + replay PASS (revisions 3, head 3, versions 11+12+12)",
+    "no-anchor.dag.v12.json: v12 import + replay PASS (revisions 1, head 1)",
+    "no-anchor.revisions.v12.json: v12 import + replay PASS (revisions 1, head 1)",
+    "lr-squeezed: seed 6203020; decision decision:1; checkpoint {\"column\":2,\"row\":1}; token {\"id\":\"token:lr-squeezed-large\",\"combatantId\":\"combatant:lr-squeezed-large\",\"position\":{\"column\":2,\"row\":1},\"placementMode\":{\"kind\":\"normal\",\"actual\":\"Medium\"}}",
+    "lr-squeezed.dag.v12.json: v12 import + replay PASS (revisions 3, head 3)",
+    "lr-squeezed.revisions.v12.json: v12 import + replay PASS (revisions 3, head 3)",
+    "lr-spent: NOT PRODUCED at the base: CreatureSizeRuleError: combatant:lr-spent-large: placement_size_mismatch",
+    "lr-ambiguous: seed 6203020; decision decision:1; checkpoint {\"column\":2,\"row\":1}; token {\"id\":\"token:lr-ambiguous-large\",\"combatantId\":\"combatant:lr-ambiguous-large\",\"position\":{\"column\":2,\"row\":1},\"placementMode\":{\"kind\":\"normal\",\"actual\":\"Medium\"}}",
+    "lr-ambiguous.dag.v12.json: v12 import + replay PASS (revisions 3, head 3)",
+    "lr-ambiguous.revisions.v12.json: v12 import + replay PASS (revisions 3, head 3)",
+    "mismatch.stored-stream.v12.json: v12 migrateStoredSessionRevisions + replay PASS (revisions 1, head 1)",
+    "mismatch: the v12 export also succeeds"
+  ]
+}

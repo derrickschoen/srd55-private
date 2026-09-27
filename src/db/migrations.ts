@@ -67,6 +67,7 @@ import vttContextRollover from '../../drizzle/0063_vtt_context_rollover.sql?raw'
 import vttCreatureSpace from '../../drizzle/0064_vtt_creature_space.sql?raw';
 import vttObservationHistory from '../../drizzle/0065_vtt_observation_history.sql?raw';
 import speciesTemplateSenses from '../../drizzle/0066_species_template_senses.sql?raw';
+import vttFootprintPlacement from '../../drizzle/0067_vtt_footprint_placement.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -688,6 +689,15 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
     sql: speciesTemplateSenses,
     checksum: '141d6c26844435f12e93bd9eca399fa9539886fd69d37602bf3aa5ed585ff4ee',
     resultSchemaChecksum: 'a903420d08785c08efc77607b038e19c7e73a7515051bf16a22dab649a3ce730',
+  }),
+  Object.freeze({
+    // FOOTPRINT (D900, D919): session schema 13 (whole-body placement; archived v12 histories).
+    // Written as 0066 on its own branch; it lands after PC-EXPORT-TRUTH's 0066 (landing batch 2),
+    // so it is 0067 and its result schema holds species_template_senses too.
+    id: '0067_vtt_footprint_placement',
+    sql: vttFootprintPlacement,
+    checksum: 'ac00ac665e78a4e60f8bf2d306eb0f06bb3e8fb724be3c7f53268442db2fcd87',
+    resultSchemaChecksum: '5599bfaf0b1adee6fd4e5470ec926d315f8c1941350d5d1665cfa0316f4f253e',
   }),
 ]);
 

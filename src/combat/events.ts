@@ -110,7 +110,7 @@ export type EncounterCommand =
   | {
       readonly type: 'resolve_pending_placement';
       readonly combatant: CombatantId;
-      readonly reason: 'legacy_size_required' | 'effect_adjudication_pending';
+      readonly reason: 'legacy_size_required' | 'effect_adjudication_pending' | 'whole_body_placement_pending';
       readonly size: KnownCreatureSize;
       readonly anchor: GridCell;
     }
@@ -503,7 +503,8 @@ export type EncounterEvent =
       readonly reason:
         | 'legacy_size_required'
         | 'effect_adjudication_pending'
-        | 'overlap_adjudication_pending';
+        | 'overlap_adjudication_pending'
+        | 'whole_body_placement_pending';
       readonly effectiveSize: KnownCreatureSize;
       readonly position: GridCell;
       readonly placementMode: SerializedPlacementMode;

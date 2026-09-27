@@ -398,8 +398,9 @@ describe('hand-authored serialized-surface change register', () => {
     };
     expect(captured).toEqual({
       ...PRE_EDIT_POLICY_LITERALS,
-      sessionSchema: '12',
-      replaySchema: '7',
+      // FOOTPRINT (D900, D919): session 13 places whole bodies; replay 8 carries session-13 revisions.
+      sessionSchema: '13',
+      replaySchema: '8',
       actorKnowledge: 'actor-knowledge-last-seen-v4',
       dmTurn: 'dm-turn-intel-v2-creature-space',
       dmQuery: 'dm-intel-query-v2-creature-space',

@@ -410,7 +410,7 @@ describe('increment 10 deterministic replay and playable exit', () => {
   it('OWN-BUNDLE-VERSION-OUTSIDE-WINDOW is refused while the adjacent migration remains exact', () => {
     const gate = recordScriptedReferenceSkirmish();
     expect(decodeReplayBundle(exportReplayBundleV1ForMigrationTest(gate.bundle))).toEqual(gate.bundle);
-    for (const version of [0, 8]) {
+    for (const version of [0, 9]) {
       const candidate = mutable(gate.bundle);
       candidate.schemaVersion = version;
       expect(() => decodeReplayBundle(JSON.stringify(candidate))).toThrow('outside the migration window');
@@ -434,8 +434,8 @@ describe('increment 10 deterministic replay and playable exit', () => {
 
     const migrated = decodeReplayBundle(sourceBytes);
 
-    expect(migrated.schemaVersion).toBe(7);
-    expect(migrated.revisions[0]?.revision.schemaVersion).toBe(12);
+    expect(migrated.schemaVersion).toBe(8);
+    expect(migrated.revisions[0]?.revision.schemaVersion).toBe(13);
     expect(migrated.revisions[0]?.revision.encounterState).toMatchObject({
       tokens: [],
       sharedSpaceRelations: [],

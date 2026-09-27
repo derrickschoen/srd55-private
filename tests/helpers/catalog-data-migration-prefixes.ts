@@ -76,6 +76,7 @@ export const RECORDED_SCHEMA_PREFIX_IDS = [
   '0064_vtt_creature_space',
   '0065_vtt_observation_history',
   '0066_species_template_senses',
+  '0067_vtt_footprint_placement',
 ] as const;
 
 export const PREFIX_MIGRATION_ID = 'test_catalog_prefix_probe';

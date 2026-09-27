@@ -459,7 +459,7 @@ const actorKnowledgeTarget = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('placement_pending'), target_id: identifier,
     placement_status: z.literal('placement_pending'), pending_reason: z.enum([
-      'legacy_size_required', 'effect_adjudication_pending', 'overlap_adjudication_pending',
+      'legacy_size_required', 'effect_adjudication_pending', 'overlap_adjudication_pending', 'whole_body_placement_pending',
     ]),
   }).strict(),
   z.object({
@@ -1096,7 +1096,7 @@ const placementPendingCombatantSummary = z.object({
   combatant_id: identifier, name: identifier, side: z.enum(['player_character', 'monster']), status: actorStatus,
   placement_status: z.literal('placement_pending'),
   pending_reason: z.enum([
-    'legacy_size_required', 'effect_adjudication_pending', 'overlap_adjudication_pending',
+    'legacy_size_required', 'effect_adjudication_pending', 'overlap_adjudication_pending', 'whole_body_placement_pending',
   ]),
   options: z.array(tacticalOption).length(0), threats: z.array(threat).length(0),
 }).strict();

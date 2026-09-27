@@ -4186,7 +4186,8 @@
               "enum": [
                 "legacy_size_required",
                 "effect_adjudication_pending",
-                "overlap_adjudication_pending"
+                "overlap_adjudication_pending",
+                "whole_body_placement_pending"
               ]
             }
           },
