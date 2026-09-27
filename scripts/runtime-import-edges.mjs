@@ -393,6 +393,8 @@ export function moduleStringConstants(sourceFile) {
   return constants;
 }
 
+const NO_CONSTANTS = new Map();
+
 /** A specifier's text: a string literal, or an identifier bound by moduleStringConstants. */
 export function specifierText(expression, constants) {
   if (expression === undefined) return undefined;
@@ -425,7 +427,15 @@ export function buildModuleGraph(roots, host) {
   while (queue.length > 0) {
     const file = queue.shift();
     const sourceFile = parseModule(file, host.readFile(file));
-    const constants = moduleStringConstants(sourceFile);
+    // Constants are read only for a file that names a specifier by identifier
+    // (a handful); walking every file for them costs half a second.
+    let constants;
+    const textOf = (expression) => specifierText(
+      expression,
+      expression !== undefined && ts.isIdentifier(expression)
+        ? (constants ??= moduleStringConstants(sourceFile))
+        : NO_CONSTANTS,
+    );
     const out = [];
     const enqueue = (to) => {
       if (!to.includes('?') && isCodeFile(to) && !queued.has(to)) {
@@ -440,11 +450,11 @@ export function buildModuleGraph(roots, host) {
           file,
           line: found.line,
           syntax: found.syntax,
-          specifier: specifierText(found.specifiers[0], constants) ?? '<non-literal>',
+          specifier: textOf(found.specifiers[0]) ?? '<non-literal>',
         });
       }
       if (found.syntax === 'glob') {
-        const patterns = found.specifiers.map((expression) => specifierText(expression, constants));
+        const patterns = found.specifiers.map(textOf);
         const matched = !found.glob.supported || patterns.length === 0 || patterns.includes(undefined)
           ? undefined
           : expandGlob(file, patterns, host.filesBelow);
@@ -460,7 +470,7 @@ export function buildModuleGraph(roots, host) {
         }
         continue;
       }
-      const specifier = specifierText(found.specifiers[0], constants);
+      const specifier = textOf(found.specifiers[0]);
       if (specifier === undefined) {
         if (found.evaluation !== EVALUATION.ERASED) {
           unresolved.push({ file, line: found.line, specifier: '<non-literal>', evaluation: found.evaluation });
