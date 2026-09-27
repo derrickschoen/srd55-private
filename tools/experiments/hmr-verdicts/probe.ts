@@ -1,4 +1,4 @@
-import { openSeededTestDatabase } from '../../../tests/helpers/open-db';
+import { openSeededTestDatabase } from '../../../tests/helpers/open-seeded-db';
 
 const MARKER = 'application-seed-overlay';
 const LISTENER_CANARY = 'hmr-verdicts-listener-canary';

@@ -10,7 +10,7 @@ import {
 } from '../../../src/queries/print-appendix-preferences';
 import { characterEffects } from '../../../src/rules/origins';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
-import { openSeededTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-seeded-db';
 
 /**
  * THE SHEET, AGAINST A REAL DATABASE, WITH HAND-COMPUTED EXPECTATIONS.

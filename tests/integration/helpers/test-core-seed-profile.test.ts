@@ -10,7 +10,7 @@ import { canonicalContentIdentityJson } from '../../../src/catalog/content-ident
 import { bundledContentManifestV1 } from '../../../src/catalog/bundled-content-registry-v1';
 import { TEST_CORE_SPELL_CONTENT_KEYS } from '../../../src/db/test-core-spell-content-keys.generated';
 import { DatabaseContext } from '../../../src/db/database';
-import { openSeededTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-seeded-db';
 
 const TESTS_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const GENERATION_COMMAND =

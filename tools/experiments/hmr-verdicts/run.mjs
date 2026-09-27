@@ -21,14 +21,14 @@ const { createServer, createServerModuleRunner } = await import('vite');
 const experimentDirectory = dirname(fileURLToPath(import.meta.url));
 const root = resolve(experimentDirectory, '../../..');
 const bootstrapPath = resolve(root, 'src/db/bootstrap.ts');
-const openDbPath = resolve(root, 'tests/helpers/open-db.ts');
+const openSeededDbPath = resolve(root, 'tests/helpers/open-seeded-db.ts');
 const seededCachePath = resolve(
   root,
   'tests/helpers/seeded-database-image-cache.ts',
 );
 const probePath = resolve(experimentDirectory, 'probe.ts');
 const bootstrapUrl = '/src/db/bootstrap.ts';
-const openDbUrl = '/tests/helpers/open-db.ts';
+const openSeededDbUrl = '/tests/helpers/open-seeded-db.ts';
 const seededCacheUrl = '/tests/helpers/seeded-database-image-cache.ts';
 const probeUrl = '/tools/experiments/hmr-verdicts/probe.ts';
 const marker = 'application-seed-overlay';
@@ -63,11 +63,11 @@ function seedOverlay(source) {
   );
 }
 
-function hmrOpenDbContract(source) {
+function hmrOpenSeededDbContract(source) {
   const original =
     "import { applicationSeed } from '../../src/db/bootstrap';";
   if (!source.includes(original)) {
-    throw new Error('Could not locate open-db applicationSeed import.');
+    throw new Error('Could not locate open-seeded-db applicationSeed import.');
   }
   return source.replace(
     original,
@@ -150,7 +150,7 @@ function overlayController(withHmrContracts) {
       transform(code, id) {
         if (!withHmrContracts) return null;
         const cleanId = normalizedId(id);
-        if (cleanId === openDbPath) return hmrOpenDbContract(code);
+        if (cleanId === openSeededDbPath) return hmrOpenSeededDbContract(code);
         if (cleanId === seededCachePath) return hmrSeededCacheContract(code);
         if (cleanId === bootstrapPath) return hmrBootstrapDispose(code);
         return null;
@@ -308,7 +308,7 @@ async function acceptDisposeUpdate(server, runner) {
     .map((node) => node.url)
     .sort();
   if (
-    !acceptedBy.includes(openDbUrl) ||
+    !acceptedBy.includes(openSeededDbUrl) ||
     !acceptedBy.includes(seededCacheUrl)
   ) {
     throw new Error(`Incomplete HMR boundaries: ${acceptedBy.join(', ')}`);
@@ -355,7 +355,7 @@ async function runConfiguration(name) {
     } else if (name === 'B-full-reverse-cone') {
       const cone = fullReverseConeInvalidate(instance.server, instance.runner);
       probe = await instance.runner.import(probeUrl);
-      detail = `reverse-cone=${String(cone.length)} open-db=${String(cone.includes(openDbPath))} probe=${String(cone.includes(probePath))}`;
+      detail = `reverse-cone=${String(cone.length)} open-seeded-db=${String(cone.includes(openSeededDbPath))} probe=${String(cone.includes(probePath))}`;
     } else if (name === 'C1-leaf-plus-global-reset') {
       resetProcessSeedCache();
       leafOnlyInvalidate(instance.server, instance.runner);

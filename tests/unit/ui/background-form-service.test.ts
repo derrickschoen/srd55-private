@@ -27,7 +27,7 @@ import {
   interactiveElement,
   type InteractiveTestElement,
 } from '../../fixtures/interactive-dom';
-import { openSeededTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-seeded-db';
 
 const connections: Database[] = [];
 let uuidSequence = 0;

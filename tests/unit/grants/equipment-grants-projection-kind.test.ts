@@ -4,7 +4,7 @@ import { projectStoredPortableContentV1 } from '../../../src/catalog/stored-cont
 import { DatabaseContext } from '../../../src/db/database';
 import type { ContentKey } from '../../../src/domain/ids';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
-import { openSeededTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-seeded-db';
 
 const CONTENT_KEY = 'fixture:wrong-projection-owner' as ContentKey;
 const PROJECTOR_MODULE = '../../../src/catalog/stored-content-projector-v1';

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseContext } from '../../../src/db/database';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
 import { sheetFacts, sheetSections } from '../../../src/ui/screens/sheet/sheet-view';
-import { openSeededTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-seeded-db';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import classLevelTables from '../../../docs/srd/source/class-level-tables.txt?raw';
 import veteranPlayer from '../../../docs/homebrew/cc-by/veteran-player.md?raw';

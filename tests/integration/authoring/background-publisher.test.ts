@@ -46,7 +46,7 @@ import type { CharacterId, ContentKey } from '../../../src/domain/ids';
 import { EquipmentGrantRefusal } from '../../../src/grants/equipment-grants';
 import { SavePointQueries } from '../../../src/queries/save-points';
 import { featProjectorV1Vector } from '../../unit/catalog/fixtures/source-projector-v1-vectors';
-import { openSeededTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-seeded-db';
 
 const opened: Database[] = [];
 let uuidSequence = 0;

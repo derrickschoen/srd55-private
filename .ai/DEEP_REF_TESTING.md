@@ -131,7 +131,10 @@ re-coerced with `Number(row.id)` at the point of use because the assertion was
 not trusted.
 
 Other helpers: `tests/helpers/open-db.ts` (a real in-memory SQLite with the
-schema applied), `tests/helpers/schema-sources.ts`,
+schema applied), `tests/helpers/open-seeded-db.ts` (a writable clone of the
+suite's seeded image; the only opener that loads `src/db/bootstrap.ts`, so a
+test that never seeds imports `open-db.ts` alone — guard rule R3 in
+`scripts/check-import-boundaries.mjs`), `tests/helpers/schema-sources.ts`,
 `tests/helpers/rpc-harness.ts`.
 
 ---

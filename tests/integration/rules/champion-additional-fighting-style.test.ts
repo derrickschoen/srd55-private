@@ -13,10 +13,8 @@ import { guidedRequiredFighterChoicesState } from '../../../src/builder/required
 import { CharacterCompletenessQueries } from '../../../src/queries/character-completeness';
 import { ensureBundledStableContentIdentity } from '../../../src/catalog/content-registry';
 import { normalizeContentIdentityName } from '../../../src/catalog/content-identity';
-import {
-  openSeededTestDatabase,
-  openTestDatabase,
-} from '../../helpers/open-db';
+import { openTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-seeded-db';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import {
   GrantSourceDefinitionResolutionError,

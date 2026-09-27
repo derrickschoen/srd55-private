@@ -13,7 +13,7 @@ import {
   resolveSheetFeatureValues,
   type FeatureValueClassInput,
 } from '../../../src/rules/sheet-feature-values';
-import { openSeededTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-seeded-db';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
 const ROGUE_KEY = '2024:class:rogue' as ContentKey;

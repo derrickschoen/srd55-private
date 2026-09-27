@@ -70,8 +70,8 @@ import {
   getSqlite3,
   MemoryDatabaseStorage,
   openFreshSchemaTestDatabase,
-  openFreshSeededTestDatabase,
 } from '../../helpers/open-db';
+import { openFreshSeededTestDatabase } from '../../helpers/open-seeded-db';
 
 const opened: Database[] = [];
 const exportedAt = '2042-03-05T00:00:00.000Z';

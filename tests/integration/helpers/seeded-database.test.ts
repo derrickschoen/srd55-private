@@ -3,10 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { applicationSeed } from '../../../src/db/bootstrap';
 import { DatabaseContext } from '../../../src/db/database';
 import { databaseSchemaSignature } from '../../../src/db/database-lifecycle';
-import {
-  openSeededTestDatabase,
-  openTestDatabase,
-} from '../../helpers/open-db';
+import { openTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-seeded-db';
 
 function tableRowCounts(db: Database): Record<string, number> {
   const counts: Record<string, number> = {};

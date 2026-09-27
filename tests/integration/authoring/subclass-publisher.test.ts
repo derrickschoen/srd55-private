@@ -48,7 +48,7 @@ import { SheetContentLookup } from '../../../src/rules/sheet-content-lookup';
 import { attacksPerAction } from '../../../src/rules/sheet';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import { expectOkOutcome } from '../../helpers/outcome';
-import { openSeededTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-seeded-db';
 
 const connections: Database[] = [];
 let uuidSequence = 0;

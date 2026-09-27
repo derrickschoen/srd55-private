@@ -11,7 +11,7 @@ import {
   planBundledHomebrewInstall,
 } from '../../../src/authoring/bundled-homebrew-installer';
 import type { SheetResourceMaximum } from '../../../src/rules/sheet';
-import { openSeededTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-seeded-db';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { rpcRegistry } from '../../../src/worker/registry';
 import { createSeededRpcHarness } from '../../helpers/rpc-harness';

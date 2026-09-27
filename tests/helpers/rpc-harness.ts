@@ -18,11 +18,8 @@ import type {
   RpcHandler,
   RuntimeEnvironment,
 } from '../../src/worker/handler';
-import {
-  getSqlite3,
-  MemoryDatabaseStorage,
-  openSeededTestDatabase,
-} from './open-db';
+import { getSqlite3, MemoryDatabaseStorage } from './open-db';
+import { openSeededTestDatabase } from './open-seeded-db';
 import { acquireSharedDb, type SharedDbLease } from './shared-db';
 
 export interface RpcHarness {

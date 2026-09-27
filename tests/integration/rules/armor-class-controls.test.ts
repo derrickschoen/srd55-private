@@ -23,10 +23,8 @@ import {
   decodeShareFragment,
   encodeShareFragment,
 } from '../../../src/sharing/codec';
-import {
-  openSeededTestDatabase,
-  openTestDatabase,
-} from '../../helpers/open-db';
+import { openTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-seeded-db';
 import { expectOkOutcome } from '../../helpers/outcome';
 
 const connections: Database[] = [];

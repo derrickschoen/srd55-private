@@ -4,7 +4,7 @@ import { DatabaseContext } from '../../../src/db/database';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
 import { WeaponQueries } from '../../../src/queries/weapons';
 import { AbilityScores } from '../../../src/rules/ability-scores';
-import { openSeededTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-seeded-db';
 
 /**
  * THE TWO SCREENS, ABOUT ONE WEAPON, ON ONE CHARACTER.

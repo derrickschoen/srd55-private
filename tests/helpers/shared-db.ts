@@ -6,7 +6,8 @@ import {
   databaseIsInTransaction,
   registerSqliteQueryEngine,
 } from '../../src/db/query';
-import { getSqlite3, openSeededTestDatabase } from './open-db';
+import { getSqlite3 } from './open-db';
+import { openSeededTestDatabase } from './open-seeded-db';
 
 export type SharedDbMode = 'ro' | 'rw';
 

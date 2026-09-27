@@ -9,7 +9,7 @@ import {
   CharacterCompletenessQueries,
   type UnfilledSkillGrantsItem,
 } from '../../../src/queries/character-completeness';
-import { openSeededTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-seeded-db';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { expectOkOutcome } from '../../helpers/outcome';

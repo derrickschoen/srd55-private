@@ -10,7 +10,7 @@ import { LevelUpStateQuery } from '../../../src/queries/level-up-state';
 import {
   MulticlassPrimaryAbilityQueries,
 } from '../../../src/queries/multiclass-primary-ability';
-import { openSeededTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-seeded-db';
 import { registerAssertedFixtureContentIdentity } from '../../helpers/content-identity';
 import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
 import { expectOkOutcome } from '../../helpers/outcome';

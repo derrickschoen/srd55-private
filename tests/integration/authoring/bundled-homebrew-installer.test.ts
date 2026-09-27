@@ -11,7 +11,7 @@ import {
 import type { SubclassAuthoringDraft } from '../../../src/authoring/contracts';
 import type { ContentKey } from '../../../src/domain/ids';
 import { DatabaseContext } from '../../../src/db/database';
-import { openSeededTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-seeded-db';
 import {
   exportCharacterBackup,
   importCharacterBackup,

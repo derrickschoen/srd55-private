@@ -59,10 +59,8 @@ import {
   portableElfLibraryDocument,
   PORTABLE_ELF_KEY,
 } from '../../helpers/species-lineage-portability';
-import {
-  openSeededTestDatabase,
-  openTestDatabase,
-} from '../../helpers/open-db';
+import { openTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-seeded-db';
 
 const opened: Database[] = [];
 let uuidSequence = 0;
