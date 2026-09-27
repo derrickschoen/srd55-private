@@ -62,8 +62,11 @@ function service(db: DatabaseContext): CatalogAuthoringService {
 /** A plain Medium species whose only open question is its senses. */
 function speciesDocument(created: StoredHomebrewDraft, name: string, senses: unknown): SpeciesAuthoringDraft {
   if (created.document.kind !== 'species') throw new Error('Fixture draft is not species.');
+  // `undefined` builds the draft shape from before the field existed: the
+  // created draft's own `senses` key is removed, not merely left unset.
+  const { senses: _created, ...before } = created.document as unknown as Readonly<Record<string, unknown>>;
   return {
-    ...created.document,
+    ...before,
     name,
     rules_edition: 'expanded',
     reference_text: `${name}, authored for PC-EXPORT-TRUTH.`,
@@ -73,9 +76,8 @@ function speciesDocument(created: StoredHomebrewDraft, name: string, senses: unk
     walking_speed_feet: 30,
     traits: [],
     grants: [],
-    // `undefined` builds the draft shape from before the field existed.
     ...(senses === undefined ? {} : { senses }),
-  } as SpeciesAuthoringDraft;
+  } as unknown as SpeciesAuthoringDraft;
 }
 
 /** A thrown refusal is folded into a value, so a red run fails on an assertion. */
@@ -137,8 +139,9 @@ describe('an authored species states its senses (owner D923 Q10)', () => {
         ? (Reflect.get(outcome.data, 'issues') as readonly { path: unknown; code: unknown }[] | undefined)
           ?.map(({ path, code }) => ({ path, code }))
         : outcome;
-    // The draft shape from before the field: it no longer publishes silently.
-    expect(issues(publish(db, 'Silent Folk', undefined))).toEqual([{ path: ['senses'], code: 'required' }]);
+    // The draft shape from before the field: it is not even saved — the draft
+    // codec refuses the missing key — so it can never publish silently.
+    expect(issues(publish(db, 'Silent Folk', undefined))).toEqual([{ path: ['senses'], code: 'invalid_type' }]);
     expect(issues(publish(db, 'Unstated Folk', null))).toEqual([{ path: ['senses'], code: 'required' }]);
     expect(issues(publish(db, 'Half Stated Folk', [
       { draft_item_uuid: 'sense-a', kind: 'darkvision', range_feet: null },
