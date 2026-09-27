@@ -9,11 +9,11 @@ import { FEATURE_VALUE_CONTRIBUTION_LIMITS } from '../domain/contracts/feature-v
 import {
   assertedExternalContentKey,
 } from '../catalog/catalog-key';
-import {
-  type ContentImportChoices,
-  type ContentImportEntryOutcome,
-  type ContentImportNode,
-  type ContentImportProjection,
+import type {
+  ContentImportChoices,
+  ContentImportEntryOutcome,
+  ContentImportNode,
+  ContentImportProjection,
 } from '../catalog/content-adoption';
 import {
   CatalogSupersessionRefusal,

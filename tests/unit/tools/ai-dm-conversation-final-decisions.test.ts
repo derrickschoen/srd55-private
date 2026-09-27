@@ -11,8 +11,8 @@ import {
 } from '../../../tools/ai-dm-conversation';
 import { buildRerunPacket } from '../../../tools/ai-dm-rerun-packet';
 import { mkdtempSync, readFileSync } from '../../helpers/test-filesystem';
-import { type EncounterState } from '../../../src/combat/encounter';
-import { type EngineMcpLauncherManifest } from '../../../src/vtt/mcp/entrypoint';
+import type { EncounterState } from '../../../src/combat/encounter';
+import type { EngineMcpLauncherManifest } from '../../../src/vtt/mcp/entrypoint';
 import { MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION } from '../../../src/vtt/mcp/engine-server';
 import { alternatingInitiativeRoom } from '../../fixtures/initiative-segments/alternating-room';
 import {

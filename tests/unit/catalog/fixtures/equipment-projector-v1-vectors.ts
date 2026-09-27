@@ -1,9 +1,9 @@
-import {
-  type ArmorContentAggregate,
-  type EquipmentContentAggregate,
-  type EquipmentProjectorPayloadV1,
-  type ItemContentAggregate,
-  type WeaponContentAggregate,
+import type {
+  ArmorContentAggregate,
+  EquipmentContentAggregate,
+  EquipmentProjectorPayloadV1,
+  ItemContentAggregate,
+  WeaponContentAggregate,
 } from '../../../../src/catalog/equipment-content-projector-v1';
 import {
   canonicalOpenPassthroughValue,

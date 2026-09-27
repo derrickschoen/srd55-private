@@ -11,11 +11,11 @@ import type { ContentKey } from '../domain/ids';
 import {
   assertedExternalContentKey,
 } from '../catalog/catalog-key';
-import {
-  type ContentImportChoices,
-  type ContentImportEntryOutcome,
-  type ContentImportNode,
-  type ContentImportProjection,
+import type {
+  ContentImportChoices,
+  ContentImportEntryOutcome,
+  ContentImportNode,
+  ContentImportProjection,
 } from '../catalog/content-adoption';
 import {
   CatalogSupersessionRefusal,

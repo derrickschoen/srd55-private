@@ -47,8 +47,8 @@ import {
   type JsTurnProgramExecution,
   type JsTurnProgramLimits,
 } from './js-turn-program';
-import {
-  type TurnProgramAmbientApiDescription,
+import type {
+  TurnProgramAmbientApiDescription,
 } from './turn-program-declarations';
 import {
   JsTurnProgramTypeError,

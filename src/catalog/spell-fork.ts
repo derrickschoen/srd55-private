@@ -5,13 +5,13 @@ import {
 import { normalizeCatalogName } from './catalog-normalize';
 import type { DatabaseContext } from '../db/database';
 import type { ContentKey } from '../domain/ids';
-import {
-  type ContentImportChoices,
-  type ContentImportCommitResult,
-  type ContentImportNode,
-  type ContentImportPlan,
-  type ContentImportPlanToken,
-  type ContentImportProjection,
+import type {
+  ContentImportChoices,
+  ContentImportCommitResult,
+  ContentImportNode,
+  ContentImportPlan,
+  ContentImportPlanToken,
+  ContentImportProjection,
 } from './content-adoption';
 import {
   commitImmutableCatalogPublication,

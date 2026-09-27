@@ -1,8 +1,8 @@
 import type { DatabaseContext } from '../db/database';
 import { sqlInteger, sqlNullableString, sqlString } from '../db/codecs';
-import {
-  type CatalogNamedDisclosure,
-  type CatalogLayerDisclosure,
+import type {
+  CatalogNamedDisclosure,
+  CatalogLayerDisclosure,
 } from '../catalog/catalog-disclosure';
 import { spellCatalogDisclosure } from '../catalog/spell-catalog-disclosure';
 import { characterSourceCatalogResolution } from '../catalog/recorded-source-provenance';

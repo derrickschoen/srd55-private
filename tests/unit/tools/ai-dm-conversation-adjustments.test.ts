@@ -8,9 +8,9 @@ import {
 } from '../../../src/vtt/agent-session';
 import { parseConversationArgs, runConversation } from '../../../tools/ai-dm-conversation';
 import { mkdtempSync, readFileSync } from '../../helpers/test-filesystem';
-import { type EncounterState } from '../../../src/combat/encounter';
+import type { EncounterState } from '../../../src/combat/encounter';
 import { armorClass, feet } from '../../../src/combat/values';
-import { type EngineMcpLauncherManifest } from '../../../src/vtt/mcp/entrypoint';
+import type { EngineMcpLauncherManifest } from '../../../src/vtt/mcp/entrypoint';
 import { alternatingInitiativeRoom } from '../../fixtures/initiative-segments/alternating-room';
 import { createScriptedPartyPlan } from '../../../src/vtt/scripted-party-round';
 import { DEFAULT_RENDERER_PROFILE } from '../../../src/vtt/renderer-profile';

@@ -41,7 +41,7 @@ import {
   type M1GateReport,
   type RequiredHandoffGate,
 } from '../../../tools/vtt-handoff/gate-inventory';
-import { type RepositoryIdentityPolicy } from '../../../tools/vtt-handoff/paths';
+import type { RepositoryIdentityPolicy } from '../../../tools/vtt-handoff/paths';
 
 const COMMIT = '0123456789abcdef0123456789abcdef01234567';
 const OLD_COMMIT = '1123456789abcdef0123456789abcdef01234567';

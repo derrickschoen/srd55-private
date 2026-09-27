@@ -1,7 +1,7 @@
 import type { EncounterSessionId } from '../combat/values';
-import {
-  type IndexedDbBrowserSessionStore,
-  type StoredBrowserSave,
+import type {
+  IndexedDbBrowserSessionStore,
+  StoredBrowserSave,
 } from './local-session-store';
 import { decodeSavedSessionFingerprint } from './session-persistence';
 import type { SaveManagerNavigationInstruction } from './save-manager';

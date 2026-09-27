@@ -19,11 +19,11 @@ import type {
 } from '../catalog/content-adoption';
 import { externalContentDisclosure } from '../catalog/content-adoption';
 import { projectAuthoredContentAggregateV1 } from '../catalog/stored-authored-content-projector-v1';
-import {
-  type AuthoredContentKind,
-  type HomebrewDraft,
-  type PublishResult,
-  type PublishableHomebrew,
+import type {
+  AuthoredContentKind,
+  HomebrewDraft,
+  PublishResult,
+  PublishableHomebrew,
 } from './contracts';
 import { AuthoringServiceError, CatalogAuthoringService } from './draft-service';
 import { speciesDraftToAggregate } from './species-publisher';

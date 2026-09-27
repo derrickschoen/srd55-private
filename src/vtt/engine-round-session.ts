@@ -11,7 +11,7 @@ import {
   type MonsterSpellcastingAction,
 } from '../combat/statblock';
 import { spellDefinition } from '../combat/spells/definitions';
-import { type CombatantId, type EncounterBranchId, type EncounterSessionId } from '../combat/values';
+import type { CombatantId, EncounterBranchId, EncounterSessionId } from '../combat/values';
 import type {
   EngineOrdinaryRequestKind,
   EnginePlanAdjustmentMetadata,
@@ -30,13 +30,13 @@ import {
 } from './intent-resolver';
 import { createEngineMcpRuntime } from './mcp/entrypoint';
 import { projectEngineInitiativeIntel } from './engine-initiative-intel';
-import {
-  type AutoResolvedReactionOffer,
-  type ReactionOfferHostPolicy,
+import type {
+  AutoResolvedReactionOffer,
+  ReactionOfferHostPolicy,
 } from './reaction-offer-host-policy';
-import {
-  type GuidedReactionResolution,
-  type ReactionGuidanceDeclaration,
+import type {
+  GuidedReactionResolution,
+  ReactionGuidanceDeclaration,
 } from './reaction-guidance';
 import {
   resolveSessionBoundaryDecisions,

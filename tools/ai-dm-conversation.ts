@@ -166,8 +166,8 @@ import { ACTOR_KNOWLEDGE_POLICY } from '../src/vtt/intel/actor-knowledge';
 import { LEGENDARY_WINDOWS_POLICY } from '../src/vtt/intel/legendary-windows';
 import { REACTION_SPEND_HOLD_POLICY } from '../src/vtt/intel/reaction-spend-hold';
 import { RECOVERY_CAPABILITY_POLICY } from '../src/vtt/intel/recovery-capability';
-import {
-  type ReactionGuidanceDeclaration,
+import type {
+  ReactionGuidanceDeclaration,
 } from '../src/vtt/reaction-guidance';
 import {
   createScriptedPartyPlan,

@@ -5,7 +5,7 @@ import {
   normalizeLabelText,
 } from './pixel-font';
 import { neutral, paletteHex, type PaletteColorRef } from './palette';
-import { type Bitmap, type Rgba } from './bitmap';
+import type { Bitmap, Rgba } from './bitmap';
 
 export const BOARD_CHROME_ART_SCALE = 2;
 export const CREATURE_BADGE_NATIVE_WIDTH = 15;

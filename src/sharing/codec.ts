@@ -14,9 +14,9 @@ import {
   type ShareWeapon,
   validateShareDocument,
 } from './schema';
-import {
-  type VersatileWeaponDamage,
-  type WeaponDamage,
+import type {
+  VersatileWeaponDamage,
+  WeaponDamage,
 } from '../domain/weapon-damage';
 import {
   CURRENT_CHARACTER_SHARE_VERSION,

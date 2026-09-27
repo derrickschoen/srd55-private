@@ -35,14 +35,14 @@ import {
   readEquipmentPackageOptions,
   type EquipmentPackageOption,
 } from '../rules/equipment-package-display';
-import {
-  type EquipmentStepRefusalData,
-  type EquipmentStepRefusalReason,
-  type GuidedApplyEquipmentParams,
-  type GuidedApplyOriginResult,
-  type GuidedEquipmentOfferedOption,
-  type GuidedEquipmentSourcePackage,
-  type GuidedEquipmentStepState,
+import type {
+  EquipmentStepRefusalData,
+  EquipmentStepRefusalReason,
+  GuidedApplyEquipmentParams,
+  GuidedApplyOriginResult,
+  GuidedEquipmentOfferedOption,
+  GuidedEquipmentSourcePackage,
+  GuidedEquipmentStepState,
 } from './contracts';
 import {
   deriveBuildStep,

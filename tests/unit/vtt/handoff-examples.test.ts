@@ -29,7 +29,7 @@ import { encounterSeed } from '../../../src/vtt/session-seed';
 import type { ProjectedControllerRequest } from '../../../src/vtt/encounter-projections';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { publishCore, publishExamples } from '../../../tools/vtt-handoff/publish';
-import { type RepositoryIdentityPolicy } from '../../../tools/vtt-handoff/paths';
+import type { RepositoryIdentityPolicy } from '../../../tools/vtt-handoff/paths';
 import { dirname, join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';

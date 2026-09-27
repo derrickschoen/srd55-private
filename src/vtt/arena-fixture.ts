@@ -2,14 +2,14 @@ import { canonicalJson } from '../commands/canonical-json';
 import type { EncounterState } from '../combat/encounter';
 import type { GridCell } from '../combat/grid';
 import type { EncounterIr } from './encounter-ir';
-import {
-  type AuthoredPartySeat,
-  type GeneratedRoom,
-  type RoomMonsterRosterEntry,
-  type RoomSpec,
-  type RoomTerrainFeature,
-  type SampledPartySeat,
-  type SampledSpellSlot,
+import type {
+  AuthoredPartySeat,
+  GeneratedRoom,
+  RoomMonsterRosterEntry,
+  RoomSpec,
+  RoomTerrainFeature,
+  SampledPartySeat,
+  SampledSpellSlot,
 } from './room-generator';
 import { decodeEncounterStateV1 } from './encounter-state-codec';
 

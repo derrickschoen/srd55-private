@@ -6,13 +6,13 @@ import {
   RollProvenance,
   type DrawRecord,
 } from '../combat/roll-provenance';
-import {
-  type AutoResolvedReactionOffer,
-  type ReactionOfferHostPolicy,
+import type {
+  AutoResolvedReactionOffer,
+  ReactionOfferHostPolicy,
 } from './reaction-offer-host-policy';
-import {
-  type GuidedReactionResolution,
-  type ReactionGuidanceDeclaration,
+import type {
+  GuidedReactionResolution,
+  ReactionGuidanceDeclaration,
 } from './reaction-guidance';
 import {
   SessionCommandTrialCore,
