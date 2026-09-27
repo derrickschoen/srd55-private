@@ -3122,3 +3122,17 @@ HARVESTED (agent-reported, reviews pending):
   - Owner-level items it raises (pending, one at a time): 71 unassigned rules (Playing the Game sections) need a RULES-CORE unit; a perception capability unit; DieSize d3 (SRD) against D34's planner dice.
 
 Next free id: D920.
+
+## D920 — 2026-09-27 14:46 — owner: RULES-CORE and PERCEPTION units; d3 supported everywhere (reopens D34)
+
+QUESTION 1 (RULE-INDEX: 71 unassigned rules, mostly "Playing the Game", plus 6 unowned capabilities). OWNER, verbatim choice: "New RULES-CORE unit (Recommended)".
+- RULES-CORE: typed data plus status for the 71 core rules (combat, damage and healing, hit points, rests, dying, general glossary). A rule is 'executed' only where a test proves it.
+- PERCEPTION: a named unit for hearing and sight filters (who notices whom), queued after COVER-EDGE. CAPABILITY_OWNER.perception_filters = 'PERCEPTION'.
+- object_state, zones, summons, plane_state and inventory stay UNASSIGNED until a capability unit is planned.
+
+QUESTION 2 (die sizes: the SRD prints 1d3 19 times; D34 closed the planner's dice without d3). My recommendation was two lists. OWNER, verbatim choice: "Add d3 everywhere".
+- D34's closed die list is REOPENED: d3 joins the planner's die sizes, and there is ONE die-size list (the SRD vocabulary's DieSize) for rule data and planning.
+- The owning change: the RULE-INDEX follow-up, or the first unit that touches the planner's dice.
+- Requirements: a d3 roll distribution witness (1..3 uniform), average 2, and a probability fold that handles d3. Existing pins unaffected unless some rule already used a d3 substitute (say which).
+
+Next free id: D921.
