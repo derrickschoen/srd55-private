@@ -26,9 +26,18 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import ts from 'typescript';
 
-const CACHE_VERSION = 5;
-const CACHE_ROOT = '/tmp/dnd-verdict-cache';
+const CACHE_VERSION = 6;
+export const CACHE_ROOT = '/tmp/dnd-verdict-cache';
 const DISABLING_ENVIRONMENT = ['SQL_QUERY_LOG', 'AI_BRIDGE_LIVE'];
+/*
+ * Variables that key EVERY verdict. A variable a test's JavaScript reads in
+ * its worker while that file runs is recorded by the verdict recorder and keys
+ * that file's verdict by value (`environmentInputs`). These stay for reads the
+ * recorder cannot attribute: native code (TZ, LANG, LC_ALL: time zone and
+ * ICU); the Vitest main process, its config and its global setups (CI,
+ * NODE_ENV and STATIC_APP_CACHE_DIR among them); and module-scope reads, which
+ * a worker running several files (isolate: false) makes for the first only.
+ */
 const HASHED_ENVIRONMENT = [
   'AI_BRIDGE_FAKE',
   'CI',
@@ -468,7 +477,7 @@ function readModule(path) {
   return record;
 }
 
-function buildClosure(testFile) {
+export function buildClosure(testFile) {
   const pending = [testFile];
   const visited = new Set();
   const resources = new Set();
@@ -491,7 +500,7 @@ function buildClosure(testFile) {
   };
 }
 
-function globalSalt() {
+export function globalSalt() {
   const inventory = MODULE_INVENTORY_ROOTS
     .flatMap((directory) => filesBelow(resolve(root, directory)))
     .map(repositoryPath)
@@ -563,7 +572,13 @@ function observedInputState(observation) {
   return undefined;
 }
 
-function verdictDigest(testFile, closure, observedInputs, declaredInputs, salt) {
+/** One variable as it keys a verdict: its value in this process, or its absence. */
+function environmentState(name) {
+  const value = process.env[name];
+  return value === undefined ? 'unset' : `set=${value}`;
+}
+
+function verdictDigest(testFile, closure, observedInputs, declaredInputs, environmentInputs, salt) {
   const parts = [
     `test=${repositoryPath(testFile)}`,
     `test-sha256=${sha256(readFileSync(testFile))}`,
@@ -584,6 +599,9 @@ function verdictDigest(testFile, closure, observedInputs, declaredInputs, salt) 
     if (state === undefined) return undefined;
     parts.push(`declared-input=${name}`, `state=${state}`);
   }
+  for (const name of environmentInputs) {
+    parts.push(`environment-input=${name}`, `state=${environmentState(name)}`);
+  }
   return hashParts(parts);
 }
 
@@ -595,12 +613,12 @@ function readJson(path) {
   }
 }
 
-function entryPath(digest) {
-  return join(CACHE_ROOT, 'entries', `${digest}.json`);
+function entryPath(cacheRoot, digest) {
+  return join(cacheRoot, 'entries', `${digest}.json`);
 }
 
-function pointerPath(testFile) {
-  return join(CACHE_ROOT, 'tests', `${sha256(repositoryPath(testFile))}.json`);
+function pointerPath(cacheRoot, testFile) {
+  return join(cacheRoot, 'tests', `${sha256(repositoryPath(testFile))}.json`);
 }
 
 function validEntry(value, testFile, digest, closure) {
@@ -618,6 +636,8 @@ function validEntry(value, testFile, digest, closure) {
     value.observedInputs.every((item) => typeof item === 'string') &&
     Array.isArray(value.declaredInputs) &&
     value.declaredInputs.every((item) => typeof item === 'string') &&
+    Array.isArray(value.environmentInputs) &&
+    value.environmentInputs.every((item) => typeof item === 'string') &&
     (closure === undefined || (
       value.closure.length === closure.length &&
       value.closure.every((item, index) => item === closure[index])
@@ -631,15 +651,16 @@ function atomicJson(path, value) {
   renameSync(temporary, path);
 }
 
-function cachedVerdict(testFile, salt) {
-  const pointer = readJson(pointerPath(testFile));
+/** The green verdict stored for `testFile` in `cacheRoot`, when every input it was keyed on is unchanged. */
+export function cachedVerdict(testFile, salt, cacheRoot) {
+  const pointer = readJson(pointerPath(cacheRoot, testFile));
   if (
     pointer === null ||
     typeof pointer !== 'object' ||
     pointer.testFile !== repositoryPath(testFile) ||
     typeof pointer.digest !== 'string'
   ) return undefined;
-  const entry = readJson(entryPath(pointer.digest));
+  const entry = readJson(entryPath(cacheRoot, pointer.digest));
   if (!validEntry(entry, testFile, pointer.digest, undefined)) return undefined;
 
   // Self-healing invariant: reading a different path requires either a code
@@ -651,31 +672,76 @@ function cachedVerdict(testFile, salt) {
     entry.closure,
     entry.observedInputs,
     entry.declaredInputs,
+    entry.environmentInputs,
     salt,
   );
   return currentDigest === pointer.digest ? entry : undefined;
 }
 
-function storeVerdict(
-  testFile,
-  closure,
-  observedInputs,
-  declaredInputs,
-  digest,
-  testCount,
-) {
+/**
+ * Stores a green verdict for `testFile` in `cacheRoot`, keyed on its closure
+ * (`graph`), the recorder's observation `record` and the global salt. Returns
+ * the digest, or undefined when an observed input cannot be hashed.
+ */
+export function storeVerdict({ testFile, graph, record, testCount, salt, cacheRoot }) {
+  const declaredInputs = record.declaredInputs ?? [];
+  const digest = verdictDigest(
+    testFile,
+    graph.closure,
+    record.observedInputs,
+    declaredInputs,
+    record.environmentInputs,
+    salt,
+  );
+  if (digest === undefined) return undefined;
   const entry = {
     version: CACHE_VERSION,
     testFile: repositoryPath(testFile),
     digest,
-    closure,
-    observedInputs,
+    closure: graph.closure,
+    observedInputs: record.observedInputs,
     declaredInputs,
+    environmentInputs: record.environmentInputs,
     testCount,
     recordedAt: new Date().toISOString(),
   };
-  atomicJson(entryPath(digest), entry);
-  atomicJson(pointerPath(testFile), { testFile: entry.testFile, digest });
+  atomicJson(entryPath(cacheRoot, digest), entry);
+  atomicJson(pointerPath(cacheRoot, testFile), { testFile: entry.testFile, digest });
+  return digest;
+}
+
+/** The recorder's observation record (verdict-fs-recorder-setup.mjs) when it is well formed; else undefined. */
+export function observationRecord(record) {
+  return record !== null &&
+    typeof record === 'object' &&
+    record.version === 2 &&
+    typeof record.testFile === 'string' &&
+    Array.isArray(record.observedInputs) &&
+    record.observedInputs.every((item) => typeof item === 'string') &&
+    Array.isArray(record.externalInputs) &&
+    record.externalInputs.every((item) => typeof item === 'string') &&
+    Array.isArray(record.environmentInputs) &&
+    record.environmentInputs.every((item) => typeof item === 'string') &&
+    typeof record.environmentEnumerated === 'boolean' &&
+    (record.declaredInputs === undefined || (
+      Array.isArray(record.declaredInputs) &&
+      record.declaredInputs.every((item) => typeof item === 'string')
+    ))
+    ? record
+    : undefined;
+}
+
+/**
+ * Why a file's verdict may not be stored even when it passed; empty when it
+ * may. A file that enumerated process.env read every variable, and no subset
+ * of them can key its verdict.
+ */
+export function failClosedReasons(graph, record) {
+  return [
+    ...(graph?.unresolved ?? []),
+    ...(record?.externalInputs ?? ['<filesystem observation missing>']),
+    ...(record?.environmentEnumerated === true ? ['<process.env enumerated>'] : []),
+  ];
 }
 
 function testFiles() {
@@ -716,23 +782,8 @@ function runVitest(files) {
   const report = readJson(reportPath);
   const observations = new Map();
   for (const path of filesBelow(observationsDirectory)) {
-    const record = readJson(path);
-    if (
-      record !== null &&
-      typeof record === 'object' &&
-      record.version === 1 &&
-      typeof record.testFile === 'string' &&
-      Array.isArray(record.observedInputs) &&
-      record.observedInputs.every((item) => typeof item === 'string') &&
-      Array.isArray(record.externalInputs) &&
-      record.externalInputs.every((item) => typeof item === 'string') &&
-      (record.declaredInputs === undefined || (
-        Array.isArray(record.declaredInputs) &&
-        record.declaredInputs.every((item) => typeof item === 'string')
-      ))
-    ) {
-      observations.set(record.testFile, record);
-    }
+    const record = observationRecord(readJson(path));
+    if (record !== undefined) observations.set(record.testFile, record);
   }
   rmSync(reportDirectory, { recursive: true, force: true });
   rmSync(observationsDirectory, { recursive: true, force: true });
@@ -752,7 +803,7 @@ function main() {
   const uncacheableReasons = new Map();
 
   for (const testFile of files) {
-    if (cacheEnabled && cachedVerdict(testFile, salt) !== undefined) {
+    if (cacheEnabled && cachedVerdict(testFile, salt, CACHE_ROOT) !== undefined) {
       cached.push(testFile);
       continue;
     }
@@ -797,31 +848,19 @@ function main() {
         assertions.length > 0 &&
         assertions.every((assertion) => assertion.status === 'passed');
       const observation = observations.get(name);
-      const reasons = [
-        ...(graph?.unresolved ?? []),
-        ...(observation?.externalInputs ?? ['<filesystem observation missing>']),
-      ];
+      const reasons = failClosedReasons(graph, observation);
       if (reasons.length > 0) failClosedByFile.set(name, reasons);
       if (graph?.cacheable === true && observation !== undefined && reasons.length === 0 && passed) {
-        const declaredInputs = observation.declaredInputs ?? [];
-        const digest = verdictDigest(
+        const digest = storeVerdict({
           testFile,
-          graph.closure,
-          observation.observedInputs,
-          declaredInputs,
+          graph,
+          record: observation,
+          testCount: assertions.length,
           salt,
-        );
+          cacheRoot: CACHE_ROOT,
+        });
         if (digest === undefined) {
           failClosedByFile.set(name, ['<observed repository input could not be hashed>']);
-        } else {
-          storeVerdict(
-            testFile,
-            graph.closure,
-            observation.observedInputs,
-            declaredInputs,
-            digest,
-            assertions.length,
-          );
         }
       }
     }
@@ -839,4 +878,14 @@ function main() {
   process.exitCode = status;
 }
 
-main();
+/** True when node runs this file itself; the verdict cache's own tests import it without running it. */
+function invokedDirectly() {
+  if (process.argv[1] === undefined) return false;
+  try {
+    return realpathSync(process.argv[1]) === runnerPath;
+  } catch {
+    return false;
+  }
+}
+
+if (invokedDirectly()) main();

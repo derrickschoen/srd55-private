@@ -159,6 +159,16 @@ async function engineChildDeclarations(state, offer) {
   }
 }
 
+function noteEnvironmentRead(name) {
+  const state = currentState();
+  if (state !== undefined && typeof name === 'string') state.environment.add(name);
+}
+
+function noteEnvironmentEnumeration() {
+  const state = currentState();
+  if (state !== undefined) state.environmentEnumerated = true;
+}
+
 function callbackIndex(args) {
   for (let index = args.length - 1; index >= 0; index -= 1) {
     if (typeof args[index] === 'function') return index;
@@ -325,6 +335,35 @@ if (globalThis[stateSymbol] === undefined) {
     return result;
   };
   syncBuiltinESMExports();
+
+  // Every environment variable a test reads keys its verdict by value
+  // (test:affected hashes it), so reads name the variable; writes pass
+  // through. An enumeration reads every variable at once and fails the file
+  // closed. Variables only native code reads (TZ, LANG, LC_ALL) never reach
+  // this object; test:affected hashes those for every file.
+  const recordingEnvironment = new Proxy(process.env, {
+    get(target, name) {
+      noteEnvironmentRead(name);
+      return Reflect.get(target, name);
+    },
+    has(target, name) {
+      noteEnvironmentRead(name);
+      return Reflect.has(target, name);
+    },
+    getOwnPropertyDescriptor(target, name) {
+      noteEnvironmentRead(name);
+      return Reflect.getOwnPropertyDescriptor(target, name);
+    },
+    ownKeys(target) {
+      noteEnvironmentEnumeration();
+      return Reflect.ownKeys(target);
+    },
+    set: (target, name, value) => Reflect.set(target, name, value),
+    deleteProperty: (target, name) => Reflect.deleteProperty(target, name),
+    defineProperty: (target, name, descriptor) => Reflect.defineProperty(target, name, descriptor),
+  });
+  process.env = recordingEnvironment;
+  globalThis[stateSymbol].environment = recordingEnvironment;
 }
 
 const testFile = expect.getState().testPath;
@@ -332,6 +371,8 @@ if (testFile === undefined) {
   throw new Error('Vitest did not expose the active test file to the verdict recorder.');
 }
 const fileState = {
+  environment: new Set(),
+  environmentEnumerated: false,
   external: new Set(),
   observed: new Set(),
   testFile,
@@ -378,11 +419,20 @@ afterAll(async () => {
       );
     }
   }
+  if (process.env !== globalThis[stateSymbol].environment) {
+    if (globalThis[stateSymbol].current === fileState) globalThis[stateSymbol].current = undefined;
+    throw new Error(
+      `process.env was replaced while ${relative(repositoryRoot, fileState.testFile)} ran, so the verdict ` +
+        'recorder cannot name the environment variables its tests read. Restore the original object.',
+    );
+  }
   const record = {
-    version: 1,
+    version: 2,
     testFile: relative(repositoryRoot, fileState.testFile).split(sep).join('/'),
     observedInputs: [...fileState.observed].sort(),
     externalInputs: [...fileState.external].sort(),
+    environmentInputs: [...fileState.environment].sort(),
+    environmentEnumerated: fileState.environmentEnumerated,
     ...(declaredInputs === undefined
       ? {}
       : { declaredInputs: [...declaredInputs].sort() }),
