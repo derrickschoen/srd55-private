@@ -3269,3 +3269,18 @@ Q22. LUNA6 study timing (it waited behind 8 rule units and REGEN). OWNER, verbat
 Q23 (re-check the power simulation after REGEN): MOOT; the study is withdrawn.
 
 Next free id: D926.
+
+## D926 — 2026-09-27 17:49 — owner: keep the study tooling; clean up landed and closed clones (done: 99 deleted, 42 archived first)
+
+FOLLOW-UP to D925 (delete the now-unused B6 effort-study operator?). My recommendation was to delete it. OWNER, verbatim choice: "Keep it".
+- tools/luna6-effort-study*, T8 and the D569 exports stay on main for a possible future study. T8 costs about 4.5 s per gate.
+
+Q24 (disk cleanup; I asked to list first). OWNER, verbatim: "Delete landed and closed experiments".
+- Done by me. Log: .tmp/runs/cleanup-2026-09-27.log.
+- Every dnd-probe-* and dnd-gate-exp-* directory except the 8 in-flight clones was removed. Kept: coveredge-cd0d, footprint-impl-e01c, importguard-14de, pathone-bf5a, pcexport-1b54, recordera-ce06, ruleindex-2cc6, srdbuild-b8c1.
+- Before any deletion, every clone whose HEAD held commits not on main by patch id (git cherry) was archived into the main repo as refs/archive/clones/<name>. 42 were archived, with 0 archive failures. Nothing unlanded is lost; the refs are local and not pushed.
+- 99 directories were deleted, including one non-git copy (dnd-probe-coverself-CUFM-base45c, a coverself timing base; coverself landed inside cover6).
+- Disk went from 622G to 556G used. The shelved dnd-wt-* worktrees (VIS-FIELD, COHORT-01) were NOT touched.
+- The WASM clone was deleted as a closed experiment. Its D911/D914 quiet re-bench is therefore dropped; D912's "no WASM" stands, and the flat-kernel code is archived as refs/archive/clones/dnd-probe-wasm-7dcb for COVER-SWEEP-FLAT.
+
+Next free id: D927.
