@@ -3161,3 +3161,33 @@ Q3. Flyers and difficult terrain (the engine lets any flyer ignore all difficult
 - Owner: MOVE-COST (the stacking cost kinds, D905) with MOVEMENT-MODES (the fly mode). Tag data lives in the typed effect and terrain definitions, so a new effect must declare its tag.
 
 Next free id: D922.
+
+## D922 — 2026-09-27 16:40 — owner question series, Q4–Q7: Touch range; spell class membership as a union; XP where sources disagree
+
+Q4. Touch range: the engine uses a fixed 5 ft.
+- OWNER first answer, verbatim: "Research community rulings".
+- Research (mine):
+  - SRD 5.2.1 (docs/srd/full/srd-5.2.1.txt, spell Range section, verified): "Touch. The spell’s effect originates on something, as defined by the spell, that the spellcaster must touch within their reach."
+  - Community rulings (D&D Beyond forum threads on touch spells and bugbear reach): a touch spell uses the caster's melee reach. A feature that extends reach only for melee attacks (e.g. Long-Limbed) applies only to touch spells that make a melee attack roll.
+- Follow-up, OWNER verbatim choice: "Yes, reach with attack caveat (Recommended)".
+- RULE: range kind 'touch' resolves from the caster's reach, never a fixed 5 ft.
+  - Natural reach counts for every Touch spell.
+  - Attack-only reach extensions count only for Touch spells with a melee spell attack.
+  - This is a wrong-result fix with a failing test first.
+
+Q5. Phantasmal Force. Verified: the header at spell-descriptions.txt:5697-5699 reads "Level 2 Illusion (Bard, Sorcerer, Wizard)", and it appears in NONE of docs/srd/source/*-spell-list.txt.
+- OWNER, verbatim choice: "Union of both".
+
+Q6. Mind Spike. Verified: the header at spell-descriptions.txt:5398-5399 lists Sorcerer, Warlock, Wizard; only the wizard and warlock list files include it.
+- The question asked whether the union becomes general. OWNER, verbatim choice: "Yes, union everywhere (Recommended)".
+- RULE: a spell's classes = header classes ∪ class-list memberships, for EVERY spell. Each disagreement is still recorded as a typed source_disagreement with both spans and this ruling's id, so it stays visible.
+- Consequences: Phantasmal Force goes to Bard, Sorcerer and Wizard; Mind Spike to Sorcerer, Warlock and Wizard.
+- Owner of the change: SPELL-HEADERS/IDS, and the builder's catalogue.
+
+Q7. Archmage XP. Verified: the stat block prints "CR 12 (XP 8,000; PB +4)"; the CR table prints "12 8,400".
+- OWNER, verbatim: "Highest wins in all case".
+- RULE: wherever two SRD sources give different XP for a creature (printed stat-block XP against the CR/XP table), the higher value is used. Archmage = 8,400.
+- My reading of "in all case": it applies to every XP disagreement, and each is recorded as source_disagreement with the chosen (higher) value. It is NOT extended to other numeric disagreements without asking.
+- Owner: MON-TABLES / SRD-MONSTERS.
+
+Next free id: D923.
