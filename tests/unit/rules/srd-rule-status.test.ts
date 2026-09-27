@@ -207,6 +207,10 @@ describe('RULE_STATUS', () => {
     expect(witnessFault({ test: 'tests/unit/combat/death-saves.test.ts::queues a closed death_save PendingDecision at the start of a dying NPC turn', asserts: resolved }))
       .toBe('no test with that title');
     expect(witnessFault({ test: 'tests/unit/combat/no-such-file.test.ts::x', asserts: resolved })).toBe('no such test file');
+    // A negated or emptiness matcher states an absence, whatever it names.
+    expect(isPositiveAssertion('expect(result.event).not.toMatchObject({ outcome })')).toBe(false);
+    expect(isPositiveAssertion('expect(started.pendingDecisions).toHaveLength(0)')).toBe(false);
+    expect(isPositiveAssertion(resolved)).toBe(true);
     // A skipped test, or a test inside a skipped describe, witnesses nothing.
     expect(testAssertions("describe.skip('d', () => { it('t', () => { expect(1).toBe(1); }); });", 't'))
       .toEqual({ found: true, runs: false, expects: ['expect(1).toBe(1)'] });
