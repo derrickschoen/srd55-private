@@ -153,6 +153,7 @@ Every script, from `package.json`:
 | `npm run test:all` | `test` → `build` → `test:browser` |
 | `npm run db:schema` | Regenerates `src/db/schema.sql` from `db/schema/*.ts` |
 | `npm run db:contracts` | Regenerates `src/domain/contracts/generated/column-facts.ts` |
+| `npm run srd:artifacts` | Re-reads the SRD corpora under `docs/srd` and regenerates `src/rules/generated/*-srd.ts` and `src/simulation/generated/coverage-source.ts`. The runtime never parses SRD text; run this after editing a corpus or a `*-reader.ts`, or the per-artifact drift tests fail |
 | `npm run scrape` | The scraper CLI. Its output must never be committed — guarded |
 
 ### Five traps in that surface
