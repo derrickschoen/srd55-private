@@ -10,7 +10,7 @@ import {
 import {
   parseSrdClassTraits,
   SrdClassTraitsError,
-} from '../../../src/rules/class-traits-srd';
+} from '../../../src/rules/class-traits-srd-reader';
 
 const PRIMARY_ABILITIES: Readonly<Record<string, PrimaryAbilityExpression>> = {
   Barbarian: { kind: 'all_of', abilities: ['strength'] },
@@ -43,7 +43,7 @@ describe('sourced primary-ability expressions and D96', () => {
   it('preserves all twelve hand-transcribed one_of/all_of expressions', () => {
     expect(
       Object.fromEntries(
-        parseSrdClassTraits().map((entry) => [
+        parseSrdClassTraits(coreTraitsSource).map((entry) => [
           entry.class_name,
           entry.primary_ability_expression,
         ]),

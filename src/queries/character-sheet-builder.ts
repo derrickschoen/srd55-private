@@ -41,7 +41,8 @@ import {
 import type { AbilityOverrideOutcome } from '../builder/contracts';
 import { AbilityScores } from '../rules/ability-scores';
 import { SheetContentLookup } from '../rules/sheet-content-lookup';
-import { SKILL_LABELS, abilityForSkill } from '../rules/skills';
+import { abilityForSkill } from '../rules/skills';
+import { SKILL_LABELS } from '../rules/skill-labels';
 import { activeGrantedSkills } from '../grants/skill-grants';
 import {
   activeExpertiseSkills,

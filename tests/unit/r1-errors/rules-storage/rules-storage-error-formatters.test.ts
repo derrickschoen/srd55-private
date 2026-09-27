@@ -4,7 +4,7 @@ import {
   SrdPointCostDuplicateScoreError,
   SrdPointCostTableMissingError,
   SrdStandardArrayShapeError,
-} from '../../../../src/rules/ability-score-generation-srd';
+} from '../../../../src/rules/ability-score-generation-srd-reader';
 import {
   SubclassSpellcastingAbilityError,
 } from '../../../../src/rules/class-level-features-srd';

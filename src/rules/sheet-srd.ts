@@ -26,29 +26,24 @@ import { normalizeContentIdentityName } from '../catalog/content-identity';
 import { ensureBundledStableContentIdentity } from '../catalog/content-registry';
 import { encodePrimaryAbilityExpression } from '../domain/primary-ability';
 import {
-  parseSrdClassTraits,
-  parseSrdExtraAttackGrants,
-  parseSrdMartialArtsDice,
-  SrdClassTraitsError,
+  bundledSrdClassTraits,
+  bundledSrdExtraAttackGrants,
+  bundledSrdMartialArtsDice,
 } from './class-traits-srd';
+import { SrdClassTraitsError } from './class-traits-srd-reader';
+import { bundledSrdMulticlassEntryGrants } from './multiclass-entry-srd';
 import {
   multiclassSkillColumns,
-  parseSrdMulticlassEntryGrants,
   SrdMulticlassEntryError,
-} from './multiclass-entry-srd';
-import {
-  bundledArmorTemplates,
-  BUNDLED_ARMOR_RULES_EDITION,
-} from './armor-srd';
-import {
-  parseSrdNamedExtraAttackFeatures,
-  BUNDLED_FEATURE_RULES_EDITION,
-} from './extra-attack-srd';
+  type SrdMulticlassEntryGrant,
+} from './multiclass-entry-srd-reader';
+import { bundledArmorTemplates } from './armor-srd';
+import { BUNDLED_ARMOR_RULES_EDITION } from './armor-srd-reader';
+import { bundledSrdNamedExtraAttackFeatures } from './extra-attack-srd';
+import { BUNDLED_FEATURE_RULES_EDITION } from './extra-attack-srd-reader';
 import { skillAbilities } from './skills';
-import {
-  parseSrdUnarmoredDefenseFeatures,
-  type SrdUnarmoredDefenseFeature,
-} from './unarmored-defense-srd';
+import { bundledSrdUnarmoredDefenseFeatures } from './unarmored-defense-srd';
+import type { SrdUnarmoredDefenseFeature } from './unarmored-defense-srd-reader';
 
 /** The class the Martial Arts progression belongs to. */
 const MARTIAL_ARTS_CLASS = 'Monk';
@@ -112,7 +107,7 @@ export function hasBundledSheetContent(db: DatabaseContext): boolean {
   // How many of the parsed classes this database actually carries. Compared
   // against the traits rows so a database with a partial class catalog is not
   // permanently reported unhealthy.
-  const parsedTraits = parseSrdClassTraits();
+  const parsedTraits = bundledSrdClassTraits();
   const names = parsedTraits.map((traits) => traits.class_name);
   const namePlaceholders = names.map(() => '?').join(', ');
   const known = Number(
@@ -239,7 +234,7 @@ function hasBundledMulticlassEntryGrants(db: DatabaseContext): boolean {
       .map((row) => [row.classId, row] as const),
   );
 
-  for (const grant of parseSrdMulticlassEntryGrants()) {
+  for (const grant of bundledSrdMulticlassEntryGrants()) {
     const classId = classes.get(grant.class_name);
     if (classId === undefined) {
       continue;
@@ -334,25 +329,23 @@ function seedArmorTemplates(db: DatabaseContext, timestamp: string): void {
 }
 
 function seedClassSheetContent(db: DatabaseContext, timestamp: string): void {
-  // Parsed here rather than at module scope so a malformed extract throws
-  // inside the seeding transaction and leaves nothing half-written.
-  const traits = parseSrdClassTraits();
-  // THE ENTRY GRANTS ARE PARSED HERE, INSIDE THE TRANSACTION, AND CHECKED
-  // AGAINST `traits` AS THEY ARE PARSED. `parseSrdMulticlassEntryGrants` throws
-  // if any class's entry grant names an armour category or a weapon category its
-  // own Core Traits row does not have — which is the invariant the per-row flag
-  // depends on, since a category with no row has nothing to flag and would be
-  // silently dropped rather than loudly refused.
-  const entryGrants = new Map(
-    parseSrdMulticlassEntryGrants(undefined, traits).map((grant) => [
+  // Both catalogs were parsed at build time. The ENTRY GRANTS were checked
+  // there against the Core Traits parse (`parseSrdMulticlassEntryGrants`
+  // throws if any class's entry grant names an armour category or a weapon
+  // category its own Core Traits row does not have) — which is the invariant
+  // the per-row flag depends on, since a category with no row has nothing to
+  // flag and would be silently dropped rather than loudly refused.
+  const traits = bundledSrdClassTraits();
+  const entryGrants = new Map<string, SrdMulticlassEntryGrant>(
+    bundledSrdMulticlassEntryGrants().map((grant) => [
       grant.class_name,
       grant,
     ]),
   );
-  const extraAttacks = new Map(
-    parseSrdExtraAttackGrants().map((grant) => [grant.class_name, grant.counts]),
+  const extraAttacks = new Map<string, ReadonlyMap<number, number>>(
+    bundledSrdExtraAttackGrants().map((grant) => [grant.class_name, grant.counts]),
   );
-  const martialArts = parseSrdMartialArtsDice();
+  const martialArts = bundledSrdMartialArtsDice();
   // Touched so a broken Skills table fails the seed rather than failing later
   // at the first skill modifier a user asks for.
   skillAbilities();
@@ -551,7 +544,7 @@ function seedClassFeatureEffects(
   db: DatabaseContext,
   timestamp: string,
 ): void {
-  for (const feature of parseSrdUnarmoredDefenseFeatures()) {
+  for (const feature of bundledSrdUnarmoredDefenseFeatures()) {
     const classId = bundledClassId(db, feature.class_name);
     if (classId === null) {
       continue;
@@ -598,7 +591,7 @@ function seedClassFeatureEffects(
  * parsed from `docs/srd/source/unarmored-defense.txt`.
  */
 function hasBundledClassFeatureEffects(db: DatabaseContext): boolean {
-  for (const feature of parseSrdUnarmoredDefenseFeatures()) {
+  for (const feature of bundledSrdUnarmoredDefenseFeatures()) {
     const classId = bundledClassId(db, feature.class_name);
     if (classId === null) {
       continue;
@@ -701,7 +694,7 @@ function sameClassFeatureEffect(
  * class-content seeder treats a class with no `class_definitions` row.
  */
 function seedNamedFeatures(db: DatabaseContext, timestamp: string): void {
-  const features = parseSrdNamedExtraAttackFeatures();
+  const features = bundledSrdNamedExtraAttackFeatures();
   for (const feature of features) {
     db.exec('DELETE FROM named_features WHERE content_key = ?', [
       feature.content_key,
@@ -814,7 +807,7 @@ function classIdsByName(db: DatabaseContext): Map<string, number> {
  * it, and this is the claim that makes the clearing checkable.
  */
 function hasBundledNamedFeatures(db: DatabaseContext): boolean {
-  for (const feature of parseSrdNamedExtraAttackFeatures()) {
+  for (const feature of bundledSrdNamedExtraAttackFeatures()) {
     const stored = db.all(
       `SELECT feature.class_definition_id, feature.name, feature.rules_edition,
               feature.prerequisite, feature.description, feature.class_level,

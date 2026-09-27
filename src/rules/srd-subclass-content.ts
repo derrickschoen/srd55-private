@@ -14,22 +14,20 @@ import {
   BUNDLED_RULES_EDITION,
   classContentKey,
 } from './class-progression-lookup';
+import { bundledSrdSubclassManifest } from './srd-subclasses';
 import {
-  parseSrdSubclasses,
   srdSubclassClassNames,
   type SrdSubclassDefinition,
   type SrdSubclassClassName,
-} from './srd-subclasses';
+} from './srd-subclasses-reader';
 import type { Ability } from '../domain/enums';
 import type { CharacterLevel } from '../domain/enums';
 import {
   HEADING_ONLY_DESCRIPTION,
   type HeadingOnlyDescription,
 } from '../domain/subclass-feature-description';
-import {
-  parseSrdDraconicResilience,
-  type SrdDraconicResilienceEffect,
-} from './draconic-resilience-srd';
+import { bundledSrdDraconicResilience } from './draconic-resilience-srd';
+import type { SrdDraconicResilienceEffect } from './draconic-resilience-srd-reader';
 
 export type BundledSubclassGrantRulesShape =
   | 'json_text_or_null'
@@ -152,8 +150,8 @@ function srdSubclassSeeds(): readonly BundledSubclassSeed[] {
   if (cachedSeeds !== undefined) {
     return cachedSeeds;
   }
-  const manifest = parseSrdSubclasses();
-  const draconicResilience = parseSrdDraconicResilience();
+  const manifest = bundledSrdSubclassManifest();
+  const draconicResilience = bundledSrdDraconicResilience();
   cachedSeeds = Object.freeze(
     srdSubclassClassNames.map((className) => {
       const definition = manifest.by_class[className];

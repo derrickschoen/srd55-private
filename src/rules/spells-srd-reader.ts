@@ -16,6 +16,15 @@
  * commits the catalog as `generated/spells-srd.ts`, which `spells-srd.ts`
  * seeds from; `spells-srd-generation.test.ts` re-parses the extracts and fails
  * on any byte difference.
+ *
+ * THE PRINTED FIELDS ARE DISPLAY TEXT; THE TYPED FIELDS ARE THE FACTS (D918).
+ * Casting time, range, components and duration are each kept verbatim for the
+ * card and the catalogue, and each is ALSO read here, once, into a closed
+ * value: a casting-time unit, a range kind (the domain `SpellRange`), the
+ * V/S/M flags with the material clause and its cost, and a duration kind. The
+ * SRD's vocabulary for these is closed, so a printed value outside it fails
+ * the build instead of reaching a consumer as an unread string. Code reads the
+ * typed fields; nothing parses the printed text at runtime.
  */
 import {
   normalizeCatalogKeyComponent,
@@ -25,6 +34,11 @@ import {
   spellSchools,
   type KnownSpellSchool,
 } from '../domain/enums';
+import {
+  parseSpellComponents,
+  type MaterialCost,
+} from '../domain/spell-components';
+import { parseSpellRange, type SpellRange } from '../domain/spell-range';
 
 export const BUNDLED_SPELL_RULES_EDITION = '2024';
 export const BUNDLED_SPELL_SEED_VERSION = 'srd-5.2.1';
@@ -50,20 +64,100 @@ export class SrdSpellError extends Error {
   }
 }
 
+/** A bundled spell's version key: the edition, then the name's slug. */
+export type SrdSpellContentKey = `${typeof BUNDLED_SPELL_RULES_EDITION}:${string}`;
+
+export const SRD_SPELL_LEVELS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
+/** 0 is a cantrip. */
+export type SrdSpellLevel = (typeof SRD_SPELL_LEVELS)[number];
+
+/** The action-economy slot a casting time names, as the catalogue stores it. */
+export const SRD_SPELL_ACTION_TYPES = ['Action', 'Bonus Action', 'Reaction'] as const;
+export type SrdSpellActionType = (typeof SRD_SPELL_ACTION_TYPES)[number];
+
+/** The units every SRD casting time is counted in. */
+export const SRD_CASTING_TIME_UNITS = [
+  'action',
+  'bonus_action',
+  'reaction',
+  'minute',
+  'hour',
+] as const;
+export type SrdCastingTimeUnit = (typeof SRD_CASTING_TIME_UNITS)[number];
+
+/**
+ * One printed way to cast. An action-economy slot carries the trigger printed
+ * after it (`Reaction, which you take when…`), verbatim; a length of time
+ * carries its amount. `mode` is the parenthesised name of the option when a
+ * spell prints two (Plant Growth: `Action (Overgrowth) or 8 hours (Enrichment)`).
+ */
+export type SrdCastingOption =
+  | {
+      readonly unit: Extract<SrdCastingTimeUnit, 'action' | 'bonus_action' | 'reaction'>;
+      readonly trigger: string | null;
+      readonly mode: string | null;
+    }
+  | {
+      readonly unit: Extract<SrdCastingTimeUnit, 'minute' | 'hour'>;
+      readonly amount: number;
+      readonly mode: string | null;
+    };
+
+export interface SrdSpellCastingTime {
+  readonly options: readonly [SrdCastingOption, ...SrdCastingOption[]];
+  /** `… or Ritual`: the spell can also be cast as a Ritual. */
+  readonly ritual: boolean;
+}
+
+/** The V/S/M flags, the material clause verbatim, and its printed cost. */
+export interface SrdSpellComponents {
+  readonly verbal: boolean;
+  readonly somatic: boolean;
+  /** What `M (…)` names, or null when the spell has no Material component. */
+  readonly material: string | null;
+  readonly cost: MaterialCost | null;
+}
+
+/** The units every timed SRD duration is counted in. */
+export const SRD_DURATION_UNITS = ['round', 'minute', 'hour', 'day'] as const;
+export type SrdDurationUnit = (typeof SRD_DURATION_UNITS)[number];
+
+export type SrdSpellDuration =
+  | { readonly kind: 'instantaneous' }
+  | {
+      readonly kind: 'timed';
+      readonly amount: number;
+      readonly unit: SrdDurationUnit;
+      /** `Concentration, up to …`. */
+      readonly concentration: boolean;
+      /** `Up to …` or `Concentration, up to …`: the duration is a maximum. */
+      readonly up_to: boolean;
+    }
+  | { readonly kind: 'until_dispelled'; readonly or_triggered: boolean }
+  | { readonly kind: 'special' };
+
 export interface SrdSpellDescription {
   readonly name: string;
   readonly identity_key: string;
-  readonly content_key: string;
-  readonly level: number;
+  readonly content_key: SrdSpellContentKey;
+  readonly level: SrdSpellLevel;
   readonly school: KnownSpellSchool;
   readonly ritual: boolean;
   readonly concentration: boolean;
+  /** Printed, for display. Code reads {@link casting_time_value}. */
   readonly casting_time: string;
-  readonly action_type: string | null;
+  readonly action_type: SrdSpellActionType | null;
+  /** Printed, for display. Code reads {@link range_value}. */
   readonly range: string;
+  /** Printed, for display. Code reads {@link components_value}. */
   readonly components: string;
+  /** Printed, for display. Code reads {@link duration_value}. */
   readonly duration: string;
   readonly description: string;
+  readonly casting_time_value: SrdSpellCastingTime;
+  readonly range_value: SpellRange;
+  readonly components_value: SrdSpellComponents;
+  readonly duration_value: SrdSpellDuration;
 }
 
 export interface SrdSpellListMembership {
@@ -119,7 +213,7 @@ function joined(lines: readonly string[]): string {
     .trim();
 }
 
-function actionType(castingTime: string): string | null {
+function actionType(castingTime: string): SrdSpellActionType | null {
   if (/\bBonus Action\b/iu.test(castingTime)) {
     return 'Bonus Action';
   }
@@ -168,6 +262,147 @@ function fieldValue(
     throw new SrdSpellError(`${spellName} has an empty ${label} field.`);
   }
   return { value, at, next };
+}
+
+const CASTING_SLOT: Readonly<Record<string, Extract<SrdCastingTimeUnit, 'action' | 'bonus_action' | 'reaction'>>> = {
+  Action: 'action',
+  'Bonus Action': 'bonus_action',
+  Reaction: 'reaction',
+};
+const CASTING_SLOT_WITH_TRIGGER = /^(?<slot>Action|Bonus Action|Reaction), (?<trigger>which .+)$/u;
+const CASTING_OPTION = /^(?<base>Action|Bonus Action|Reaction|(?<amount>\d+) (?<unit>minute|hour)s?)(?: \((?<mode>[^()]+)\))?$/u;
+
+function castingOption(spellName: string, text: string): SrdCastingOption {
+  const groups = CASTING_OPTION.exec(text)?.groups;
+  if (groups?.base === undefined) {
+    throw new SrdSpellError(
+      `${spellName} has casting time ${JSON.stringify(text)}, outside the SRD's closed vocabulary.`,
+    );
+  }
+  const mode = groups.mode ?? null;
+  const slot = CASTING_SLOT[groups.base];
+  if (slot !== undefined) {
+    return { unit: slot, trigger: null, mode };
+  }
+  return {
+    unit: groups.unit === 'hour' ? 'hour' : 'minute',
+    amount: Number(groups.amount),
+    mode,
+  };
+}
+
+/** Reads a printed casting time into its closed form, or throws. */
+export function parseSrdCastingTime(
+  spellName: string,
+  printed: string,
+): SrdSpellCastingTime {
+  const ritual = /^.+ or Ritual$/u.test(printed);
+  const text = ritual ? printed.replace(/ or Ritual$/u, '') : printed;
+  const triggered = CASTING_SLOT_WITH_TRIGGER.exec(text)?.groups;
+  if (triggered?.slot !== undefined && triggered.trigger !== undefined) {
+    return {
+      options: [{
+        unit: CASTING_SLOT[triggered.slot] as Extract<SrdCastingTimeUnit, 'action' | 'bonus_action' | 'reaction'>,
+        trigger: triggered.trigger,
+        mode: null,
+      }],
+      ritual,
+    };
+  }
+  const [first, ...rest] = text.split(' or ').map((option) =>
+    castingOption(spellName, option),
+  );
+  if (first === undefined) {
+    throw new SrdSpellError(`${spellName} has an empty casting time.`);
+  }
+  return { options: [first, ...rest], ritual };
+}
+
+const COMPONENT_FLAGS = /^(?<flags>[VSM](?:, [VSM])*)(?: \((?<material>.*)\))?$/u;
+
+/** Reads a printed components line into its V/S/M flags and material clause, or throws. */
+export function parseSrdSpellComponents(
+  spellName: string,
+  printed: string,
+): SrdSpellComponents {
+  const groups = COMPONENT_FLAGS.exec(printed)?.groups;
+  const flags = groups?.flags?.split(', ') ?? [];
+  const inOrder = ['V', 'S', 'M'].filter((flag) => flags.includes(flag));
+  const hasMaterial = flags.includes('M');
+  const clause = parseSpellComponents(printed);
+  if (
+    groups === undefined ||
+    flags.join(', ') !== inOrder.join(', ') ||
+    hasMaterial !== (groups.material !== undefined) ||
+    hasMaterial !== (clause.material !== null)
+  ) {
+    throw new SrdSpellError(
+      `${spellName} has components ${JSON.stringify(printed)}, outside the SRD's V, S, M (…) form.`,
+    );
+  }
+  return {
+    verbal: flags.includes('V'),
+    somatic: flags.includes('S'),
+    material: clause.material,
+    cost: clause.cost,
+  };
+}
+
+const DURATION_TIMED =
+  /^(?<qualifier>Concentration,? up to |Up to )?(?<amount>\d+) (?<unit>round|minute|hour|day)s?$/u;
+
+/** Reads a printed duration into its closed form, or throws. */
+export function parseSrdSpellDuration(
+  spellName: string,
+  printed: string,
+): SrdSpellDuration {
+  switch (printed) {
+    case 'Instantaneous':
+      return { kind: 'instantaneous' };
+    case 'Special':
+      return { kind: 'special' };
+    case 'Until dispelled':
+      return { kind: 'until_dispelled', or_triggered: false };
+    case 'Until dispelled or triggered':
+      return { kind: 'until_dispelled', or_triggered: true };
+  }
+  const groups = DURATION_TIMED.exec(printed)?.groups;
+  const unit = SRD_DURATION_UNITS.find((candidate) => candidate === groups?.unit);
+  if (groups?.amount === undefined || unit === undefined) {
+    throw new SrdSpellError(
+      `${spellName} has duration ${JSON.stringify(printed)}, outside the SRD's closed vocabulary.`,
+    );
+  }
+  const qualifier = groups.qualifier ?? '';
+  return {
+    kind: 'timed',
+    amount: Number(groups.amount),
+    unit,
+    concentration: qualifier.startsWith('Concentration'),
+    up_to: qualifier !== '',
+  };
+}
+
+/** Reads a printed range through the domain's range vocabulary, or throws. */
+export function parseSrdSpellRange(
+  spellName: string,
+  printed: string,
+): SpellRange {
+  const range = parseSpellRange(printed);
+  if (range === null) {
+    throw new SrdSpellError(
+      `${spellName} has range ${JSON.stringify(printed)}, outside the spell-range vocabulary.`,
+    );
+  }
+  return range;
+}
+
+function isSrdSpellContentKey(value: string): value is SrdSpellContentKey {
+  return value.startsWith(`${BUNDLED_SPELL_RULES_EDITION}:`);
+}
+
+function isSrdSpellLevel(value: number): value is SrdSpellLevel {
+  return (SRD_SPELL_LEVELS as readonly number[]).includes(value);
 }
 
 /**
@@ -261,21 +496,44 @@ export function parseSrdSpellDescriptions(
 
     const school = (metadata.leveledSchool ??
       metadata.cantripSchool) as KnownSpellSchool;
+    const level = metadata.level === undefined ? 0 : Number(metadata.level);
+    if (!isSrdSpellLevel(level)) {
+      throw new SrdSpellError(`${name} has spell level ${String(level)}.`);
+    }
+    const ritual = /\bor Ritual\b/iu.test(casting.value);
+    const concentration = /^Concentration\b/iu.test(duration.value);
+    const contentKey = officialSpellKey(BUNDLED_SPELL_RULES_EDITION, name);
+    if (!isSrdSpellContentKey(contentKey)) {
+      throw new SrdSpellError(`${name} has content key ${contentKey}, outside the bundled edition.`);
+    }
+    const castingTimeValue = parseSrdCastingTime(name, casting.value);
+    const durationValue = parseSrdSpellDuration(name, duration.value);
+    if (
+      castingTimeValue.ritual !== ritual ||
+      (durationValue.kind === 'timed' && durationValue.concentration) !== concentration
+    ) {
+      throw new SrdSpellError(
+        `${name}'s typed casting time or duration disagrees with its printed Ritual or Concentration.`,
+      );
+    }
     parsed.push({
       name,
       identity_key: normalizeCatalogKeyComponent(name),
-      content_key: officialSpellKey(BUNDLED_SPELL_RULES_EDITION, name),
-      level:
-        metadata.level === undefined ? 0 : Number(metadata.level),
+      content_key: contentKey,
+      level,
       school,
-      ritual: /\bor Ritual\b/iu.test(casting.value),
-      concentration: /^Concentration\b/iu.test(duration.value),
+      ritual,
+      concentration,
       casting_time: casting.value,
       action_type: actionType(casting.value),
       range: range.value,
       components: components.value,
       duration: duration.value,
       description: prose,
+      casting_time_value: castingTimeValue,
+      range_value: parseSrdSpellRange(name, range.value),
+      components_value: parseSrdSpellComponents(name, components.value),
+      duration_value: durationValue,
     });
   }
 

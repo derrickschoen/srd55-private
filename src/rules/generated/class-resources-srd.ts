@@ -1,9 +1,9 @@
 // GENERATED FILE — DO NOT EDIT BY HAND.
-// Source of truth, read by src/rules/class-resources-srd-reader.ts:
-//   docs/srd/source/class-level-tables.txt
-//   docs/srd/full/srd-5.2.1.txt
+// Source of truth, read by src/rules/class-resources-srd-reader.ts, each source pinned by its sha256:
+//   docs/srd/source/class-level-tables.txt sha256=a42925cfeff1df54e909947389daf7ae641377a57b456fa7c4bfd9b503a4ea0c
+//   docs/srd/full/srd-5.2.1.txt sha256=d2425fa863247509c9af77cd4856e254a9ad4216661b948fc99daa67db69c918
 // Regenerate with `npm run srd:artifacts`.
-// tests/unit/rules/class-resources-srd-generation.test.ts fails if it drifts.
+// tests/unit/rules/class-resources-srd-generation.test.ts fails if it drifts, or if any byte of a source changes.
 /**
  * This work includes material from the System Reference Document 5.2.1
  * ("SRD 5.2.1") by Wizards of the Coast LLC, available at
@@ -13,7 +13,7 @@
  */
 import type { SrdClassResourceArtifact } from '../class-resources-srd-reader';
 
-export const BUNDLED_SRD_CLASS_RESOURCES: SrdClassResourceArtifact = {
+export const BUNDLED_SRD_CLASS_RESOURCES = {
   "manifest": [
     {
       "content_key": "2024:class:barbarian",
@@ -599,4 +599,4 @@ export const BUNDLED_SRD_CLASS_RESOURCES: SrdClassResourceArtifact = {
     ]
   },
   "arcane_recovery_description": "You can regain some of your magical energy by studying your spellbook. When you finish a Short Rest, you can choose expended spell slots to recover. The spell slots can have a combined level equal to no more than half your Wizard level (round up), and none of the slots can be level 6 or higher. For example, if you’re a level 4 Wizard, you can recover up to two levels’ worth of spell slots, regaining either one level 2 spell slot or two level 1 spell slots. Once you use this feature, you can’t do so again until you finish a Long Rest."
-};
+} as const satisfies SrdClassResourceArtifact;

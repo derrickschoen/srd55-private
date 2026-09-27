@@ -31,11 +31,8 @@ import type { BundledStoredProjectionV1 } from '../catalog/bundled-content-regis
 import { sha256 } from '../crypto/sha256';
 import { sqlString } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
-import {
-  encodeSpellComponents,
-  parseSpellComponents,
-} from '../domain/spell-components';
-import { encodeSpellRange, parseSpellRange } from '../domain/spell-range';
+import { encodeSpellComponents } from '../domain/spell-components';
+import { encodeSpellRange } from '../domain/spell-range';
 import type { ContentKey } from '../domain/ids';
 import { deepFreeze } from '../domain/deep-freeze';
 import {
@@ -191,10 +188,8 @@ function seedSpellIdentityV1(
   spell: SrdSpellDescription,
   memberships: readonly SrdSpellListMembership[],
 ): DerivedContentIdentityV1<'spell', unknown> {
-  const range = encodeSpellRange(parseSpellRange(spell.range));
-  const components = encodeSpellComponents(
-    parseSpellComponents(spell.components),
-  );
+  const range = encodeSpellRange(spell.range_value);
+  const components = encodeSpellComponents(spell.components_value);
   const projection = projectSpellContentAggregateV1({
     kind: 'spell',
     name: spell.name,
@@ -279,10 +274,8 @@ function writeBundledSpell(
     );
   }
 
-  const range = encodeSpellRange(parseSpellRange(spell.range));
-  const components = encodeSpellComponents(
-    parseSpellComponents(spell.components),
-  );
+  const range = encodeSpellRange(spell.range_value);
+  const components = encodeSpellComponents(spell.components_value);
   ensureBundledStableContentIdentity(db, {
     kind: 'spell',
     contentKey: spell.content_key,

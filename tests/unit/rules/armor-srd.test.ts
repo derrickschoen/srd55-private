@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseSrdArmorTemplates } from '../../../src/rules/armor-srd';
+import { parseSrdArmorTemplates } from '../../../src/rules/armor-srd-reader';
 import armorSource from '../../../docs/srd/source/armor-table.txt?raw';
 
 /**
@@ -12,7 +12,7 @@ import armorSource from '../../../docs/srd/source/armor-table.txt?raw';
  * requirement, and the Shield — whose AC cell is a BONUS rather than a base.
  */
 
-const armor = parseSrdArmorTemplates();
+const armor = parseSrdArmorTemplates(armorSource);
 
 function row(name: string) {
   const found = armor.find((entry) => entry.name === name);
@@ -181,7 +181,7 @@ describe('the armour parse is load-bearing', () => {
     expect(mutated).not.toBe(armorSource);
     const parsed = parseSrdArmorTemplates(mutated);
     expect(parsed.find((entry) => entry.name === 'Plate Armor')?.armor_class).toBe(19);
-    expect(parseSrdArmorTemplates().find((e) => e.name === 'Plate Armor')?.armor_class).toBe(18);
+    expect(parseSrdArmorTemplates(armorSource).find((e) => e.name === 'Plate Armor')?.armor_class).toBe(18);
   });
 
   it('follows the extract when a Dexterity cap changes', () => {

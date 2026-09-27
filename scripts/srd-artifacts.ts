@@ -1,3 +1,12 @@
+import { createHash } from 'node:crypto';
+import {
+  deriveSrdAbilityScoreGenerationArtifact,
+} from '../src/rules/ability-score-generation-srd-reader';
+import { parseSrdArmorTemplates } from '../src/rules/armor-srd-reader';
+import {
+  deriveSrdClassChoiceEntitlementArtifact,
+} from '../src/rules/class-choice-entitlements-srd-reader';
+import { parseSrdClassEquipment } from '../src/rules/class-equipment-srd-reader';
 import {
   parseSrdClassLevelFeatures,
 } from '../src/rules/class-level-features-srd-reader';
@@ -5,10 +14,28 @@ import {
   deriveSrdClassResourceArtifact,
 } from '../src/rules/class-resources-srd-reader';
 import {
+  deriveSrdClassTraitsArtifact,
+  parseSrdClassTraits,
+} from '../src/rules/class-traits-srd-reader';
+import { parseSrdDraconicResilience } from '../src/rules/draconic-resilience-srd-reader';
+import { parseSrdNamedExtraAttackFeatures } from '../src/rules/extra-attack-srd-reader';
+import { parseSrdFeatDefinitions } from '../src/rules/feats-srd-reader';
+import { parseSrdMulticlassEntryGrants } from '../src/rules/multiclass-entry-srd-reader';
+import { deriveSrdOriginsArtifact } from '../src/rules/origins-srd-reader';
+import { deriveSrdSkillAbilitiesArtifact } from '../src/rules/skills-reader';
+import {
   deriveSrdSpellCatalogArtifact,
   SRD_SPELL_LISTS,
   type SrdSpellList,
 } from '../src/rules/spells-srd-reader';
+import { parseSrdSubclasses } from '../src/rules/srd-subclasses-reader';
+import {
+  parseSrdUnarmoredDefenseFeatures,
+} from '../src/rules/unarmored-defense-srd-reader';
+import {
+  deriveSrdWeaponsArtifact,
+  parseSrdWeaponTemplates,
+} from '../src/rules/weapons-srd-reader';
 import {
   deriveBundledCoverageSource,
 } from '../src/simulation/coverage-source';
@@ -17,29 +44,52 @@ import {
  * THE SRD TEXT IS READ AT BUILD TIME, AND ONLY HERE (plus tests).
  *
  * Every rules module used to import its SRD corpus as a `?raw` string and parse
- * it at module evaluation: in every test process, every engine child, and three
- * shipped app chunks that carried the 2.1 MB full SRD. The parsers now take the
- * text as an argument, and this module runs them once per corpus edit:
- * `npm run srd:artifacts` (scripts/generate-srd-artifacts.ts) writes each
- * artifact below, and the runtime modules read the committed artifacts.
+ * it at module evaluation: in every test process, every engine child, and the
+ * shipped app chunks. The parsers now take the text as an argument, and this
+ * module runs them once per corpus edit: `npm run srd:artifacts`
+ * (scripts/generate-srd-artifacts.ts) writes each artifact below, and the
+ * runtime modules read the committed artifacts. No module outside tests, this
+ * generator and its readers reads a `docs/srd` corpus.
  *
- * An artifact is a typed TypeScript module, never edited by hand. Its data is
- * one JSON literal annotated with the reader's own record type, so tsc checks
- * every generated value against the rules vocabulary (a kind, an ability, a
- * damage type) the moment it is written, and the runtime pays no decode for the
- * unbranded majority. Branded values (class content keys, formula levels and
- * counts) are minted back through their validating constructors by the module
- * that reads the artifact.
+ * AN ARTIFACT IS TYPED TS DATA, NEVER EDITED BY HAND (D916, D918). Its data is
+ * one literal, `as const satisfies <DomainType>`: the literals keep their
+ * literal types (a spell's key, a class level, a closed vocabulary member)
+ * and tsc checks every generated value against the domain type the moment it
+ * is written, without widening it to that type. Where a bare literal cannot
+ * satisfy a brand (a class content key, a feat key), the domain type states the
+ * closed set of printed keys and the runtime module mints the brand through
+ * its validating constructor.
  *
- * Each artifact has a drift test that re-derives it from the SRD text with the
- * same readers and fails on any byte difference (`assertSrdArtifactFresh`).
+ * EVERY BYTE OF EVERY SOURCE IS PINNED. The header records each source
+ * corpus's sha256, so an edit the parse ignores (a preamble line, an
+ * extraction note) still makes the committed artifact stale.
+ * `assertSrdArtifactFresh` checks those fingerprints first, then re-derives
+ * the artifact and fails on any byte difference.
  */
 
-/** The SRD corpora the readers parse. Paths are repository-relative. */
+/** Every SRD corpus a reader parses. Paths are repository-relative. */
 export const SRD_CORPUS_PATHS = {
   fullSrd: 'docs/srd/full/srd-5.2.1.txt',
   spellDescriptions: 'docs/srd/source/spell-descriptions.txt',
   classLevelTables: 'docs/srd/source/class-level-tables.txt',
+  abilityScoreGeneration: 'docs/srd/source/ability-score-generation.txt',
+  armorTable: 'docs/srd/source/armor-table.txt',
+  attackClassFeatures: 'docs/srd/source/attack-class-features.txt',
+  backgrounds: 'docs/srd/source/backgrounds.txt',
+  classCoreTraits: 'docs/srd/source/class-core-traits.txt',
+  classExpertise: 'docs/srd/source/class-expertise.txt',
+  classSpellReplacement: 'docs/srd/source/class-spell-replacement.txt',
+  classStartingEquipment: 'docs/srd/source/class-starting-equipment.txt',
+  draconicResilience: 'docs/srd/source/draconic-resilience.txt',
+  extraAttackOtherSources: 'docs/srd/source/extra-attack-other-sources.txt',
+  feats: 'docs/srd/source/feats.txt',
+  multiclassEntryGrants: 'docs/srd/source/multiclass-entry-grants.txt',
+  skillsTable: 'docs/srd/source/skills-table.txt',
+  speciesDescriptions: 'docs/srd/source/species-descriptions.txt',
+  subclasses: 'docs/srd/source/subclasses.txt',
+  unarmoredDefense: 'docs/srd/source/unarmored-defense.txt',
+  weaponMasteryProgression: 'docs/srd/source/weapon-mastery-progression.txt',
+  weaponsTable: 'docs/srd/source/weapons-table.txt',
 } as const;
 
 export const SRD_SPELL_LIST_PATHS = {
@@ -79,13 +129,26 @@ export interface SrdArtifact {
   /** The drift test that re-derives it, for its header. */
   readonly driftTest: string;
   readonly exportName: string;
-  /** The record type the export is annotated with, and where it comes from. */
+  /**
+   * The domain type the literal must satisfy (`satisfies`, never an
+   * annotation: an annotation would widen every literal to the type), the
+   * names it imports, and the module they come from.
+   */
   readonly type: {
-    readonly annotation: string;
-    readonly name: string;
+    readonly satisfies: string;
+    readonly names: readonly string[];
     readonly module: string;
   };
   derive(read: SrdCorpusReader): unknown;
+}
+
+/** The drift test every artifact without a dedicated one is checked by. */
+const ARTIFACTS_DRIFT_TEST = 'tests/unit/tools/srd-artifacts-fresh.test.ts';
+
+function spellListTexts(read: SrdCorpusReader): Record<SrdSpellList, string> {
+  return Object.fromEntries(SRD_SPELL_LISTS.map((list) =>
+    [list, read(SRD_SPELL_LIST_PATHS[list])],
+  )) as Record<SrdSpellList, string>;
 }
 
 export const SRD_ARTIFACTS: readonly SrdArtifact[] = [
@@ -96,8 +159,8 @@ export const SRD_ARTIFACTS: readonly SrdArtifact[] = [
     driftTest: 'tests/unit/rules/class-level-features-srd-generation.test.ts',
     exportName: 'BUNDLED_SRD_CLASS_LEVEL_FEATURES',
     type: {
-      annotation: 'readonly SrdClassLevelFeatures[]',
-      name: 'SrdClassLevelFeatures',
+      satisfies: 'readonly SrdClassLevelFeatures[]',
+      names: ['SrdClassLevelFeatures'],
       module: '../class-level-features-srd-reader',
     },
     derive: (read) => parseSrdClassLevelFeatures(
@@ -111,8 +174,8 @@ export const SRD_ARTIFACTS: readonly SrdArtifact[] = [
     driftTest: 'tests/unit/rules/class-resources-srd-generation.test.ts',
     exportName: 'BUNDLED_SRD_CLASS_RESOURCES',
     type: {
-      annotation: 'SrdClassResourceArtifact',
-      name: 'SrdClassResourceArtifact',
+      satisfies: 'SrdClassResourceArtifact',
+      names: ['SrdClassResourceArtifact'],
       module: '../class-resources-srd-reader',
     },
     derive: (read) => deriveSrdClassResourceArtifact(
@@ -130,15 +193,13 @@ export const SRD_ARTIFACTS: readonly SrdArtifact[] = [
     driftTest: 'tests/unit/rules/spells-srd-generation.test.ts',
     exportName: 'BUNDLED_SRD_SPELL_CATALOG',
     type: {
-      annotation: 'SrdSpellCatalogArtifact',
-      name: 'SrdSpellCatalogArtifact',
+      satisfies: 'SrdSpellCatalogArtifact',
+      names: ['SrdSpellCatalogArtifact'],
       module: '../spells-srd-reader',
     },
     derive: (read) => deriveSrdSpellCatalogArtifact(
       read(SRD_CORPUS_PATHS.spellDescriptions),
-      Object.fromEntries(SRD_SPELL_LISTS.map((list) =>
-        [list, read(SRD_SPELL_LIST_PATHS[list])],
-      )) as Record<SrdSpellList, string>,
+      spellListTexts(read),
     ),
   },
   {
@@ -148,13 +209,245 @@ export const SRD_ARTIFACTS: readonly SrdArtifact[] = [
     driftTest: 'tests/unit/simulation/coverage-source-generation.test.ts',
     exportName: 'BUNDLED_COVERAGE_SOURCE',
     type: {
-      annotation: 'BundledCoverageSource',
-      name: 'BundledCoverageSource',
+      satisfies: 'BundledCoverageSource',
+      names: ['BundledCoverageSource'],
       module: '../coverage-source',
     },
     derive: (read) => deriveBundledCoverageSource(
       read(SRD_CORPUS_PATHS.fullSrd),
       read(SRD_CORPUS_PATHS.spellDescriptions),
+    ),
+  },
+  {
+    path: 'src/rules/generated/ability-score-generation-srd.ts',
+    sources: [SRD_CORPUS_PATHS.abilityScoreGeneration],
+    reader: 'src/rules/ability-score-generation-srd-reader.ts',
+    driftTest: ARTIFACTS_DRIFT_TEST,
+    exportName: 'BUNDLED_SRD_ABILITY_SCORE_GENERATION',
+    type: {
+      satisfies: 'SrdAbilityScoreGenerationArtifact',
+      names: ['SrdAbilityScoreGenerationArtifact'],
+      module: '../ability-score-generation-srd-reader',
+    },
+    derive: (read) => deriveSrdAbilityScoreGenerationArtifact(
+      read(SRD_CORPUS_PATHS.abilityScoreGeneration),
+    ),
+  },
+  {
+    path: 'src/rules/generated/armor-srd.ts',
+    sources: [SRD_CORPUS_PATHS.armorTable],
+    reader: 'src/rules/armor-srd-reader.ts',
+    driftTest: ARTIFACTS_DRIFT_TEST,
+    exportName: 'BUNDLED_SRD_ARMOR_TEMPLATES',
+    type: {
+      satisfies: 'readonly SrdArmorTemplate[]',
+      names: ['SrdArmorTemplate'],
+      module: '../armor-srd-reader',
+    },
+    derive: (read) => parseSrdArmorTemplates(read(SRD_CORPUS_PATHS.armorTable)),
+  },
+  {
+    path: 'src/rules/generated/class-choice-entitlements-srd.ts',
+    sources: [
+      SRD_CORPUS_PATHS.classExpertise,
+      SRD_CORPUS_PATHS.classSpellReplacement,
+      SRD_CORPUS_PATHS.classLevelTables,
+    ],
+    reader: 'src/rules/class-choice-entitlements-srd-reader.ts',
+    driftTest: ARTIFACTS_DRIFT_TEST,
+    exportName: 'BUNDLED_SRD_CLASS_CHOICE_ENTITLEMENTS',
+    type: {
+      satisfies: 'SrdClassChoiceEntitlementArtifact',
+      names: ['SrdClassChoiceEntitlementArtifact'],
+      module: '../class-choice-entitlements-srd-reader',
+    },
+    derive: (read) => deriveSrdClassChoiceEntitlementArtifact(
+      read(SRD_CORPUS_PATHS.classExpertise),
+      read(SRD_CORPUS_PATHS.classSpellReplacement),
+      parseSrdClassLevelFeatures(read(SRD_CORPUS_PATHS.classLevelTables)),
+    ),
+  },
+  {
+    path: 'src/rules/generated/class-equipment-srd.ts',
+    sources: [
+      SRD_CORPUS_PATHS.classStartingEquipment,
+      SRD_CORPUS_PATHS.weaponsTable,
+      SRD_CORPUS_PATHS.armorTable,
+    ],
+    reader: 'src/rules/class-equipment-srd-reader.ts',
+    driftTest: ARTIFACTS_DRIFT_TEST,
+    exportName: 'BUNDLED_SRD_CLASS_EQUIPMENT',
+    type: {
+      satisfies: 'readonly SrdClassEquipment[]',
+      names: ['SrdClassEquipment'],
+      module: '../class-equipment-srd-reader',
+    },
+    derive: (read) => parseSrdClassEquipment(
+      read(SRD_CORPUS_PATHS.classStartingEquipment),
+      parseSrdWeaponTemplates(read(SRD_CORPUS_PATHS.weaponsTable)),
+      parseSrdArmorTemplates(read(SRD_CORPUS_PATHS.armorTable)),
+    ),
+  },
+  {
+    path: 'src/rules/generated/class-traits-srd.ts',
+    sources: [
+      SRD_CORPUS_PATHS.classCoreTraits,
+      SRD_CORPUS_PATHS.attackClassFeatures,
+    ],
+    reader: 'src/rules/class-traits-srd-reader.ts',
+    driftTest: ARTIFACTS_DRIFT_TEST,
+    exportName: 'BUNDLED_SRD_CLASS_TRAITS',
+    type: {
+      satisfies: 'SrdClassTraitsArtifact',
+      names: ['SrdClassTraitsArtifact'],
+      module: '../class-traits-srd-reader',
+    },
+    derive: (read) => deriveSrdClassTraitsArtifact(
+      read(SRD_CORPUS_PATHS.classCoreTraits),
+      read(SRD_CORPUS_PATHS.attackClassFeatures),
+    ),
+  },
+  {
+    path: 'src/rules/generated/draconic-resilience-srd.ts',
+    sources: [SRD_CORPUS_PATHS.draconicResilience],
+    reader: 'src/rules/draconic-resilience-srd-reader.ts',
+    driftTest: ARTIFACTS_DRIFT_TEST,
+    exportName: 'BUNDLED_SRD_DRACONIC_RESILIENCE',
+    type: {
+      satisfies: 'SrdDraconicResilienceFeature',
+      names: ['SrdDraconicResilienceFeature'],
+      module: '../draconic-resilience-srd-reader',
+    },
+    derive: (read) => parseSrdDraconicResilience(
+      read(SRD_CORPUS_PATHS.draconicResilience),
+    ),
+  },
+  {
+    path: 'src/rules/generated/extra-attack-srd.ts',
+    sources: [SRD_CORPUS_PATHS.extraAttackOtherSources],
+    reader: 'src/rules/extra-attack-srd-reader.ts',
+    driftTest: ARTIFACTS_DRIFT_TEST,
+    exportName: 'BUNDLED_SRD_NAMED_EXTRA_ATTACK_FEATURES',
+    type: {
+      satisfies: 'readonly SrdNamedFeature[]',
+      names: ['SrdNamedFeature'],
+      module: '../extra-attack-srd-reader',
+    },
+    derive: (read) => parseSrdNamedExtraAttackFeatures(
+      read(SRD_CORPUS_PATHS.extraAttackOtherSources),
+    ),
+  },
+  {
+    path: 'src/rules/generated/feats-srd.ts',
+    sources: [SRD_CORPUS_PATHS.feats],
+    reader: 'src/rules/feats-srd-reader.ts',
+    driftTest: ARTIFACTS_DRIFT_TEST,
+    exportName: 'BUNDLED_SRD_FEAT_DEFINITIONS',
+    type: {
+      satisfies: 'readonly SrdFeatDefinitionRecord[]',
+      names: ['SrdFeatDefinitionRecord'],
+      module: '../feats-srd-reader',
+    },
+    derive: (read) => parseSrdFeatDefinitions(read(SRD_CORPUS_PATHS.feats)),
+  },
+  {
+    path: 'src/rules/generated/multiclass-entry-srd.ts',
+    sources: [
+      SRD_CORPUS_PATHS.multiclassEntryGrants,
+      SRD_CORPUS_PATHS.classCoreTraits,
+    ],
+    reader: 'src/rules/multiclass-entry-srd-reader.ts',
+    driftTest: ARTIFACTS_DRIFT_TEST,
+    exportName: 'BUNDLED_SRD_MULTICLASS_ENTRY_GRANTS',
+    type: {
+      satisfies: 'readonly SrdMulticlassEntryGrant[]',
+      names: ['SrdMulticlassEntryGrant'],
+      module: '../multiclass-entry-srd-reader',
+    },
+    derive: (read) => parseSrdMulticlassEntryGrants(
+      read(SRD_CORPUS_PATHS.multiclassEntryGrants),
+      parseSrdClassTraits(read(SRD_CORPUS_PATHS.classCoreTraits)),
+    ),
+  },
+  {
+    path: 'src/rules/generated/origins-srd.ts',
+    sources: [
+      SRD_CORPUS_PATHS.speciesDescriptions,
+      SRD_CORPUS_PATHS.backgrounds,
+    ],
+    reader: 'src/rules/origins-srd-reader.ts',
+    driftTest: ARTIFACTS_DRIFT_TEST,
+    exportName: 'BUNDLED_SRD_ORIGINS',
+    type: {
+      satisfies: 'SrdOriginsArtifact',
+      names: ['SrdOriginsArtifact'],
+      module: '../origins-srd-reader',
+    },
+    derive: (read) => deriveSrdOriginsArtifact(
+      read(SRD_CORPUS_PATHS.speciesDescriptions),
+      read(SRD_CORPUS_PATHS.backgrounds),
+    ),
+  },
+  {
+    path: 'src/rules/generated/skills.ts',
+    sources: [SRD_CORPUS_PATHS.skillsTable],
+    reader: 'src/rules/skills-reader.ts',
+    driftTest: ARTIFACTS_DRIFT_TEST,
+    exportName: 'BUNDLED_SRD_SKILL_ABILITIES',
+    type: {
+      satisfies: 'SrdSkillAbilitiesArtifact',
+      names: ['SrdSkillAbilitiesArtifact'],
+      module: '../skills-reader',
+    },
+    derive: (read) => deriveSrdSkillAbilitiesArtifact(
+      read(SRD_CORPUS_PATHS.skillsTable),
+    ),
+  },
+  {
+    path: 'src/rules/generated/srd-subclasses.ts',
+    sources: [SRD_CORPUS_PATHS.subclasses],
+    reader: 'src/rules/srd-subclasses-reader.ts',
+    driftTest: ARTIFACTS_DRIFT_TEST,
+    exportName: 'BUNDLED_SRD_SUBCLASS_MANIFEST',
+    type: {
+      satisfies: 'SrdSubclassManifest',
+      names: ['SrdSubclassManifest'],
+      module: '../srd-subclasses-reader',
+    },
+    derive: (read) => parseSrdSubclasses(read(SRD_CORPUS_PATHS.subclasses)),
+  },
+  {
+    path: 'src/rules/generated/unarmored-defense-srd.ts',
+    sources: [SRD_CORPUS_PATHS.unarmoredDefense],
+    reader: 'src/rules/unarmored-defense-srd-reader.ts',
+    driftTest: ARTIFACTS_DRIFT_TEST,
+    exportName: 'BUNDLED_SRD_UNARMORED_DEFENSE_FEATURES',
+    type: {
+      satisfies: 'readonly SrdUnarmoredDefenseFeature[]',
+      names: ['SrdUnarmoredDefenseFeature'],
+      module: '../unarmored-defense-srd-reader',
+    },
+    derive: (read) => parseSrdUnarmoredDefenseFeatures(
+      read(SRD_CORPUS_PATHS.unarmoredDefense),
+    ),
+  },
+  {
+    path: 'src/rules/generated/weapons-srd.ts',
+    sources: [
+      SRD_CORPUS_PATHS.weaponsTable,
+      SRD_CORPUS_PATHS.weaponMasteryProgression,
+    ],
+    reader: 'src/rules/weapons-srd-reader.ts',
+    driftTest: ARTIFACTS_DRIFT_TEST,
+    exportName: 'BUNDLED_SRD_WEAPONS',
+    type: {
+      satisfies: 'SrdWeaponsArtifact',
+      names: ['SrdWeaponsArtifact'],
+      module: '../weapons-srd-reader',
+    },
+    derive: (read) => deriveSrdWeaponsArtifact(
+      read(SRD_CORPUS_PATHS.weaponsTable),
+      read(SRD_CORPUS_PATHS.weaponMasteryProgression),
     ),
   },
 ];
@@ -215,6 +508,26 @@ function assertJsonFaithful(value: unknown, at: string): void {
   throw new SrdArtifactError(`${at} is a ${typeof value}, which JSON cannot carry.`);
 }
 
+/**
+ * A corpus's whole-text fingerprint: the sha256 of its UTF-8 bytes. The text
+ * must not hold U+FFFD, the one character a decoder substitutes for bytes it
+ * could not read: with it excluded, decoding is one-to-one, so this digest is
+ * the digest of the file's bytes and any byte edit changes it.
+ */
+export function srdCorpusFingerprint(path: string, text: string): string {
+  if (text.includes('�')) {
+    throw new SrdArtifactError(
+      `${path} holds U+FFFD, so its text no longer determines its bytes; fix its encoding.`,
+    );
+  }
+  return createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+/** The header line that pins one source corpus. */
+function fingerprintLine(path: string, text: string): string {
+  return `//   ${path} sha256=${srdCorpusFingerprint(path, text)}`;
+}
+
 const SRD_ATTRIBUTION = [
   'This work includes material from the System Reference Document 5.2.1',
   '("SRD 5.2.1") by Wizards of the Coast LLC, available at',
@@ -239,35 +552,64 @@ export function composeSrdArtifact(
   assertJsonFaithful(value, artifact.exportName);
   return [
     '// GENERATED FILE — DO NOT EDIT BY HAND.',
-    `// Source of truth, read by ${artifact.reader}:`,
-    ...artifact.sources.map((source) => `//   ${source}`),
+    `// Source of truth, read by ${artifact.reader}, each source pinned by its sha256:`,
+    ...artifact.sources.map((source) => fingerprintLine(source, read(source))),
     '// Regenerate with `npm run srd:artifacts`.',
-    `// ${artifact.driftTest} fails if it drifts.`,
+    `// ${artifact.driftTest} fails if it drifts, or if any byte of a source changes.`,
     '/**',
     ...SRD_ATTRIBUTION.map((line) => ` * ${line}`),
     ' */',
-    `import type { ${artifact.type.name} } from '${artifact.type.module}';`,
+    `import type { ${artifact.type.names.join(', ')} } from '${artifact.type.module}';`,
     '',
-    `export const ${artifact.exportName}: ${artifact.type.annotation} = ${JSON.stringify(value, null, 2)};`,
+    `export const ${artifact.exportName} = ${JSON.stringify(value, null, 2)} as const satisfies ${artifact.type.satisfies};`,
     '',
   ].join('\n');
 }
 
 /**
- * The drift check every artifact's test runs: the committed text must be
- * byte-for-byte what the readers derive from the SRD text now.
+ * The first half of the drift check: each source's fingerprint line must be in
+ * the committed header, so an edit anywhere in a corpus fails here and names
+ * the corpus, even where no parse reads the edited bytes. It derives nothing.
+ */
+export function assertSrdArtifactSourcesPinned(
+  artifact: SrdArtifact,
+  read: SrdCorpusReader,
+  committed: string,
+): void {
+  const committedLines = committed.split('\n');
+  for (const source of artifact.sources) {
+    const expected = fingerprintLine(source, read(source));
+    if (!committedLines.includes(expected)) {
+      const pinned = committedLines.find((line) =>
+        line.startsWith(`//   ${source} sha256=`),
+      );
+      throw new SrdArtifactError(
+        `${artifact.path} is stale: ${source} is not the corpus it was generated from ` +
+          `(pinned ${pinned === undefined ? 'nothing' : pinned.slice(pinned.indexOf('sha256='))}, ` +
+          `the corpus is now ${expected.slice(expected.indexOf('sha256='))}). ` +
+          'Run `npm run srd:artifacts`; never edit it by hand.',
+      );
+    }
+  }
+}
+
+/**
+ * The drift check every artifact's test runs. FIRST THE SOURCES
+ * ({@link assertSrdArtifactSourcesPinned}); THEN THE BYTES: the committed text
+ * must be exactly what the readers derive from the SRD text now.
  */
 export function assertSrdArtifactFresh(
   artifact: SrdArtifact,
   read: SrdCorpusReader,
   committed: string,
 ): void {
+  assertSrdArtifactSourcesPinned(artifact, read, committed);
   const composed = composeSrdArtifact(artifact, read);
   if (composed === committed) {
     return;
   }
-  const composedLines = composed.split('\n');
   const committedLines = committed.split('\n');
+  const composedLines = composed.split('\n');
   const line = composedLines.findIndex(
     (text, index) => text !== committedLines[index],
   );

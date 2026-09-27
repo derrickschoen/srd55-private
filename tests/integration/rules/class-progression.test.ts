@@ -20,9 +20,9 @@ import {
   HEADING_ONLY_DESCRIPTION,
 } from '../../../src/domain/subclass-feature-description';
 import {
-  parseSrdSubclasses,
   srdSubclassClassNames,
-} from '../../../src/rules/srd-subclasses';
+} from '../../../src/rules/srd-subclasses-reader';
+import { bundledSrdSubclassManifest } from '../../../src/rules/srd-subclasses';
 import { openTestDatabase } from '../../helpers/open-db';
 
 function defect(run: () => unknown): unknown {
@@ -266,7 +266,7 @@ describe('persisted class progression catalog', () => {
       row.rows === 20 && row.first_level === 1 && row.last_level === 20,
     )).toBe(true);
 
-    const parsed = parseSrdSubclasses();
+    const parsed = bundledSrdSubclassManifest();
     expect(
       db.allRaw(`
         SELECT class.name AS class_name, subclass.name AS subclass_name,

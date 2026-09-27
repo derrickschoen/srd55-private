@@ -5,136 +5,29 @@
  * Commons Attribution 4.0 International License, available at
  * https://creativecommons.org/licenses/by/4.0/legalcode.
  *
- * ABILITY SCORE GENERATION, FROM THE SRD EXTRACT (B1, D64).
- *
- * The standard array, the point-buy budget and the complete point-cost table
- * are PARSED FROM `docs/srd/source/ability-score-generation.txt` — never
- * hand-typed here and never taken from the unit test that previously held the
- * only parser. The extract is the oracle; a module restating the numbers
- * would be a second copy that drifts, and the B1-ARRAY control exists to
- * prove a changed extract fails against `docs/srd/source/`, not against our
- * own output.
- *
- * Random Generation (4d6 drop lowest) is in the extract and deliberately NOT
- * modelled: D55 deleted Roll in Order outright — not deferred — and D64's
- * three offered methods are standard array, point buy and manual entry.
- *
- * Parsing follows the fail-fast pattern of the sibling `*-srd.ts` modules: a
- * malformed extract throws at module evaluation, because a guessed rule
- * number would be a wrong number wearing a fact's clothes (D33).
+ * ABILITY SCORE GENERATION (B1, D64): the standard array, the point-buy
+ * budget and the complete point-cost table, parsed from
+ * `docs/srd/source/ability-score-generation.txt` AT BUILD TIME by
+ * `ability-score-generation-srd-reader.ts` and read here from the generated
+ * artifact (`generated/ability-score-generation-srd.ts`, written by
+ * `npm run srd:artifacts`). This module imports no SRD text.
  */
+import { deepFreeze } from '../domain/deep-freeze';
+import type { StandardArrayScores } from './ability-score-generation-srd-reader';
+import { BUNDLED_SRD_ABILITY_SCORE_GENERATION } from './generated/ability-score-generation-srd';
 
-import extract from '../../docs/srd/source/ability-score-generation.txt?raw';
-
-export type SrdAbilityScoreGenerationSection =
-  | 'standard_array'
-  | 'point_cost';
-
-const SRD_ABILITY_SCORE_SECTION_MESSAGES: Readonly<
-  Record<SrdAbilityScoreGenerationSection, string>
-> = {
-  standard_array:
-    'SRD extract: Standard Array wording is absent or unrecognised.',
-  point_cost: 'SRD extract: Point Cost wording is absent or unrecognised.',
-};
-
-export class SrdAbilityScoreGenerationWordingError extends Error {
-  override readonly name = 'SrdAbilityScoreGenerationWordingError' as const;
-  constructor(readonly section: SrdAbilityScoreGenerationSection) {
-    super(SRD_ABILITY_SCORE_SECTION_MESSAGES[section]);
-  }
-}
-
-export class SrdStandardArrayShapeError extends Error {
-  override readonly name = 'SrdStandardArrayShapeError' as const;
-  constructor() {
-    super('SRD extract: Standard Array must list six integers.');
-  }
-}
-
-export class SrdPointCostDuplicateScoreError extends Error {
-  override readonly name = 'SrdPointCostDuplicateScoreError' as const;
-  constructor(readonly score: number) {
-    super(`SRD extract: point cost for score ${String(score)} appears twice.`);
-  }
-}
-
-export class SrdPointCostTableMissingError extends Error {
-  override readonly name = 'SrdPointCostTableMissingError' as const;
-  constructor() {
-    super(
-      'SRD extract: the Ability Score Point Costs table is absent or unrecognised.',
-    );
-  }
-}
-
-function normalized(source: string): string {
-  return source.replace(/\s+/gu, ' ').trim();
-}
-
-export function parseStandardArray(source: string): readonly number[] {
-  const match = normalized(source).match(
-    /Standard Array\. Use the following six scores for your abilities: (?<scores>[\d, ]+)\./u,
-  );
-  const scores = match?.groups?.scores;
-  if (scores === undefined) {
-    throw new SrdAbilityScoreGenerationWordingError('standard_array');
-  }
-  const values = scores.split(', ').map(Number);
-  if (values.length !== 6 || values.some((value) => !Number.isInteger(value))) {
-    throw new SrdStandardArrayShapeError();
-  }
-  return values;
-}
-
-export function parsePointBudget(source: string): number {
-  const match = normalized(source).match(
-    /Point Cost\. You have (?<points>\d+) points to spend on your ability scores\./u,
-  );
-  const points = match?.groups?.points;
-  if (points === undefined) {
-    throw new SrdAbilityScoreGenerationWordingError('point_cost');
-  }
-  return Number(points);
-}
-
-/**
- * The Ability Score Point Costs table is printed as two side-by-side
- * score/cost column pairs; each physical row carries two entries.
- */
-export function parsePointCosts(source: string): ReadonlyMap<number, number> {
-  const costs = new Map<number, number>();
-  const rowPattern =
-    /^\s+(?<leftScore>\d+)\s+(?<leftCost>\d+)\s+(?<rightScore>\d+)\s+(?<rightCost>\d+)\s*$/gmu;
-  for (const match of source.matchAll(rowPattern)) {
-    const groups = match.groups;
-    if (groups === undefined) {
-      continue;
-    }
-    for (const [score, cost] of [
-      [Number(groups.leftScore), Number(groups.leftCost)],
-      [Number(groups.rightScore), Number(groups.rightCost)],
-    ] as const) {
-      if (costs.has(score)) {
-        throw new SrdPointCostDuplicateScoreError(score);
-      }
-      costs.set(score, cost);
-    }
-  }
-  if (costs.size === 0) {
-    throw new SrdPointCostTableMissingError();
-  }
-  return costs;
-}
+const ARTIFACT = deepFreeze(BUNDLED_SRD_ABILITY_SCORE_GENERATION);
 
 /** The six standard-array scores, in the extract's printed order. */
-export const STANDARD_ARRAY: readonly number[] = parseStandardArray(extract);
+export const STANDARD_ARRAY: StandardArrayScores = ARTIFACT.standard_array;
 
 /** The point-buy budget: the points a character has to spend. */
-export const POINT_BUY_BUDGET: number = parsePointBudget(extract);
+export const POINT_BUY_BUDGET: number = ARTIFACT.point_buy_budget;
 
 /** Point cost by score, exactly the printed table — no interpolation. */
-export const POINT_COSTS: ReadonlyMap<number, number> = parsePointCosts(extract);
+export const POINT_COSTS: ReadonlyMap<number, number> = new Map(
+  ARTIFACT.point_costs,
+);
 
 /** The lowest and highest scores the printed cost table prices. */
 export const POINT_BUY_MIN_SCORE: number = Math.min(...POINT_COSTS.keys());

@@ -24,7 +24,7 @@ import {
   resolveSkillGrants,
   SkillGrantRefusal,
 } from '../../../src/grants/skill-grants';
-import { skillFromLabel } from '../../../src/rules/skills';
+import { skillFromLabel } from '../../../src/rules/skill-labels';
 import { rpcRegistry } from '../../../src/worker/registry';
 import {
   createSharedRpcHarness,

@@ -22,7 +22,7 @@ import {
   CharacterCompletenessQueries,
   type UnfilledSkillGrantsItem,
 } from '../../../src/queries/character-completeness';
-import { skillFromLabel } from '../../../src/rules/skills';
+import { skillFromLabel } from '../../../src/rules/skill-labels';
 import { rpcRegistry } from '../../../src/worker/registry';
 import { createSkillsStep } from '../../../src/ui/screens/guided-builder/skills-step';
 import {

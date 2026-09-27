@@ -11,7 +11,7 @@ import {
   SKILL_GRANT_KEYS,
 } from '../../../builder/contracts';
 import type { Skill } from '../../../domain/enums';
-import { SKILL_LABELS } from '../../../rules/skills';
+import { SKILL_LABELS } from '../../../rules/skill-labels';
 import { CATALOG_IMPORT_ROUTE } from '../character-list/import-backup-controls';
 
 export interface PlannerCompletenessActions {

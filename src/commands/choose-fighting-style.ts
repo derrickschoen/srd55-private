@@ -13,7 +13,7 @@ import { characterLevel } from '../rules/character-level';
 import {
   ADDITIONAL_FIGHTING_STYLE_CONFIG_CONFIG,
   ADDITIONAL_FIGHTING_STYLE_KEY_CONFIG,
-} from '../rules/srd-subclasses';
+} from '../rules/srd-subclasses-reader';
 import { sqlInteger } from '../db/codecs';
 import type { StoredCharacterSnapshotInverse } from './stored-inverses';
 import type { CharacterCommandIntegrity } from './integrity';

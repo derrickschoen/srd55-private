@@ -6,7 +6,8 @@ import {
   type EffectRow,
 } from '../../../src/rules/species-effects';
 import { effectKinds } from '../../../src/domain/enums';
-import { parseSrdSpeciesTemplates } from '../../../src/rules/origins-srd';
+import speciesSource from '../../../docs/srd/source/species-descriptions.txt?raw';
+import { parseSrdSpeciesTemplates } from '../../../src/rules/origins-srd-reader';
 
 /**
  * EVERY MECHANICAL KIND IS PROVED TWICE: once that it TAKES EFFECT, and once
@@ -44,7 +45,7 @@ function effect(
 }
 
 /** The printed traits, so the pairs below use the real rows the seeder writes. */
-const srd = parseSrdSpeciesTemplates();
+const srd = parseSrdSpeciesTemplates(speciesSource);
 
 /**
  * Every effect one printed species grants, flattened and labelled exactly as

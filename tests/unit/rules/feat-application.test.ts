@@ -16,10 +16,8 @@ import {
   featSpellReplacementEntitlement,
   type BundledFeatContentKey,
 } from '../../../src/rules/feat-application';
-import {
-  bundledFeatDefinitions,
-  type SrdFeatDefinition,
-} from '../../../src/rules/feats-srd';
+import { bundledFeatDefinitions } from '../../../src/rules/feats-srd';
+import type { SrdFeatDefinition } from '../../../src/rules/feats-srd-reader';
 
 const PRESENT_FEATURES: FeatFeatureEvidence = {
   fighting_style: 'present',

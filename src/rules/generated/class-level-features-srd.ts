@@ -1,8 +1,8 @@
 // GENERATED FILE — DO NOT EDIT BY HAND.
-// Source of truth, read by src/rules/class-level-features-srd-reader.ts:
-//   docs/srd/source/class-level-tables.txt
+// Source of truth, read by src/rules/class-level-features-srd-reader.ts, each source pinned by its sha256:
+//   docs/srd/source/class-level-tables.txt sha256=a42925cfeff1df54e909947389daf7ae641377a57b456fa7c4bfd9b503a4ea0c
 // Regenerate with `npm run srd:artifacts`.
-// tests/unit/rules/class-level-features-srd-generation.test.ts fails if it drifts.
+// tests/unit/rules/class-level-features-srd-generation.test.ts fails if it drifts, or if any byte of a source changes.
 /**
  * This work includes material from the System Reference Document 5.2.1
  * ("SRD 5.2.1") by Wizards of the Coast LLC, available at
@@ -12,7 +12,7 @@
  */
 import type { SrdClassLevelFeatures } from '../class-level-features-srd-reader';
 
-export const BUNDLED_SRD_CLASS_LEVEL_FEATURES: readonly SrdClassLevelFeatures[] = [
+export const BUNDLED_SRD_CLASS_LEVEL_FEATURES = [
   {
     "class_name": "Barbarian",
     "levels": [
@@ -2403,4 +2403,4 @@ export const BUNDLED_SRD_CLASS_LEVEL_FEATURES: readonly SrdClassLevelFeatures[] 
       }
     ]
   }
-];
+] as const satisfies readonly SrdClassLevelFeatures[];

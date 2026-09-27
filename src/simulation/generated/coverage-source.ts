@@ -1,9 +1,9 @@
 // GENERATED FILE — DO NOT EDIT BY HAND.
-// Source of truth, read by src/simulation/coverage-source.ts:
-//   docs/srd/full/srd-5.2.1.txt
-//   docs/srd/source/spell-descriptions.txt
+// Source of truth, read by src/simulation/coverage-source.ts, each source pinned by its sha256:
+//   docs/srd/full/srd-5.2.1.txt sha256=d2425fa863247509c9af77cd4856e254a9ad4216661b948fc99daa67db69c918
+//   docs/srd/source/spell-descriptions.txt sha256=81c213de67213734b27d65c791b18686770ed3404dd0443d346ec72290057829
 // Regenerate with `npm run srd:artifacts`.
-// tests/unit/simulation/coverage-source-generation.test.ts fails if it drifts.
+// tests/unit/simulation/coverage-source-generation.test.ts fails if it drifts, or if any byte of a source changes.
 /**
  * This work includes material from the System Reference Document 5.2.1
  * ("SRD 5.2.1") by Wizards of the Coast LLC, available at
@@ -13,7 +13,7 @@
  */
 import type { BundledCoverageSource } from '../coverage-source';
 
-export const BUNDLED_COVERAGE_SOURCE: BundledCoverageSource = {
+export const BUNDLED_COVERAGE_SOURCE = {
   "reviewed_headings_in_bundled_srd": [
     "Acid Splash",
     "Advantage/Disadvantage",
@@ -6252,4 +6252,4 @@ export const BUNDLED_COVERAGE_SOURCE: BundledCoverageSource = {
       "end": 3321
     }
   ]
-};
+} as const satisfies BundledCoverageSource;

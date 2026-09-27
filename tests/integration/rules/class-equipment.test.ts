@@ -3,13 +3,17 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import classEquipmentExtract from '../../../docs/srd/source/class-starting-equipment.txt?raw';
 import { DatabaseContext } from '../../../src/db/database';
 import {
+  bundledSrdClassEquipment,
   ensureBundledClassEquipment,
+} from '../../../src/rules/class-equipment-srd';
+import {
   parseSrdClassEquipment,
   SrdClassEquipmentError,
-} from '../../../src/rules/class-equipment-srd';
+} from '../../../src/rules/class-equipment-srd-reader';
+import { bundledArmorTemplates } from '../../../src/rules/armor-srd';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
 import { seedSheetContent } from '../../../src/rules/sheet-srd';
-import { seedWeaponContent } from '../../../src/rules/weapons-srd';
+import { bundledWeaponTemplates, seedWeaponContent } from '../../../src/rules/weapons-srd';
 import { equipmentItemKinds } from '../../../src/domain/enums';
 import { openTestDatabase } from '../../helpers/open-db';
 
@@ -182,7 +186,7 @@ function parserPackages(): Readonly<
   Record<string, Readonly<Record<string, readonly ExpectedItem[]>>>
 > {
   return Object.fromEntries(
-    parseSrdClassEquipment().map((equipment) => [
+    bundledSrdClassEquipment().map((equipment) => [
       equipment.class_name,
       Object.fromEntries(
         [...new Set(equipment.items.map((item) => item.option))].map(
@@ -246,7 +250,11 @@ describe('SRD class starting equipment parser and seed', () => {
       '8Javelins',
     );
     expect(unreadable).not.toBe(classEquipmentExtract);
-    expect(() => parseSrdClassEquipment(unreadable)).toThrow(
+    expect(() => parseSrdClassEquipment(
+      unreadable,
+      bundledWeaponTemplates(),
+      bundledArmorTemplates(),
+    )).toThrow(
       new SrdClassEquipmentError(
         'Fighter equipment option A has an unreadable quantity: 8Javelins',
       ),

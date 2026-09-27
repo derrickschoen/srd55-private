@@ -93,7 +93,7 @@ import type { AuthoringGrant } from '../../src/authoring/contracts';
 import { normalizeCatalogKeyComponent } from '../../src/catalog/catalog-key';
 import type { Skill } from '../../src/domain/enums';
 import { GrantRule } from '../../src/grants/grant-rule';
-import { skillFromLabel } from '../../src/rules/skills';
+import { skillFromLabel } from '../../src/rules/skill-labels';
 import './provenance';
 import {
   readAbilityIncreaseOptions,

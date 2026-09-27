@@ -53,7 +53,7 @@ import { abilities, creatureSizes, damageTypes, skills, weaponMasteryProperties,
 import { hitDieSizes, type HitDieSize } from '../domain/enums';
 import { exactValues } from '../domain/exact-table';
 import { TotalMap } from '../domain/total-map';
-import { SRD_CLASS_NAMES } from '../rules/class-traits-srd';
+import { SRD_CLASS_NAMES } from '../rules/srd-class-names';
 import {
   createGapReport,
   deduplicateGapReports,

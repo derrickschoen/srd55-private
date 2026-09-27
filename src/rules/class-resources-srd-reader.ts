@@ -29,7 +29,12 @@ import {
   type CharacterLevel,
 } from '../domain/enums';
 import type { ClassLevel, ContentKey } from '../domain/ids';
+import {
+  perCharacterLevel,
+  type PerCharacterLevel,
+} from '../domain/per-level';
 import { parseSrdClassLevelFeatures } from './class-level-features-srd-reader';
+import { SRD_CLASS_NAMES, type SrdClassName } from './srd-class-names';
 
 export class SrdClassResourcesError extends Error {
   constructor(message: string) {
@@ -38,25 +43,43 @@ export class SrdClassResourcesError extends Error {
   }
 }
 
-const CLASS_NAMES = [
-  'Barbarian',
-  'Bard',
-  'Cleric',
-  'Druid',
-  'Fighter',
-  'Monk',
-  'Paladin',
-  'Ranger',
-  'Rogue',
-  'Sorcerer',
-  'Warlock',
-  'Wizard',
-] as const;
+const CLASS_NAMES = SRD_CLASS_NAMES;
 
-export type BundledClassName = (typeof CLASS_NAMES)[number];
+export type BundledClassName = SrdClassName;
+
+/** A bundled class's content key as the build records it: one of twelve literals. */
+export type BundledClassContentKeyText = `2024:class:${Lowercase<SrdClassName>}`;
+
+/**
+ * Each class's key, checked PER CLASS by the compiler: the mapped type admits
+ * only the lower-cased name of the class it is keyed by.
+ */
+const BUNDLED_CLASS_CONTENT_KEY_TEXT = {
+  Barbarian: '2024:class:barbarian',
+  Bard: '2024:class:bard',
+  Cleric: '2024:class:cleric',
+  Druid: '2024:class:druid',
+  Fighter: '2024:class:fighter',
+  Monk: '2024:class:monk',
+  Paladin: '2024:class:paladin',
+  Ranger: '2024:class:ranger',
+  Rogue: '2024:class:rogue',
+  Sorcerer: '2024:class:sorcerer',
+  Warlock: '2024:class:warlock',
+  Wizard: '2024:class:wizard',
+} as const satisfies {
+  readonly [Name in SrdClassName]: `2024:class:${Lowercase<Name>}`;
+};
+
+/** The recorded key of one bundled class. */
+export function bundledClassContentKeyText(
+  className: SrdClassName,
+): BundledClassContentKeyText {
+  return BUNDLED_CLASS_CONTENT_KEY_TEXT[className];
+}
 
 function contentKey(className: BundledClassName): ContentKey {
-  return `2024:class:${className.toLowerCase()}` as ContentKey;
+  return BUNDLED_CLASS_CONTENT_KEY_TEXT[className] as string as ContentKey;
 }
 
 /** The twelve bundled class content keys, in source order. */
@@ -142,7 +165,8 @@ export interface SrdClassResourceLadder {
   readonly content_key: ContentKey;
   readonly class_name: BundledClassName;
   readonly resource_kind: ClassResourceKind;
-  readonly maxima: readonly number[];
+  /** The table's maximum at each class level: index `level - 1`, 0 before acquisition. */
+  readonly maxima: PerCharacterLevel<number>;
 }
 
 export interface SrdClassResourceManifestEntry {
@@ -297,11 +321,18 @@ function parseLadder(
   ) {
     throw new SrdClassResourcesError(`${className} table does not enumerate resource levels 1..20.`);
   }
+  const ladder = perCharacterLevel(
+    characterLevels.map((level) => maxima.get(level) as number),
+  );
+  /* c8 ignore next 3 -- the check above proved all twenty levels. */
+  if (ladder === null) {
+    throw new SrdClassResourcesError(`${className} table does not enumerate resource levels 1..20.`);
+  }
   return {
     content_key: contentKey(className),
     class_name: className,
     resource_kind: configuration.kind,
-    maxima: characterLevels.map((level) => maxima.get(level) as number),
+    maxima: ladder,
   };
 }
 
@@ -723,7 +754,7 @@ export function parseSrdClassResourceFormulaManifest(
  */
 export interface ClassResourceFormulaColumns {
   readonly formula_kind: ClassResourceFormula['kind'];
-  readonly minimum_class_level: number;
+  readonly minimum_class_level: CharacterLevel;
   readonly fixed_count: number | null;
   readonly ability: ResourceFormulaAbility | null;
   readonly multiplier: number | null;
@@ -753,21 +784,21 @@ export function formulaColumns(
  * back through `bundledClassContentKey` and `decodeClassResourceFormula`.
  */
 export interface SrdClassResourceLadderRecord {
-  readonly content_key: string;
+  readonly content_key: BundledClassContentKeyText;
   readonly class_name: BundledClassName;
   readonly resource_kind: ClassResourceKind;
-  readonly maxima: readonly number[];
+  readonly maxima: PerCharacterLevel<number>;
 }
 
 export interface SrdClassResourceManifestRecord {
-  readonly content_key: string;
+  readonly content_key: BundledClassContentKeyText;
   readonly class_name: BundledClassName;
   readonly expected_resource_kinds: readonly ClassResourceKind[];
   readonly ladders: readonly SrdClassResourceLadderRecord[];
 }
 
 export interface SrdClassResourceFormulaRecord {
-  readonly content_key: string;
+  readonly content_key: BundledClassContentKeyText;
   readonly class_name: BundledClassName;
   readonly resource_kind: ClassFormulaResourceKind;
   readonly formula: ClassResourceFormulaColumns;
@@ -775,7 +806,7 @@ export interface SrdClassResourceFormulaRecord {
 }
 
 export interface SrdUnmodelledClassResourceRecord {
-  readonly content_key: string;
+  readonly content_key: BundledClassContentKeyText;
   readonly class_name: BundledClassName;
   readonly resource_kind: UnmodelledClassResourceFeature;
   readonly citation: string;
@@ -800,13 +831,31 @@ export function deriveSrdClassResourceArtifact(
     tableSource,
   );
   return {
-    manifest: parseSrdClassResourceManifest(tableSource),
+    manifest: parseSrdClassResourceManifest(tableSource).map((entry) => ({
+      content_key: bundledClassContentKeyText(entry.class_name),
+      class_name: entry.class_name,
+      expected_resource_kinds: entry.expected_resource_kinds,
+      ladders: entry.ladders.map((ladder) => ({
+        content_key: bundledClassContentKeyText(ladder.class_name),
+        class_name: ladder.class_name,
+        resource_kind: ladder.resource_kind,
+        maxima: ladder.maxima,
+      })),
+    })),
     formula_manifest: {
       formulas: formulaManifest.formulas.map((entry) => ({
-        ...entry,
+        content_key: bundledClassContentKeyText(entry.class_name),
+        class_name: entry.class_name,
+        resource_kind: entry.resource_kind,
         formula: formulaColumns(entry.formula),
+        citation: entry.citation,
       })),
-      unmodelled: formulaManifest.unmodelled,
+      unmodelled: formulaManifest.unmodelled.map((entry) => ({
+        content_key: bundledClassContentKeyText(entry.class_name),
+        class_name: entry.class_name,
+        resource_kind: entry.resource_kind,
+        citation: entry.citation,
+      })),
     },
     arcane_recovery_description: srdArcaneRecoveryDescription(fullSource),
   };

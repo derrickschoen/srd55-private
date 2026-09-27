@@ -5,7 +5,7 @@ import { seedClassProgressions } from '../../../src/rules/class-progression-look
 import type {
   SrdSubclassDefinition,
   SrdSubclassManifest,
-} from '../../../src/rules/srd-subclasses';
+} from '../../../src/rules/srd-subclasses-reader';
 import { openTestDatabase } from '../../helpers/open-db';
 
 const IDENTITY_PERTURBATIONS = [
@@ -21,7 +21,7 @@ const connections: Database[] = [];
 
 beforeEach(() => {
   // open-db imports the application bootstrap, which loads the real seed
-  // module before this file's tests install their narrow parser doubles.
+  // module before this file's tests install their narrow catalog doubles.
   vi.resetModules();
 });
 
@@ -110,8 +110,8 @@ describe('SRD subclass seed identity mutation guards', () => {
           >();
           return {
             ...actual,
-            parseSrdSubclasses: () =>
-              perturbIdentity(actual.parseSrdSubclasses(), field),
+            bundledSrdSubclassManifest: () =>
+              perturbIdentity(actual.bundledSrdSubclassManifest(), field),
           };
         },
       );
@@ -138,7 +138,7 @@ describe('SRD subclass seed identity mutation guards', () => {
     },
   );
 
-  it('parses each immutable seed source only once', async () => {
+  it('reads each immutable seed source only once', async () => {
     const subclassParser = vi.fn();
     const resilienceParser = vi.fn();
     vi.doMock(
@@ -147,8 +147,8 @@ describe('SRD subclass seed identity mutation guards', () => {
         const actual = await importOriginal<
           typeof import('../../../src/rules/srd-subclasses')
         >();
-        subclassParser.mockImplementation(actual.parseSrdSubclasses);
-        return { ...actual, parseSrdSubclasses: subclassParser };
+        subclassParser.mockImplementation(actual.bundledSrdSubclassManifest);
+        return { ...actual, bundledSrdSubclassManifest: subclassParser };
       },
     );
     vi.doMock(
@@ -157,8 +157,8 @@ describe('SRD subclass seed identity mutation guards', () => {
         const actual = await importOriginal<
           typeof import('../../../src/rules/draconic-resilience-srd')
         >();
-        resilienceParser.mockImplementation(actual.parseSrdDraconicResilience);
-        return { ...actual, parseSrdDraconicResilience: resilienceParser };
+        resilienceParser.mockImplementation(actual.bundledSrdDraconicResilience);
+        return { ...actual, bundledSrdDraconicResilience: resilienceParser };
       },
     );
     const { bundledSrdSubclassDefinitionContentKeys } = await import(

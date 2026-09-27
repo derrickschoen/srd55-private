@@ -1,15 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import entryGrantsExtract from '../../../docs/srd/source/multiclass-entry-grants.txt?raw';
+import coreTraitsExtract from '../../../docs/srd/source/class-core-traits.txt?raw';
 import {
   multiclassSkillColumns,
-  parseSrdMulticlassEntryGrants,
+  parseSrdMulticlassEntryGrants as parseEntryGrants,
   SrdMulticlassEntryError,
   type SrdMulticlassEntryGrant,
-} from '../../../src/rules/multiclass-entry-srd';
+} from '../../../src/rules/multiclass-entry-srd-reader';
 import {
-  parseSrdClassTraits,
+  parseSrdClassTraits as parseTraits,
   type SrdClassTraits,
-} from '../../../src/rules/class-traits-srd';
+} from '../../../src/rules/class-traits-srd-reader';
+
+/** The readers over the committed extracts, or an edited copy / altered traits. */
+const parseSrdClassTraits = (): SrdClassTraits[] => parseTraits(coreTraitsExtract);
+const parseSrdMulticlassEntryGrants = (
+  extract: string = entryGrantsExtract,
+  traits: readonly SrdClassTraits[] = parseSrdClassTraits(),
+): SrdMulticlassEntryGrant[] => parseEntryGrants(extract, traits);
 
 /**
  * THE TWELVE "AS A MULTICLASS CHARACTER" CLAUSES, PARSED, AGAINST A TABLE READ
@@ -130,7 +138,9 @@ function traitsFor(overrides: Partial<SrdClassTraits> = {}): SrdClassTraits[] {
 
 describe('the multiclass entry grants, parsed from the extract', () => {
   const parsed = parseSrdMulticlassEntryGrants();
-  const byName = new Map(parsed.map((grant) => [grant.class_name, grant]));
+  const byName = new Map<string, SrdMulticlassEntryGrant>(
+    parsed.map((grant) => [grant.class_name, grant]),
+  );
 
   it('produces exactly the twelve printed classes', () => {
     expect(parsed).toHaveLength(12);

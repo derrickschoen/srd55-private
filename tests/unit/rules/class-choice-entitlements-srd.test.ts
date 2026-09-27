@@ -3,11 +3,21 @@ import expertiseSource from '../../../docs/srd/source/class-expertise.txt?raw';
 import spellReplacementSource from '../../../docs/srd/source/class-spell-replacement.txt?raw';
 import {
   expertiseEntitlementsForClassName,
-  parseSrdClassSpellReplacementPolicies,
-  parseSrdExpertiseEntitlements,
   spellReplacementPolicyForClassName,
-  SrdClassChoiceEntitlementError,
 } from '../../../src/rules/class-choice-entitlements-srd';
+import {
+  parseSrdClassSpellReplacementPolicies as parseReplacement,
+  parseSrdExpertiseEntitlements as parseExpertise,
+  SrdClassChoiceEntitlementError,
+} from '../../../src/rules/class-choice-entitlements-srd-reader';
+import { bundledSrdClassLevelFeatures } from '../../../src/rules/class-level-features-srd';
+
+/** The readers over the committed extracts (or an edited copy), checked against the class tables. */
+const parseSrdExpertiseEntitlements = (source: string = expertiseSource) =>
+  parseExpertise(source, bundledSrdClassLevelFeatures());
+const parseSrdClassSpellReplacementPolicies = (
+  source: string = spellReplacementSource,
+) => parseReplacement(source, bundledSrdClassLevelFeatures());
 
 describe('sourced class choice entitlements', () => {
   it('pins every Expertise level, count and pool by hand', () => {

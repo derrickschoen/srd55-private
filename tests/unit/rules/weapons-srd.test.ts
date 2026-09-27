@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import weaponsTableSource from '../../../docs/srd/source/weapons-table.txt?raw';
+import masteryProgressionSource from '../../../docs/srd/source/weapon-mastery-progression.txt?raw';
+import { WEAPON_MASTERY_GRANTS } from '../../../src/rules/weapons-srd';
 import {
   parseSrdWeaponTemplates,
   parseWeaponMasteryProgressions,
-  WEAPON_MASTERY_GRANTS,
-} from '../../../src/rules/weapons-srd';
+} from '../../../src/rules/weapons-srd-reader';
 
 /**
  * THE ORACLE IS THE EXTRACT, READ BY A HUMAN — NOT THE PARSER'S OUTPUT.
@@ -19,7 +21,7 @@ import {
  * different naive implementation.
  */
 
-const templates = parseSrdWeaponTemplates();
+const templates = parseSrdWeaponTemplates(weaponsTableSource);
 
 function template(name: string) {
   const found = templates.find((entry) => entry.name === name);
@@ -217,7 +219,7 @@ describe('SRD weapons table', () => {
 });
 
 describe('weapon mastery progression tables', () => {
-  const progressions = parseWeaponMasteryProgressions();
+  const progressions = parseWeaponMasteryProgressions(masteryProgressionSource);
 
   function counts(className: string): ReadonlyMap<number, number> {
     const found = progressions.find(
@@ -292,7 +294,7 @@ describe('weapon mastery progression tables', () => {
 describe('which classes we claim to have counts for', () => {
   it('claims sourced counts only for the classes whose tables are bundled', () => {
     const parsed = new Set(
-      parseWeaponMasteryProgressions().map((entry) => entry.class_name),
+      parseWeaponMasteryProgressions(masteryProgressionSource).map((entry) => entry.class_name),
     );
     for (const [name, grant] of Object.entries(WEAPON_MASTERY_GRANTS)) {
       if (grant === 'counts_known') {

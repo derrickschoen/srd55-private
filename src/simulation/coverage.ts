@@ -514,7 +514,9 @@ type SaveClauseDiscriminator =
  * through the same reader function the text path uses.
  */
 const sourceCoverage = saveDamageCoverageFromClauseParse({
-  clauses_by_heading: new Map(BUNDLED_COVERAGE_SOURCE.clauses_by_heading),
+  clauses_by_heading: new Map<string, readonly SourceDerivedSaveClause[]>(
+    BUNDLED_COVERAGE_SOURCE.clauses_by_heading,
+  ),
   raw_clause_count: BUNDLED_COVERAGE_SOURCE.raw_clause_count,
   broad_suspects: BUNDLED_COVERAGE_SOURCE.broad_suspects,
 });

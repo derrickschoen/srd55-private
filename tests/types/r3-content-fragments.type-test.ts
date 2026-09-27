@@ -14,7 +14,7 @@ import type {
   FeatContentAggregateV1,
 } from '../../src/catalog/source-content-projector-v1';
 import type { FeatDefinitionForApplication } from '../../src/builder/level-up-wizard';
-import type { SrdFeatDefinition } from '../../src/rules/feats-srd';
+import type { SrdFeatDefinition } from '../../src/rules/feats-srd-reader';
 
 type Assert<T extends true> = T;
 type Exact<Left, Right> =

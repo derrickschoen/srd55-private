@@ -26,8 +26,10 @@ import {
 import { characterLevel } from '../../../src/rules/character-level';
 import type { ExtraAttackGrant } from '../../../src/rules/extra-attack';
 import { hitDieSizes } from '../../../src/domain/enums';
-import { parseSkillAbilities } from '../../../src/rules/skills';
-import { parseSrdArmorTemplates } from '../../../src/rules/armor-srd';
+import skillsTableSource from '../../../docs/srd/source/skills-table.txt?raw';
+import armorTableSource from '../../../docs/srd/source/armor-table.txt?raw';
+import { parseSkillAbilities } from '../../../src/rules/skills-reader';
+import { parseSrdArmorTemplates } from '../../../src/rules/armor-srd-reader';
 import type { ClassDefinitionId, ClassLevel } from '../../../src/domain/ids';
 import type {
   ClassResourceFormula,
@@ -716,7 +718,7 @@ describe('hit points', () => {
 });
 
 describe('armor class', () => {
-  const templates = parseSrdArmorTemplates();
+  const templates = parseSrdArmorTemplates(armorTableSource);
   const template = (name: string): SheetArmor => {
     const found = templates.find((entry) => entry.name === name);
     if (found === undefined) {
@@ -1332,7 +1334,7 @@ describe('skills, initiative and passive Perception', () => {
   });
 
   it('maps every one of the eighteen skills to an ability', () => {
-    const map = parseSkillAbilities();
+    const map = parseSkillAbilities(skillsTableSource);
     expect(map.size).toBe(18);
     // Spot checks transcribed from the Skills table, one per ability, plus the
     // skill no class list contains.

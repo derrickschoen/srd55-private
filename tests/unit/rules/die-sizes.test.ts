@@ -35,7 +35,7 @@ import {
 import {
   parseSrdClassTraits,
   parseSrdMartialArtsDice,
-} from '../../../src/rules/class-traits-srd';
+} from '../../../src/rules/class-traits-srd-reader';
 
 const PROJECT_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const PROBE = 'docs/type-probes/die-size.probe.ts';
@@ -112,7 +112,7 @@ describe('the hit die subset', () => {
    * that is not declared, because `hitDie` throws.
    */
   it('has no member the twelve classes never use', () => {
-    const parsed = new Set(parseSrdClassTraits().map((entry) => entry.hit_die));
+    const parsed = new Set(parseSrdClassTraits(coreTraitsExtract).map((entry) => entry.hit_die));
     expect([...parsed].sort((a, b) => a - b)).toEqual([...hitDieSizes]);
   });
 
@@ -155,7 +155,7 @@ describe('the Martial Arts die subset', () => {
    */
   it('is exactly the four sizes the twenty printed rows use', () => {
     expect([...martialArtsDieSizes]).toEqual([6, 8, 10, 12]);
-    const parsed = parseSrdMartialArtsDice();
+    const parsed = parseSrdMartialArtsDice(attackFeaturesExtract);
     expect(parsed.size).toBe(20);
     const counts = new Map<number, number>();
     for (const die of parsed.values()) {

@@ -24,6 +24,11 @@ import {
   characterLevels,
   type CharacterLevel,
 } from '../domain/enums';
+import {
+  perCharacterLevel,
+  type PerCharacterLevel,
+} from '../domain/per-level';
+import { isSrdClassName, type SrdClassName } from './srd-class-names';
 
 export const classFeatureEntitlementKinds = [
   'ability_score_improvement',
@@ -37,7 +42,7 @@ export type ClassFeatureEntitlementKind =
   (typeof classFeatureEntitlementKinds)[number];
 
 export interface SrdClassLevelFeatureCell {
-  readonly class_name: string;
+  readonly class_name: SrdClassName;
   readonly class_level: CharacterLevel;
   /** Whitespace-normalized, reassembled text from the one Features cell. */
   readonly feature_cell: string;
@@ -47,8 +52,9 @@ export interface SrdClassLevelFeatureCell {
 }
 
 export interface SrdClassLevelFeatures {
-  readonly class_name: string;
-  readonly levels: readonly SrdClassLevelFeatureCell[];
+  readonly class_name: SrdClassName;
+  /** One cell per class level: index `level - 1`. */
+  readonly levels: PerCharacterLevel<SrdClassLevelFeatureCell>;
 }
 
 export class SrdClassLevelFeaturesError extends Error {
@@ -67,7 +73,7 @@ function isCharacterLevel(value: number): value is CharacterLevel {
 }
 
 interface TableSection {
-  readonly className: string;
+  readonly className: SrdClassName;
   readonly lines: readonly string[];
 }
 
@@ -80,7 +86,11 @@ function tableSections(source: string): TableSection[] {
   }
   return markers.map((marker, index) => {
     const className = marker.groups?.className;
-    if (className === undefined || marker.index === undefined) {
+    if (
+      className === undefined ||
+      marker.index === undefined ||
+      !isSrdClassName(className)
+    ) {
       throw new SrdClassLevelFeaturesError(
         'class level-table extract has an unrecognised marker.',
       );
@@ -183,35 +193,39 @@ function parseSection(section: TableSection): SrdClassLevelFeatures {
     );
   }
 
-  return {
-    class_name: section.className,
-    levels: characterLevels.map((classLevel) => {
-      const featureCell = (cells.get(classLevel) ?? '')
-        .replace(/\s+/g, ' ')
-        .trim();
-      const featureNames =
-        featureCell === '—'
-          ? []
-          : featureCell
-              .split(',')
-              .map((name) => name.trim())
-              .filter((name) => name !== '');
-      return {
-        class_name: section.className,
-        class_level: classLevel,
-        feature_cell: featureCell,
-        feature_names: featureNames,
-        entitlements: featureNames
-          .map((name) => entitlementForName(section.className, name))
-          .filter(
-            (
-              entitlement,
-            ): entitlement is ClassFeatureEntitlementKind =>
-              entitlement !== null,
-          ),
-      };
-    }),
-  };
+  const levels = perCharacterLevel(characterLevels.map((classLevel) => {
+    const featureCell = (cells.get(classLevel) ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const featureNames =
+      featureCell === '—'
+        ? []
+        : featureCell
+            .split(',')
+            .map((name) => name.trim())
+            .filter((name) => name !== '');
+    return {
+      class_name: section.className,
+      class_level: classLevel,
+      feature_cell: featureCell,
+      feature_names: featureNames,
+      entitlements: featureNames
+        .map((name) => entitlementForName(section.className, name))
+        .filter(
+          (
+            entitlement,
+          ): entitlement is ClassFeatureEntitlementKind =>
+            entitlement !== null,
+        ),
+    };
+  }));
+  /* c8 ignore next 5 -- characterLevels has twenty members by definition. */
+  if (levels === null) {
+    throw new SrdClassLevelFeaturesError(
+      `${section.className} table does not enumerate levels 1..20.`,
+    );
+  }
+  return { class_name: section.className, levels };
 }
 
 export function parseSrdClassLevelFeatures(

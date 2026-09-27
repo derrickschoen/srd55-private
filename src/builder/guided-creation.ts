@@ -77,7 +77,7 @@ import {
   CharacterCrud,
   CharacterNotFoundError,
 } from '../queries/character-crud';
-import { skillFromLabel } from '../rules/skills';
+import { skillFromLabel } from '../rules/skill-labels';
 import { characterLevel } from '../rules/character-level';
 import {
   bundledSourceContentKeys,

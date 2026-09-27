@@ -13,7 +13,7 @@ import {
   hasBundledSheetContent,
   seedSheetContent,
 } from '../../../src/rules/sheet-srd';
-import { parseSrdClassTraits } from '../../../src/rules/class-traits-srd';
+import { bundledSrdClassTraits } from '../../../src/rules/class-traits-srd';
 import { openTestDatabase } from '../../helpers/open-db';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
@@ -31,8 +31,8 @@ describe('primary-ability catalog seed', () => {
   afterEach(() => connection.close());
 
   it('seeds and decodes all twelve sourced expressions', () => {
-    const expected = new Map(
-      parseSrdClassTraits().map((entry) => [
+    const expected = new Map<string, unknown>(
+      bundledSrdClassTraits().map((entry) => [
         entry.class_name,
         entry.primary_ability_expression,
       ]),

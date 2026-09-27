@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import extraAttackSource from '../../../docs/srd/source/extra-attack-other-sources.txt?raw';
 import {
   parseSrdNamedExtraAttackFeatures,
   SrdNamedFeatureError,
-} from '../../../src/rules/extra-attack-srd';
+} from '../../../src/rules/extra-attack-srd-reader';
 
 /**
  * THE PARSE, AGAINST THE EXTRACT AS COMMITTED.
@@ -22,7 +23,7 @@ import {
  */
 
 function feature(name: string) {
-  const found = parseSrdNamedExtraAttackFeatures().find(
+  const found = parseSrdNamedExtraAttackFeatures(extraAttackSource).find(
     (entry) => entry.name === name,
   );
   if (found === undefined) {
@@ -33,7 +34,7 @@ function feature(name: string) {
 
 describe('the two named Extra Attack features the SRD prints', () => {
   it('parses exactly two, ordered by prerequisite level', () => {
-    const features = parseSrdNamedExtraAttackFeatures();
+    const features = parseSrdNamedExtraAttackFeatures(extraAttackSource);
     expect(features.map((entry) => entry.name)).toEqual([
       'Thirsting Blade',
       'Devouring Blade',
@@ -102,7 +103,7 @@ describe('the two named Extra Attack features the SRD prints', () => {
   });
 
   it('carries no wordmark the licence asks to be left off', () => {
-    const text = parseSrdNamedExtraAttackFeatures()
+    const text = parseSrdNamedExtraAttackFeatures(extraAttackSource)
       .flatMap((entry) => [entry.name, entry.prerequisite, entry.description])
       .join(' ');
     expect(text).not.toMatch(/D&D|Dungeons|Wizards/);

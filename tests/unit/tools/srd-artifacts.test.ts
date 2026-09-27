@@ -1,9 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import packageJsonText from '../../../package.json?raw';
 import classLevelFeaturesDrift from '../rules/class-level-features-srd-generation.test.ts?raw';
 import classResourcesDrift from '../rules/class-resources-srd-generation.test.ts?raw';
 import spellsDrift from '../rules/spells-srd-generation.test.ts?raw';
 import coverageSourceDrift from '../simulation/coverage-source-generation.test.ts?raw';
+import artifactsFreshDrift from './srd-artifacts-fresh.test.ts?raw';
 import generatorSource from '../../../scripts/generate-srd-artifacts.ts?raw';
 import {
   assertSrdArtifactFresh,
@@ -13,15 +15,19 @@ import {
   SRD_SPELL_LIST_PATHS,
   srdArtifact,
   SrdArtifactError,
+  srdCorpusFingerprint,
   srdCorpusTexts,
   writeSrdArtifacts,
   type SrdArtifact,
 } from '../../../scripts/srd-artifacts';
+import { SRD_CORPUS_TEXTS } from '../../helpers/srd-corpora';
+import { declareTestInputs } from '../../helpers/test-inputs';
 
 /**
- * The generator and the drift check themselves. The per-artifact drift tests
- * prove each committed artifact fresh; these prove the two mechanisms they rest
- * on can fail: the check reports a stale file, and the writer overwrites one.
+ * The generator and the drift check themselves. The drift tests prove each
+ * committed artifact fresh; these prove the mechanisms they rest on can fail:
+ * the check reports a stale file and a changed source, the writer overwrites a
+ * stale file, and the generator's own import graph never loads an artifact.
  * Synthetic artifacts keep them independent of the SRD parse.
  */
 function syntheticArtifact(
@@ -34,12 +40,15 @@ function syntheticArtifact(
     reader: 'src/probe-reader.ts',
     driftTest: 'tests/probe.test.ts',
     exportName: 'PROBE',
-    type: { annotation: 'Probe', name: 'Probe', module: '../probe-reader' },
+    type: { satisfies: 'Probe', names: ['Probe'], module: '../probe-reader' },
     derive,
   };
 }
 
 const probeCorpus = srdCorpusTexts({ 'docs/srd/source/probe.txt': 'alpha\nbeta' });
+
+/** `printf 'alpha\nbeta' | sha256sum`, computed outside this code. */
+const PROBE_SHA256 = 'bbfb79e82216bd2db1ad2c507d44ddf80aeb12f64f9562056afe93aad43154d9';
 
 describe('the SRD artifact drift check', () => {
   const artifact = syntheticArtifact('src/generated/probe.ts');
@@ -68,7 +77,69 @@ describe('the SRD artifact drift check', () => {
   });
 });
 
+describe('the source pin: a byte the derivation never reads still makes the artifact stale', () => {
+  // The derivation reads only the second line, so an edit to the first line
+  // changes nothing it produces. Only the header's fingerprint can see it.
+  const artifact = syntheticArtifact('src/generated/probe.ts', (read) => ({
+    rows: read('docs/srd/source/probe.txt').split('\n').slice(1),
+  }));
+  const fresh = composeSrdArtifact(artifact, probeCorpus);
+
+  it('pins each source by the sha256 of its bytes', () => {
+    expect(fresh.split('\n')[2]).toBe(
+      `//   docs/srd/source/probe.txt sha256=${PROBE_SHA256}`,
+    );
+  });
+
+  it.each([
+    ['the first byte', 'Alpha\nbeta'],
+    ['a byte in the ignored first line', 'alpHa\nbeta'],
+    ['one more trailing byte', 'alpha\nbeta\n'],
+  ])('fails on %s, and names the corpus', (_label, text) => {
+    const edited = srdCorpusTexts({ 'docs/srd/source/probe.txt': text });
+    expect(() => assertSrdArtifactFresh(artifact, edited, fresh)).toThrow(
+      `src/generated/probe.ts is stale: docs/srd/source/probe.txt is not the corpus it was generated from (pinned sha256=${PROBE_SHA256}, the corpus is now sha256=`,
+    );
+  });
+
+  it('would pass the edited-first-line corpus without the pin: its derived data lines are identical', () => {
+    const edited = srdCorpusTexts({ 'docs/srd/source/probe.txt': 'alpHa\nbeta' });
+    const composed = composeSrdArtifact(artifact, edited).split('\n');
+    const committed = fresh.split('\n');
+    expect(composed.filter((line, index) => line !== committed[index])).toEqual([
+      `//   docs/srd/source/probe.txt sha256=${createHash('sha256').update('alpHa\nbeta').digest('hex')}`,
+    ]);
+  });
+
+  it('refuses a corpus holding U+FFFD, whose text would no longer determine its bytes', () => {
+    expect(() => srdCorpusFingerprint('docs/srd/source/probe.txt', 'al�pha')).toThrow(
+      'docs/srd/source/probe.txt holds U+FFFD, so its text no longer determines its bytes; fix its encoding.',
+    );
+  });
+
+  it('pins every committed corpus by the digest of its bytes on disk', () => {
+    const inputs = declareTestInputs({
+      srdText: Object.keys(SRD_CORPUS_TEXTS) as `docs/srd/${string}`[],
+    });
+    for (const [path, text] of Object.entries(SRD_CORPUS_TEXTS)) {
+      const bytes = inputs.srdText.readBytes(path as `docs/srd/${string}`);
+      expect(srdCorpusFingerprint(path, text), path).toBe(
+        createHash('sha256').update(bytes).digest('hex'),
+      );
+    }
+  });
+});
+
 describe('the SRD artifact composer', () => {
+  it('emits the literal as const satisfies its domain type, never an annotation', () => {
+    const artifact = syntheticArtifact('src/generated/probe.ts');
+    const text = composeSrdArtifact(artifact, probeCorpus);
+    expect(text).toContain("import type { Probe } from '../probe-reader';");
+    expect(text).toContain('export const PROBE = {');
+    expect(text).toMatch(/\n\} as const satisfies Probe;\n$/u);
+    expect(text).not.toContain('PROBE: Probe');
+  });
+
   it('refuses a derivation that reads a corpus it does not declare', () => {
     const artifact = syntheticArtifact('src/generated/probe.ts', (read) => read(SRD_CORPUS_PATHS.fullSrd));
     expect(() => composeSrdArtifact(artifact, probeCorpus)).toThrow(
@@ -106,7 +177,7 @@ describe('the SRD artifact writer', () => {
     for (const artifact of artifacts) {
       expect(written.get(artifact.path)).toBe(composeSrdArtifact(artifact, probeCorpus));
     }
-    expect(written.get('src/generated/second.ts')).toContain('export const PROBE: Probe = 10;');
+    expect(written.get('src/generated/second.ts')).toContain('export const PROBE = 10 as const satisfies Probe;');
     expect(reads.every((path) => path.startsWith('docs/srd/'))).toBe(true);
   });
 
@@ -131,34 +202,96 @@ describe('the SRD artifact writer', () => {
   });
 });
 
+describe('the generator never loads what it generates', () => {
+  afterEach(() => {
+    for (const artifact of SRD_ARTIFACTS) {
+      vi.doUnmock(`../../../${artifact.path}`);
+    }
+    vi.resetModules();
+  });
+
+  it('imports its readers without reaching a generated artifact, so a stale or missing one cannot block regeneration', async () => {
+    vi.resetModules();
+    for (const artifact of SRD_ARTIFACTS) {
+      vi.doMock(`../../../${artifact.path}`, () => {
+        throw new Error(`${artifact.path} was loaded by the generator's import graph.`);
+      });
+    }
+    const generator = await import('../../../scripts/srd-artifacts');
+    expect(generator.SRD_ARTIFACTS.map((artifact) => artifact.path)).toEqual(
+      SRD_ARTIFACTS.map((artifact) => artifact.path),
+    );
+  });
+});
+
 describe('the SRD artifact table', () => {
   const driftTests: Readonly<Record<string, string>> = {
     'tests/unit/rules/class-level-features-srd-generation.test.ts': classLevelFeaturesDrift,
     'tests/unit/rules/class-resources-srd-generation.test.ts': classResourcesDrift,
     'tests/unit/rules/spells-srd-generation.test.ts': spellsDrift,
     'tests/unit/simulation/coverage-source-generation.test.ts': coverageSourceDrift,
+    'tests/unit/tools/srd-artifacts-fresh.test.ts': artifactsFreshDrift,
   };
 
-  it('generates the four runtime SRD catalogs from exactly their corpora', () => {
+  it('generates all eighteen runtime SRD catalogs from exactly their corpora', () => {
+    const corpus = SRD_CORPUS_PATHS;
     expect(SRD_ARTIFACTS.map((artifact) => [artifact.path, artifact.sources])).toEqual([
-      ['src/rules/generated/class-level-features-srd.ts', [SRD_CORPUS_PATHS.classLevelTables]],
-      ['src/rules/generated/class-resources-srd.ts', [SRD_CORPUS_PATHS.classLevelTables, SRD_CORPUS_PATHS.fullSrd]],
-      ['src/rules/generated/spells-srd.ts', [SRD_CORPUS_PATHS.spellDescriptions, ...Object.values(SRD_SPELL_LIST_PATHS)]],
-      ['src/simulation/generated/coverage-source.ts', [SRD_CORPUS_PATHS.fullSrd, SRD_CORPUS_PATHS.spellDescriptions]],
+      ['src/rules/generated/class-level-features-srd.ts', [corpus.classLevelTables]],
+      ['src/rules/generated/class-resources-srd.ts', [corpus.classLevelTables, corpus.fullSrd]],
+      ['src/rules/generated/spells-srd.ts', [corpus.spellDescriptions, ...Object.values(SRD_SPELL_LIST_PATHS)]],
+      ['src/simulation/generated/coverage-source.ts', [corpus.fullSrd, corpus.spellDescriptions]],
+      ['src/rules/generated/ability-score-generation-srd.ts', [corpus.abilityScoreGeneration]],
+      ['src/rules/generated/armor-srd.ts', [corpus.armorTable]],
+      ['src/rules/generated/class-choice-entitlements-srd.ts', [corpus.classExpertise, corpus.classSpellReplacement, corpus.classLevelTables]],
+      ['src/rules/generated/class-equipment-srd.ts', [corpus.classStartingEquipment, corpus.weaponsTable, corpus.armorTable]],
+      ['src/rules/generated/class-traits-srd.ts', [corpus.classCoreTraits, corpus.attackClassFeatures]],
+      ['src/rules/generated/draconic-resilience-srd.ts', [corpus.draconicResilience]],
+      ['src/rules/generated/extra-attack-srd.ts', [corpus.extraAttackOtherSources]],
+      ['src/rules/generated/feats-srd.ts', [corpus.feats]],
+      ['src/rules/generated/multiclass-entry-srd.ts', [corpus.multiclassEntryGrants, corpus.classCoreTraits]],
+      ['src/rules/generated/origins-srd.ts', [corpus.speciesDescriptions, corpus.backgrounds]],
+      ['src/rules/generated/skills.ts', [corpus.skillsTable]],
+      ['src/rules/generated/srd-subclasses.ts', [corpus.subclasses]],
+      ['src/rules/generated/unarmored-defense-srd.ts', [corpus.unarmoredDefense]],
+      ['src/rules/generated/weapons-srd.ts', [corpus.weaponsTable, corpus.weaponMasteryProgression]],
     ]);
     expect(() => srdArtifact('src/rules/generated/nothing.ts')).toThrow(
       'src/rules/generated/nothing.ts is not a generated SRD artifact.',
     );
   });
 
+  it('reads 29 of the 34 SRD corpora; the corpus helper lists exactly the .txt files under docs/srd', () => {
+    const onDisk = Object.keys(import.meta.glob('../../../docs/srd/**/*.txt'))
+      .map((path) => path.replace(/^(?:\.\.\/){3}/u, ''))
+      .sort();
+    expect(Object.keys(SRD_CORPUS_TEXTS).sort()).toEqual(onDisk);
+    expect(onDisk).toHaveLength(34);
+    const read = new Set(SRD_ARTIFACTS.flatMap((artifact) => artifact.sources));
+    expect(read.size).toBe(29);
+    expect(onDisk.filter((path) => !read.has(path))).toEqual([
+      'docs/srd/source/domain-vocabularies.txt',
+      'docs/srd/source/multiclassing.txt',
+      'docs/srd/source/sheet-math.txt',
+      'docs/srd/source/weapon-attack-cantrips.txt',
+      'docs/srd/source/weapon-mastery-flat-classes.txt',
+    ]);
+  });
+
   it('has a drift test for every artifact that checks that artifact against its committed text', () => {
     for (const artifact of SRD_ARTIFACTS) {
       const test = driftTests[artifact.driftTest];
       expect(test, artifact.driftTest).toBeDefined();
-      const fromTest = artifact.path.replace(/^src\/[a-z]+\//u, '');
-      expect(test, artifact.driftTest).toContain(`srdArtifact('${artifact.path}')`);
-      expect(test, artifact.driftTest).toContain(`${fromTest}?raw';`);
-      expect(test, artifact.driftTest).toContain('assertSrdArtifactFresh(artifact, read, committed)');
+      if (artifact.driftTest === 'tests/unit/tools/srd-artifacts-fresh.test.ts') {
+        expect(test).toContain(`../../../${artifact.path}?raw';`);
+        expect(test).toContain(`'${artifact.path}': `);
+        expect(test).toContain('assertSrdArtifactFresh(artifact, read, committed(artifact))');
+      } else {
+        expect(test, artifact.driftTest).toContain(
+          `${artifact.path.replace(/^src\/[a-z]+\//u, '')}?raw';`,
+        );
+        expect(test, artifact.driftTest).toContain(`srdArtifact('${artifact.path}')`);
+        expect(test, artifact.driftTest).toContain('assertSrdArtifactFresh(artifact, read, committed)');
+      }
     }
   });
 });

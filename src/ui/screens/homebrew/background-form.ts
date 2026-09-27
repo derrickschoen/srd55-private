@@ -24,7 +24,7 @@ import {
 import type { ContentKey } from '../../../domain/ids';
 import { RpcError } from '../../../rpc/protocol';
 import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
-import { SKILL_LABELS } from '../../../rules/skills';
+import { SKILL_LABELS } from '../../../rules/skill-labels';
 import { createAuthoringEditGeneration } from '../../authoring/edit-generation';
 import {
   authoringPathKey,

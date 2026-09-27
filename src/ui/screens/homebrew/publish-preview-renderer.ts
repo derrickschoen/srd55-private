@@ -16,7 +16,7 @@ import {
   type ExtraAttackWeaponScope,
   type SlotBucket,
 } from '../../../domain/enums';
-import { SKILL_LABELS } from '../../../rules/skills';
+import { SKILL_LABELS } from '../../../rules/skill-labels';
 import { element } from '../../dom';
 import { freeTextSpan } from '../../free-text';
 import { abilityLabel } from '../../human-labels';

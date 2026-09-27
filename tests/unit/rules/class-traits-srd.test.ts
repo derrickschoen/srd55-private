@@ -3,8 +3,8 @@ import {
   parseSrdClassTraits,
   parseSrdExtraAttackGrants,
   parseSrdMartialArtsDice,
-  SRD_CLASS_NAMES,
-} from '../../../src/rules/class-traits-srd';
+} from '../../../src/rules/class-traits-srd-reader';
+import { SRD_CLASS_NAMES } from '../../../src/rules/srd-class-names';
 import coreTraitsSource from '../../../docs/srd/source/class-core-traits.txt?raw';
 import attackFeaturesSource from '../../../docs/srd/source/attack-class-features.txt?raw';
 
@@ -24,7 +24,7 @@ import attackFeaturesSource from '../../../docs/srd/source/attack-class-features
  * that these assertions really are load-bearing rather than incidentally true.
  */
 
-const traits = parseSrdClassTraits();
+const traits = parseSrdClassTraits(coreTraitsSource);
 
 function forClass(name: string) {
   const found = traits.find((entry) => entry.class_name === name);
@@ -276,7 +276,7 @@ describe('SRD class core traits', () => {
 });
 
 describe('SRD Extra Attack grants', () => {
-  const grants = parseSrdExtraAttackGrants();
+  const grants = parseSrdExtraAttackGrants(attackFeaturesSource);
 
   function counts(name: string): [number, number][] {
     const found = grants.find((entry) => entry.class_name === name);
@@ -334,7 +334,7 @@ describe('SRD Extra Attack grants', () => {
 });
 
 describe('SRD Martial Arts die progression', () => {
-  const dice = parseSrdMartialArtsDice();
+  const dice = parseSrdMartialArtsDice(attackFeaturesSource);
 
   it('covers all twenty levels', () => {
     expect(dice.size).toBe(20);

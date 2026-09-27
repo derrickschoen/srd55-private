@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import speciesSource from '../../../docs/srd/source/species-descriptions.txt?raw';
+import backgroundsSource from '../../../docs/srd/source/backgrounds.txt?raw';
 import {
   parseSrdBackgroundTemplates,
   parseSrdSpeciesTemplates,
-} from '../../../src/rules/origins-srd';
+} from '../../../src/rules/origins-srd-reader';
 
 /**
  * THE ORACLE IS THE EXTRACT, READ BY A HUMAN — NOT THE PARSER'S OUTPUT.
@@ -31,8 +33,8 @@ import {
  * different naive implementation.
  */
 
-const species = parseSrdSpeciesTemplates();
-const backgrounds = parseSrdBackgroundTemplates();
+const species = parseSrdSpeciesTemplates(speciesSource);
+const backgrounds = parseSrdBackgroundTemplates(backgroundsSource);
 
 function speciesNamed(name: string) {
   const found = species.find((entry) => entry.name === name);

@@ -49,7 +49,7 @@ import {
   type Ability,
   type Skill,
 } from '../../../domain/enums';
-import { SKILL_LABELS } from '../../../rules/skills';
+import { SKILL_LABELS } from '../../../rules/skill-labels';
 import { RpcError } from '../../../rpc/protocol';
 import { clear, element, listen, type Cleanup } from '../../dom';
 import { abilityLabel } from '../../human-labels';

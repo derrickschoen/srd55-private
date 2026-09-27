@@ -9,13 +9,13 @@ import {
   type SrdSubclassManifest,
   type SrdUnconditionalSpellTable,
   type SrdUnconditionalSpellTableName,
-} from '../../../src/rules/srd-subclasses';
+} from '../../../src/rules/srd-subclasses-reader';
 import { SRD_ATTRIBUTION_NOTICE } from '../../../src/rules/srd-attribution';
 import { bundledSrdSpellDescriptions } from '../../../src/rules/spells-srd';
 import {
   parseSrdDraconicResilience,
   SrdDraconicResilienceError,
-} from '../../../src/rules/draconic-resilience-srd';
+} from '../../../src/rules/draconic-resilience-srd-reader';
 
 const SOURCE_URL = new URL(
   '../../../docs/srd/source/subclasses.txt',
@@ -353,7 +353,7 @@ const EXPECTED_RULE_SET_IDENTITIES = {
 } as const;
 
 function manifest(): SrdSubclassManifest {
-  return parseSrdSubclasses();
+  return parseSrdSubclasses(SOURCE);
 }
 
 function unconditionalTable(
@@ -1621,7 +1621,7 @@ describe('SRD subclass parser rejections', () => {
   });
 
   it('parses both Draconic Resilience sheet effects from the 2024 wording', () => {
-    expect(parseSrdDraconicResilience()).toEqual({
+    expect(parseSrdDraconicResilience(DRACONIC_RESILIENCE_SOURCE)).toEqual({
       class_name: 'Sorcerer',
       subclass_name: 'Draconic Sorcery',
       class_level: 3,

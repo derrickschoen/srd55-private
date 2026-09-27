@@ -40,7 +40,7 @@ import {
   type GuidedSkillsStepState,
 } from '../../../builder/contracts';
 import type { Skill } from '../../../domain/enums';
-import { SKILL_LABELS } from '../../../rules/skills';
+import { SKILL_LABELS } from '../../../rules/skill-labels';
 import { RpcError } from '../../../rpc/protocol';
 import type { DecodedOutcome } from '../../../refusals/outcome';
 import { renderRefusal } from '../../../refusals/render';

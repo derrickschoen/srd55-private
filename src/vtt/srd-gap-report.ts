@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { conditionNames } from '../combat/conditions';
 import { SPELL_MANIFEST } from '../combat/spells/manifest';
 import type { Brand } from '../domain/ids';
-import { SRD_CLASS_NAMES } from '../rules/class-traits-srd';
+import { SRD_CLASS_NAMES } from '../rules/srd-class-names';
 
 export const engineRefusalReasons = [
   'invalid_party_pack_structure',

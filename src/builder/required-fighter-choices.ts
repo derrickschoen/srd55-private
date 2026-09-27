@@ -10,7 +10,7 @@ import { WeaponMasteryLookup } from '../rules/weapon-mastery-lookup';
 import { selectableCatalogContentSql } from '../queries/selectable-catalog-content';
 import { SourceRuleReader } from '../grants/source-rule-reader';
 import { GrantRule } from '../grants/grant-rule';
-import { ADDITIONAL_FIGHTING_STYLE_KEY_CONFIG } from '../rules/srd-subclasses';
+import { ADDITIONAL_FIGHTING_STYLE_KEY_CONFIG } from '../rules/srd-subclasses-reader';
 import type {
   GuidedAdditionalFightingStyleState,
   GuidedFightingStyleOption,

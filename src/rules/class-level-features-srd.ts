@@ -45,7 +45,7 @@ export class SubclassSpellcastingAbilityError extends TypeError {
 const BUNDLED_CLASS_LEVEL_FEATURES: readonly SrdClassLevelFeatures[] =
   deepFreeze(BUNDLED_SRD_CLASS_LEVEL_FEATURES);
 
-const CLASS_LEVEL_FEATURES = new Map(
+const CLASS_LEVEL_FEATURES = new Map<string, SrdClassLevelFeatures>(
   BUNDLED_CLASS_LEVEL_FEATURES.map((entry) => [entry.class_name, entry]),
 );
 

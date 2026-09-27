@@ -11,7 +11,7 @@ import {
 import type { WeaponsPanel } from '../domain/read-models';
 import type { AttackProfile, AbilityOption } from '../rules/attack-profiles';
 import { AbilityScores } from '../rules/ability-scores';
-import { SRD_CLASS_NAMES } from '../rules/class-traits-srd';
+import { SRD_CLASS_NAMES } from '../rules/srd-class-names';
 import type { SheetResourceMaximum } from '../rules/sheet';
 import {
   CharacterSheetBuilder,
