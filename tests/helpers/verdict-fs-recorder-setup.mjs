@@ -14,9 +14,12 @@
  *     is set; HASHED_ENVIRONMENT keys every verdict on a fixed list. A new
  *     module-scope read of a computed path or of another variable is
  *     attributed to one file only.
- *   - A child process. The environment a child inherits, and the files it
- *     reads, are read in the child, where nothing is recorded. The closure
- *     walker fails closed any file whose closure imports node:child_process.
+ *   - A child process or a worker thread. The environment a child inherits,
+ *     and the files it reads, are read in the child, where nothing is
+ *     recorded; a worker thread has its own node:fs and its own copy of
+ *     process.env. The closure walker fails closed any file whose closure
+ *     loads child_process, cluster or worker_threads, bare or node:, through
+ *     an import, require, import() or process.getBuiltinModule.
  */
 import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';

@@ -4,6 +4,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   buildClosure,
   cachedVerdict,
+  globalSalt,
+  moduleInventory,
   storeVerdict,
   type ObservationRecord,
 } from '../../scripts/test-affected.mjs';
@@ -23,7 +25,11 @@ import {
  * while the bytes of every module in the test's closure are unchanged, so a
  * module the test loads at runtime but the walker leaves out can change under
  * a reused green. Every form the transform loads is in the closure; a form the
- * walker cannot follow fails the file closed (an unresolved reason).
+ * walker cannot follow fails the file closed (an unresolved reason). A reused
+ * green's closure is not rebuilt, so a path added later (a file or a symbolic
+ * link) must change the module inventory, which keys every verdict. A Node
+ * built-in is the same module bare or node:, and one that runs code where the
+ * recorder records nothing (a child process, a worker thread) fails closed.
  *
  * Both tsconfigs set verbatimModuleSyntax, so only the type-marked forms are
  * erased: `import type`, `export type ... from`. `import { type A } from './a'`
@@ -46,7 +52,69 @@ const shape = (name: string): string[] => [
   loaded(name),
 ];
 
+/**
+ * A module per way of loading a Node built-in whose effects the recorder cannot
+ * see (a child process, a worker thread), and the node: name its reason carries.
+ * A bare specifier loads the same module as its node: form.
+ */
+const EFFECT_BUILTINS: readonly (readonly [name: string, source: string, builtin: string])[] = [
+  ['builtins/import-child_process.ts', "import { spawnSync } from 'child_process';", 'node:child_process'],
+  ['builtins/import-node-child_process.ts', "import { spawnSync } from 'node:child_process';", 'node:child_process'],
+  ['builtins/require-child_process.ts', "const { spawnSync } = require('child_process');", 'node:child_process'],
+  ['builtins/dynamic-child_process.ts', "export const load = () => import('child_process');", 'node:child_process'],
+  ['builtins/export-child_process.ts', "export { spawnSync } from 'child_process';", 'node:child_process'],
+  ['builtins/import-equals-child_process.cts', "import childProcess = require('child_process');", 'node:child_process'],
+  [
+    'builtins/get-builtin-child_process.ts',
+    "export const childProcess = process.getBuiltinModule('child_process');",
+    'node:child_process',
+  ],
+  [
+    'builtins/create-require-child_process.ts',
+    [
+      "import { createRequire } from 'node:module';",
+      'const require = createRequire(import.meta.url);',
+      "export const childProcess = require('child_process');",
+    ].join('\n'),
+    'node:child_process',
+  ],
+  ['builtins/import-worker_threads.ts', "import { Worker } from 'worker_threads';", 'node:worker_threads'],
+  ['builtins/import-node-worker_threads.ts', "import { Worker } from 'node:worker_threads';", 'node:worker_threads'],
+  ['builtins/import-cluster.ts', "import cluster from 'cluster';", 'node:cluster'],
+  ['builtins/import-node-cluster.ts', "import cluster from 'node:cluster';", 'node:cluster'],
+];
+
 const FIXTURES: Readonly<Record<string, readonly string[]>> = {
+  ...Object.fromEntries(EFFECT_BUILTINS.map(([name, source]) => [name, [source]])),
+  'builtins/fs-outside.ts': [
+    "import { readFileSync } from 'fs';",
+    "export const hostname = () => readFileSync('/etc/hostname', 'utf8');",
+  ],
+  'builtins/node-fs-outside.ts': [
+    "import { readFileSync } from 'node:fs';",
+    "export const hostname = () => readFileSync('/etc/hostname', 'utf8');",
+  ],
+  'builtins/get-builtin-fs.ts': ["export const fs = process.getBuiltinModule('node:fs');"],
+  'builtins/get-builtin-computed.ts': ['export const load = (name: string) => process.getBuiltinModule(name);'],
+  'builtins/get-builtin-alias.ts': [
+    'const { getBuiltinModule } = process;',
+    "export const childProcess = getBuiltinModule('child_process');",
+  ],
+  'builtins/create-require-renamed.ts': [
+    "import { createRequire } from 'node:module';",
+    'const load = createRequire(import.meta.url);',
+    "export const childProcess = load('child_process');",
+  ],
+  'builtins/create-require-elsewhere.ts': [
+    "import { createRequire } from 'node:module';",
+    "const require = createRequire('/elsewhere/package.json');",
+    "export const typescript = require('typescript');",
+  ],
+  'builtins/create-require-aliased.ts': [
+    "import { createRequire as make } from 'node:module';",
+    'const load = make(import.meta.url);',
+    "export const childProcess = load('child_process');",
+  ],
   'shape-a.ts': shape('shape-a'),
   'shape-b.ts': shape('shape-b'),
   'shape-c.ts': shape('shape-c'),
@@ -72,6 +140,7 @@ const FIXTURES: Readonly<Record<string, readonly string[]>> = {
   ],
   'export-type.ts': ["export type { Shape } from './shape-d';"],
   'export-inline-type.ts': ["export { type Shape } from './shape-e';"],
+  'import-equals.cts': ["import shape = require('./shape-a');", 'export = shape;'],
   'dynamic-options.ts': ["export const load = () => import('./data.json', { with: { type: 'json' } });"],
   'dynamic-computed.ts': ["export const load = (name: string) => import(name, { with: { type: 'json' } });"],
   'glob.ts': ["export const modules = import.meta.glob('./targets/*.ts', { eager: true });"],
@@ -100,18 +169,30 @@ const FIXTURES: Readonly<Record<string, readonly string[]>> = {
   'witness-inline/contracts.ts': ["export type Contract = { readonly name: string };", 'export const CONTRACT_VERSION = 1;'],
   'witness-dynamic/entry.ts': ["export const load = () => import('./data.json', { with: { type: 'json' } });"],
   'witness-dynamic/data.json': ['{ "version": 1 }'],
+  // The link witness adds witness-link/handlers/extra.ts -> ../extra.ts once its green is stored.
+  'witness-link/entry.ts': ["export const modules = import.meta.glob('./handlers/*.ts', { eager: true });"],
+  'witness-link/handlers/move.ts': ["export const move = 'move';"],
+  'witness-link/extra.ts': ["export const extra = 'extra';"],
+  // The inventory tests add and retarget inventory/alias.ts.
+  'inventory/one.ts': ["export const one = 'one';"],
+  'inventory/two.ts': ["export const two = 'two';"],
 };
 
 /**
  * Symbolic links, in a directory of their own: a glob over the fixtures above
  * must never meet one, or it would fail closed for that reason instead.
- * beforeAll adds entry/alias.ts -> ../real-targets/one.ts and base -> real-targets.
+ * beforeAll adds entry/alias.ts -> ../real-targets/one.ts, base -> real-targets
+ * and link-lib/a.ts -> ../real-lib/a.ts.
  */
 const LINK_FIXTURES: Readonly<Record<string, readonly string[]>> = {
-  'real-targets/one.ts': ["export const one = 'one';"],
-  'entry/real.ts': ["export const real = 'real';"],
-  'glob-linked-entry.ts': ["export const modules = import.meta.glob('./entry/*.ts');"],
+  'real-targets/one.ts': ["export const one = 'one';", loaded('real-targets/one')],
+  'entry/real.ts': ["export const real = 'real';", loaded('entry/real')],
+  'glob-linked-entry.ts': ["export const modules = import.meta.glob('./entry/*.ts', { eager: true });"],
   'glob-linked-base.ts': ["export const modules = import.meta.glob('./base/*.ts');"],
+  'real-lib/a.ts': ["import './b';", loaded('real-lib/a')],
+  'real-lib/b.ts': [loaded('real-lib/b')],
+  'link-lib/b.ts': [loaded('link-lib/b')],
+  'through-link.ts': ["import './link-lib/a';"],
 };
 
 let probeDirectory = '';
@@ -153,6 +234,14 @@ beforeAll(() => {
   }
   symlinkSync('../real-targets/one.ts', linkPath('entry/alias.ts'));
   symlinkSync('real-targets', linkPath('base'));
+  symlinkSync('../real-lib/a.ts', linkPath('link-lib/a.ts'));
+  for (const module of ['fs/promises', 'node:fs/promises']) {
+    writeFileSync(
+      probePath(`builtins/${module.replace(/[:/]/gu, '-')}-data.ts`),
+      `import { readFile } from '${module}';\nexport const data = () => readFile('${repositoryName('data.json')}', 'utf8');\n`,
+      'utf8',
+    );
+  }
   mkdirSync(join(repositoryRoot, '.tmp'), { recursive: true });
   outsideDirectory = mkdtempSync(join(repositoryRoot, '.tmp/closure-walker-outside-'));
   writeFileSync(join(outsideDirectory, 'data.json'), '{}\n', 'utf8');
@@ -187,6 +276,10 @@ describe('the closure walker: import and export declarations', () => {
 
   it('keeps a module re-exported through inline type bindings, which verbatimModuleSyntax loads', () => {
     expect(closureOf('export-inline-type.ts')).toEqual({ closure: names('shape-e.ts'), unresolved: [] });
+  });
+
+  it('keeps a module a CommonJS TypeScript module loads through import = require', () => {
+    expect(closureOf('import-equals.cts')).toEqual({ closure: names('shape-a.ts'), unresolved: [] });
   });
 });
 
@@ -277,6 +370,65 @@ describe('the closure walker: import.meta.glob', () => {
   });
 });
 
+describe('the closure walker: symbolic links', () => {
+  it('fails closed a module reached through a symbolic link, whose imports resolve from its real directory', () => {
+    expect(buildClosure(linkPath('through-link.ts')).unresolved)
+      .toEqual([`${repositoryPath(linkPath('link-lib/a.ts'))} -> <module reached through a symbolic link>`]);
+  });
+});
+
+describe('the closure walker: Node built-ins', () => {
+  it.each(EFFECT_BUILTINS)('%s fails closed as an effect the recorder cannot see', (name, _source, builtin) => {
+    expect(closureOf(name)).toEqual({ closure: [], unresolved: unresolvedAs(name, `<external behavior via ${builtin}>`) });
+  });
+
+  it.each([['builtins/fs-outside.ts'], ['builtins/node-fs-outside.ts']])(
+    '%s fails closed a read outside the repository convention',
+    (name) => {
+      expect(closureOf(name)).toEqual({
+        closure: [],
+        unresolved: unresolvedAs(name, '<filesystem input outside repository convention: /etc/hostname>'),
+      });
+    },
+  );
+
+  it.each([['builtins/fs-promises-data.ts'], ['builtins/node-fs-promises-data.ts']])(
+    '%s keeps the repository file it reads',
+    (name) => {
+      expect(closureOf(name)).toEqual({ closure: names('data.json'), unresolved: [] });
+    },
+  );
+
+  it('follows process.getBuiltinModule of a built-in the recorder sees', () => {
+    expect(closureOf('builtins/get-builtin-fs.ts')).toEqual({ closure: [], unresolved: [] });
+  });
+
+  it('fails closed a computed process.getBuiltinModule', () => {
+    expect(closureOf('builtins/get-builtin-computed.ts')).toEqual({
+      closure: [],
+      unresolved: unresolvedAs('builtins/get-builtin-computed.ts', '<computed process.getBuiltinModule>'),
+    });
+  });
+
+  it('fails closed a getBuiltinModule that is not called as process.getBuiltinModule', () => {
+    expect(closureOf('builtins/get-builtin-alias.ts')).toEqual({
+      closure: [],
+      unresolved: unresolvedAs('builtins/get-builtin-alias.ts', '<process.getBuiltinModule not called directly>'),
+    });
+  });
+
+  it.each([
+    ['builtins/create-require-renamed.ts'],
+    ['builtins/create-require-elsewhere.ts'],
+    ['builtins/create-require-aliased.ts'],
+  ])('%s fails closed a loader that is not require from the importer', (name) => {
+    expect(closureOf(name)).toEqual({
+      closure: [],
+      unresolved: unresolvedAs(name, '<createRequire not bound to require>'),
+    });
+  });
+});
+
 describe('the closure walker agrees with the transform Vitest runs', () => {
   it.each([
     ['import-type.ts', []],
@@ -297,6 +449,22 @@ describe('the closure walker agrees with the transform Vitest runs', () => {
 
     expect(loads.sort()).toEqual(expected);
     expect(closureOf(entry).closure).toEqual(names(...expected.map((name) => `${name}.ts`)));
+  });
+
+  // Why the walker fails closed on links: what Vitest loads through one.
+  it.each([
+    ['glob-linked-entry.ts', ['entry/real', 'real-targets/one']],
+    ['through-link.ts', ['real-lib/a', 'real-lib/b']],
+  ])('%s loads through its symbolic link: a glob follows it, imports resolve from the real directory', async (entry, expected) => {
+    const loads: string[] = [];
+    (globalThis as unknown as Record<symbol, string[] | undefined>)[Symbol.for(LOADS)] = loads;
+    try {
+      await import(/* @vite-ignore */ linkPath(entry));
+    } finally {
+      delete (globalThis as unknown as Record<symbol, string[] | undefined>)[Symbol.for(LOADS)];
+    }
+
+    expect(loads.sort()).toEqual(expected);
   });
 });
 
@@ -349,5 +517,66 @@ describe('a stored green is not reused once a module the test loads changes', ()
       expect(cachedVerdict(probePath('witness-dynamic/entry.ts'), SALT, cacheRoot)).toBeUndefined();
     });
     expect(cachedVerdict(probePath('witness-dynamic/entry.ts'), SALT, cacheRoot)?.testCount).toBe(1);
+  });
+
+  // Keyed on the real global salt: the stored closure is not rebuilt, so only
+  // the module inventory can see a path added after the green was stored.
+  // Paths other test files add or remove meanwhile can only make the two salts
+  // differ more; they cannot fail this test.
+  it('link: a symbolic link added under a glob base after the green was stored', () => {
+    const entry = probePath('witness-link/entry.ts');
+    const graph = buildClosure(entry);
+    expect(graph).toEqual({ closure: names('witness-link/handlers/move.ts'), unresolved: [] });
+    const salt = globalSalt();
+    expect(storeVerdict({ testFile: entry, graph, record: NOTHING_OBSERVED, testCount: 1, salt, cacheRoot }))
+      .toBeTypeOf('string');
+    expect(cachedVerdict(entry, salt, cacheRoot)?.testCount).toBe(1);
+
+    const link = probePath('witness-link/handlers/extra.ts');
+    symlinkSync('../extra.ts', link);
+    try {
+      expect(cachedVerdict(entry, globalSalt(), cacheRoot)).toBeUndefined();
+    } finally {
+      rmSync(link);
+    }
+  });
+});
+
+describe('the module inventory that keys the global salt', () => {
+  const inventory = (): string => moduleInventory([probePath('inventory')]);
+  const alias = (): string => probePath('inventory/alias.ts');
+
+  it('changes when a file is added', () => {
+    const before = inventory();
+    writeFileSync(probePath('inventory/three.ts'), "export const three = 'three';\n", 'utf8');
+    try {
+      expect(inventory()).not.toBe(before);
+    } finally {
+      rmSync(probePath('inventory/three.ts'));
+    }
+    expect(inventory()).toBe(before);
+  });
+
+  it('changes when a symbolic link is added', () => {
+    const before = inventory();
+    symlinkSync('one.ts', alias());
+    try {
+      expect(inventory()).not.toBe(before);
+    } finally {
+      rmSync(alias());
+    }
+    expect(inventory()).toBe(before);
+  });
+
+  it('changes when a symbolic link is given a new target', () => {
+    symlinkSync('one.ts', alias());
+    try {
+      const toOne = inventory();
+      rmSync(alias());
+      symlinkSync('two.ts', alias());
+      expect(inventory()).not.toBe(toOne);
+    } finally {
+      rmSync(alias(), { force: true });
+    }
   });
 });

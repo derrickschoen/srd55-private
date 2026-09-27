@@ -7,12 +7,14 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  readlinkSync,
   realpathSync,
   renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
+import { isBuiltin } from 'node:module';
 import { tmpdir } from 'node:os';
 import {
   dirname,
@@ -87,14 +89,22 @@ const MOCK_MODULE_FUNCTIONS = new Set([
   'mock',
   'unmock',
 ]);
+/*
+ * Built-ins whose effects happen where the verdict recorder records nothing:
+ * the network, and code run in another process or thread (a worker thread has
+ * its own node:fs and its own copy of process.env). Named in their node:
+ * form; builtinSpecifier maps a bare `child_process` onto it.
+ */
 const EXTERNAL_EFFECT_MODULES = new Set([
   'node:child_process',
+  'node:cluster',
   'node:dgram',
   'node:http',
   'node:http2',
   'node:https',
   'node:net',
   'node:tls',
+  'node:worker_threads',
 ]);
 
 const root = realpathSync(process.cwd());
@@ -259,7 +269,9 @@ function globRegex(pattern) {
 
 /**
  * Every regular file below `directory`; undefined when a link or special file
- * could hide one, since the module inventory would not see a file added there.
+ * could hide one. Vite's globber follows a link, and the module inventory
+ * lists a link without following it, so a file added behind one changes no
+ * salt.
  */
 function regularFilesBelow(directory) {
   if (!existsSync(directory)) return [];
@@ -362,12 +374,21 @@ function globCallTargets(importer, call, constants, unresolved) {
   return targets;
 }
 
+/**
+ * A Node built-in by its node: name, which the walker compares against: a bare
+ * `fs` or `child_process` loads the same module as `node:fs` or
+ * `node:child_process`. Any other specifier is returned as it is.
+ */
+function builtinSpecifier(specifier) {
+  return !specifier.startsWith('node:') && isBuiltin(specifier) ? `node:${specifier}` : specifier;
+}
+
 function fsBindings(source) {
   const bindings = new Set();
   for (const statement of source.statements) {
     if (!ts.isImportDeclaration(statement)) continue;
     if (!ts.isStringLiteralLike(statement.moduleSpecifier)) continue;
-    const moduleName = statement.moduleSpecifier.text;
+    const moduleName = builtinSpecifier(statement.moduleSpecifier.text);
     if (
       !['node:fs', 'node:fs/promises'].includes(moduleName) &&
       !/(?:^|\/)helpers\/test-filesystem(?:-promises)?$/u.test(moduleName)
@@ -380,6 +401,41 @@ function fsBindings(source) {
     }
   }
   return bindings;
+}
+
+/** Whether `identifier` names the method a call invokes: `receiver.identifier(...)`. */
+function calledAsMethod(identifier) {
+  const access = identifier.parent;
+  return ts.isPropertyAccessExpression(access) &&
+    access.name === identifier &&
+    ts.isCallExpression(access.parent) &&
+    access.parent.expression === access;
+}
+
+/**
+ * Whether a `createRequire` is one the walker follows: the plain import
+ * binding, or the call in `const require = createRequire(import.meta.url)`,
+ * whose require(...) calls the walker follows by name, from the importer's
+ * directory as that require resolves them. Any other createRequire returns a
+ * loader the walker cannot see.
+ */
+function followedCreateRequire(identifier) {
+  const parent = identifier.parent;
+  if (ts.isImportSpecifier(parent)) {
+    return parent.name === identifier && parent.propertyName === undefined;
+  }
+  const callee = ts.isPropertyAccessExpression(parent) && parent.name === identifier
+    ? parent
+    : identifier;
+  const call = callee.parent;
+  return ts.isCallExpression(call) &&
+    call.expression === callee &&
+    call.arguments.length === 1 &&
+    importMetaUrl(call.arguments[0]) &&
+    ts.isVariableDeclaration(call.parent) &&
+    call.parent.initializer === call &&
+    ts.isIdentifier(call.parent.name) &&
+    call.parent.name.text === 'require';
 }
 
 function runtimeReferences(path, content) {
@@ -395,8 +451,9 @@ function runtimeReferences(path, content) {
     if (specifier === undefined) unresolved.push(label);
     else {
       specifiers.push(specifier);
-      if (EXTERNAL_EFFECT_MODULES.has(specifier)) {
-        unresolved.push(`<external behavior via ${specifier}>`);
+      const builtin = builtinSpecifier(specifier);
+      if (EXTERNAL_EFFECT_MODULES.has(builtin)) {
+        unresolved.push(`<external behavior via ${builtin}>`);
       }
     }
   };
@@ -406,6 +463,12 @@ function runtimeReferences(path, content) {
       if (loadsModuleAtRuntime(node)) add(node.moduleSpecifier, '<non-literal import>');
     } else if (ts.isExportDeclaration(node)) {
       if (loadsModuleAtRuntime(node)) add(node.moduleSpecifier, '<non-literal export>');
+    } else if (
+      ts.isImportEqualsDeclaration(node) &&
+      ts.isExternalModuleReference(node.moduleReference)
+    ) {
+      // `import x = require('...')`, a require in a CommonJS TypeScript module.
+      if (!node.isTypeOnly) add(node.moduleReference.expression, '<computed import = require>');
     } else if (
       ts.isCallExpression(node) &&
       node.expression.kind === ts.SyntaxKind.ImportKeyword &&
@@ -420,6 +483,14 @@ function runtimeReferences(path, content) {
       node.arguments.length === 1
     ) {
       add(node.arguments[0], '<computed require>');
+    } else if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === 'getBuiltinModule'
+    ) {
+      // process.getBuiltinModule loads a built-in without an import form.
+      if (node.arguments.length === 0) unresolved.push('<computed process.getBuiltinModule>');
+      else add(node.arguments[0], '<computed process.getBuiltinModule>');
     } else if (
       ts.isCallExpression(node) &&
       ts.isPropertyAccessExpression(node.expression) &&
@@ -460,6 +531,10 @@ function runtimeReferences(path, content) {
       } else {
         rootRelativeResources.push(resolve(root, input.specifier));
       }
+    } else if (ts.isIdentifier(node) && node.text === 'getBuiltinModule') {
+      if (!calledAsMethod(node)) unresolved.push('<process.getBuiltinModule not called directly>');
+    } else if (ts.isIdentifier(node) && node.text === 'createRequire') {
+      if (!followedCreateRequire(node)) unresolved.push('<createRequire not bound to require>');
     }
     ts.forEachChild(node, visit);
   };
@@ -545,6 +620,11 @@ function readModule(path) {
     unresolved: unresolvedReferences.map((reason) =>
       `${repositoryPath(path)} -> ${reason}`),
   };
+  // Vite loads a module by its real path and resolves its imports from there,
+  // and a file added behind a linked directory changes no inventory entry.
+  if (realpathSync(path) !== path) {
+    record.unresolved.push(`${repositoryPath(path)} -> <module reached through a symbolic link>`);
+  }
   moduleRecords.set(path, record);
   for (const specifier of references.specifiers) {
     const resolved = resolvedLocalReference(path, specifier);
@@ -595,11 +675,39 @@ export function buildClosure(testFile) {
   };
 }
 
+/**
+ * The module-path inventory below `directories`, which keys the global salt:
+ * every entry that is not a directory, by kind, and a symbolic link with its
+ * target. A file or link added anywhere below changes it, so a stored verdict
+ * is not reused after a path appears that a glob or a resolution could reach.
+ * A link is listed, not followed: a glob over one (regularFilesBelow) and a
+ * module reached through one (readModule) fail closed.
+ */
+export function moduleInventory(directories) {
+  const entries = [];
+  const visit = (directory) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = resolve(directory, entry.name);
+      if (entry.isDirectory()) visit(path);
+      else entries.push(inventoryEntry(entry, path));
+    }
+  };
+  for (const directory of directories) {
+    if (existsSync(directory)) visit(directory);
+  }
+  return hashParts(entries.map((entry) => JSON.stringify(entry)).sort());
+}
+
+function inventoryEntry(entry, path) {
+  const name = repositoryPath(path);
+  if (entry.isSymbolicLink()) return ['link', name, readlinkSync(path)];
+  return [entry.isFile() ? 'file' : 'special', name];
+}
+
 export function globalSalt() {
-  const inventory = MODULE_INVENTORY_ROOTS
-    .flatMap((directory) => filesBelow(resolve(root, directory)))
-    .map(repositoryPath)
-    .sort();
+  const inventory = moduleInventory(
+    MODULE_INVENTORY_ROOTS.map((directory) => resolve(root, directory)),
+  );
   return hashParts([
     `cache-version=${CACHE_VERSION}`,
     `node=${process.version}`,
@@ -609,7 +717,7 @@ export function globalSalt() {
     `vitest.config.ts=${sha256(readFileSync(resolve(root, 'vitest.config.ts')))}`,
     `package.json=${sha256(readFileSync(resolve(root, 'package.json')))}`,
     `package-lock.json=${sha256(readFileSync(resolve(root, 'package-lock.json')))}`,
-    `module-inventory=${hashParts(inventory)}`,
+    `module-inventory=${inventory}`,
     ...HASHED_ENVIRONMENT.map((name) => `${name}=${process.env[name] ?? '<unset>'}`),
   ]);
 }

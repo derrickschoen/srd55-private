@@ -32,6 +32,8 @@ export interface VerdictEntry {
 
 export function buildClosure(testFile: string): ClosureGraph;
 export function globalSalt(): string;
+/** The hash of every non-directory entry below `directories` (a link with its target) that keys the global salt. */
+export function moduleInventory(directories: readonly string[]): string;
 export function observationRecord(record: unknown): ObservationRecord | undefined;
 export function failClosedReasons(
   graph: ClosureGraph | undefined, record: ObservationRecord | undefined,
