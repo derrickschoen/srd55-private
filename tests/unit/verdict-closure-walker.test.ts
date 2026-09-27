@@ -82,6 +82,7 @@ const FIXTURES: Readonly<Record<string, readonly string[]>> = {
   'glob-negated.ts': ["export const modules = import.meta.glob(['./targets/*.ts', '!./targets/two.ts']);"],
   'glob-braces.ts': ["export const modules = import.meta.glob('./targets/{one,two}.ts');"],
   'glob-base.ts': ["export const modules = import.meta.glob('./one.ts', { base: './targets' });"],
+  'glob-spread-options.ts': ["export const modules = import.meta.glob('./one.ts', { ...{ base: './targets' } });"],
   'glob-computed.ts': [
     "const pattern = ['./targets/', '*.ts'].join('');",
     'export const modules = import.meta.glob(pattern);',
@@ -210,6 +211,13 @@ describe('the closure walker: import.meta.glob', () => {
     expect(closureOf('glob-base.ts')).toEqual({
       closure: [],
       unresolved: unresolvedAs('glob-base.ts', '<unsupported import.meta.glob option base>'),
+    });
+  });
+
+  it('fails closed options it cannot read, which could hide a base', () => {
+    expect(closureOf('glob-spread-options.ts')).toEqual({
+      closure: [],
+      unresolved: unresolvedAs('glob-spread-options.ts', '<computed import.meta.glob options>'),
     });
   });
 
