@@ -3071,3 +3071,54 @@ QUEUE on encounter.ts, in order:
 PARALLEL (off encounter.ts): SRD-BUILDTIME(-2), GUARD, RULE-INDEX, PATH-ONE, RECORDER-A + VERDICT-SOUND.
 
 Next free id: D919.
+
+## D919 — 2026-09-27 13:50 — owner: v12 saves migrate the STATE and archive the history; FOOTPRINT plan closed; wave-3 harvested; reviews
+
+FOOTPRINT plan r3 review (gpt-6-sol xhigh, the last consensus round) REVISE, with 2 P1 left:
+- mixed-version stored histories are unplanned (session-persistence.ts:3391 migrates contiguous version groups);
+- the sealed-history guarantee needs a decision (NC-g passes after coordinated archive and revision edits);
+- P2: W21d may not produce a sealed transition;
+- P3: the queue text should follow D918.
+The consensus cap is reached, so the open P1s went to the owner.
+
+QUESTION (AskUserQuestion). OWNER, verbatim choice: "Migrate state, archive history (Recommended)". It REFINES D907 Q6.
+- On load, a v12 (or any older) save whose current state holds a body past the map edge has its CURRENT state repaired by the stated D514 rule. Play continues from there.
+- The old turn history is kept byte-for-byte as a read-only archive attached to the save, still verifiable with the rules it was recorded under, on demand.
+- New history starts at the repair point. No old turn is re-interpreted or re-reduced under the new rules. This closes both r3 P1s: mixed versions are archived verbatim; nothing sealed is rewritten.
+- Witnesses:
+  - the repair plus a continued turn;
+  - the archive's bytes are unchanged (sha);
+  - the archive verifies under its recorded rules;
+  - an archive tampered with is refused on demand;
+  - a mixed-version save is handled.
+- FOOTPRINT's plan is CLOSED with this ruling; the P2 and P3 go to the implementer.
+
+REVIEWS:
+- PATH-ONE r2 APPROVE (5a2b42e8 on 0b688fbe). Owed: its timed pair.
+- SRD-BUILDTIME r1 REVISE, all accepted:
+  - P1: scope — 14 production modules still parse extracts; D915/D917 cover all 18.
+  - P1: artifacts must be `as const satisfies` with facts in the types (branded keys, bounded levels, 20-entry per-level tuples), not widened annotations.
+  - P2: the drift test proves artifact bytes, not every source byte; pre-list prose is ignored.
+  - P2: the dist scan checks markers from 3 corpora only.
+  - P3: retain real-command idempotence evidence.
+- IMPORT-GUARD r1 REVISE, accepted:
+  - P1: R2 must cover every docs/srd corpus, not 2.
+  - P2: the runtime-edge definition is still duplicated in test-affected.mjs. RECORDER-A fix1 has fixed test-affected's two holes on its own branch; whichever lands second switches to the shared classifier.
+
+HARVESTED (agent-reported, reviews pending):
+- RECORDER-A fix1: claude/recordera 345717eb on 7d70c2de.
+  - VERDICT-SOUND: 63 of 661 test closures were missing runtime-loaded modules (29 glob, 34 inline-type); after the fix, 0.
+  - The real-CLI false green was reproduced before and fixed after.
+  - 16/16 mutants killed; pins unchanged.
+- PC-EXPORT-TRUTH: claude/pcexport 57135fdc.
+  - Built PCs carry sheet skills and passive Perception, sourced senses incl. Darkvision, Dragonborn/Tiefling resistance, and every selected mastery (typed 'sourced_not_executed' where the engine does not execute it).
+  - 6 witnesses red on main; 3,293 tests pass; pins unchanged.
+  - Open items: packs that do not state skills (heldout fixtures) are typed 'unstated_by_pack' until REGEN; engine `?? 0` skill reads (monsters) go to CONDITION-D20; Topple DC uses the attack bonus instead of 8 + mod + PB (a pre-existing wrong result, follow-up).
+- RULE-INDEX: claude/ruleindex 5a175e6d.
+  - SRD_RULE_INDEX: 1,766 rule units across 30 kinds, generated `as const satisfies` with a byte drift test.
+  - RULE_STATUS is exhaustive; 6 rules are seeded from witnesses/typed data and 1,760 are 'unrepresented'.
+  - One vocabulary module; tsc +0.42 s; 16/17 mutants killed (1 dead code removed).
+  - CORRECTION to D917/census: the glossary has 155 entries, not 156.
+  - Owner-level items it raises (pending, one at a time): 71 unassigned rules (Playing the Game sections) need a RULES-CORE unit; a perception capability unit; DieSize d3 (SRD) against D34's planner dice.
+
+Next free id: D920.
