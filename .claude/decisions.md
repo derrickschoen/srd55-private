@@ -3191,3 +3191,29 @@ Q7. Archmage XP. Verified: the stat block prints "CR 12 (XP 8,000; PB +4)"; the 
 - Owner: MON-TABLES / SRD-MONSTERS.
 
 Next free id: D923.
+
+## D923 — 2026-09-27 17:36 — owner question series, Q8–Q13
+
+Q8. Earlier exclusions (D44/D55/D61/D65/D86/D102/D142) under D918's "represented".
+OWNER, verbatim selections: "Tools & languages typed (Recommended), Coins and equipment costs".
+- Tool and language proficiencies become typed data that the sheet and checks use. The prose rule of D44/D102 is superseded.
+- Coins and equipment costs are tracked: gold, item prices, buying starting equipment, spell material costs in gp. The D86/D40 "no coins" rule is superseded. Encumbrance is not included.
+- NOT selected, so they stay typed rows marked excluded_by_owner with no execution: encumbrance (D86), character XP and XP levelling (D142), random generation (D55), and the fixed background feat and gold rules (D61/D65 as far as not covered by coins above).
+
+Q9. Monster skill rolls: an unlisted Stealth/Perception rolls +0 (`?? 0`, encounter.ts :1833/:4825/:4879). OWNER, verbatim choice: "Use ability modifier (Recommended)".
+- skill bonus = the listed value, else the governing ability modifier, with no default.
+- In CONDITION-D20, before REGEN, with a failing test first.
+
+Q10. Hand-authored species, which PC-EXPORT-TRUTH now refuses at export because their senses are unknown. OWNER, verbatim choice: "Add typed senses to authoring (Recommended)".
+- The species editor gets a REQUIRED typed senses field. No silent default.
+
+Q11. Local DB after the seed re-pin (the D226 marker disagreement; old Dragonborns unlinked). OWNER, verbatim choice: "Accept a reset (Recommended)".
+- Pre-alpha: a local DB from before the change is reset or characters are re-created. No migration code for this.
+
+Q12. Topple save DC. Verified SRD text: "DC 8 plus the ability modifier used to make the attack roll and your Proficiency Bonus". The export uses 8 + the whole attack bonus, which includes the weapon's magic bonus. OWNER, verbatim choice: "Fix before REGEN (Recommended)".
+- A typed formula, with a failing +1-weapon test first. It joins the pre-REGEN wrong-result fixes, as a PC-EXPORT-TRUTH follow-up.
+
+Q13. Tremorsense (Stonecunning) and Devil's Sight have no engine sense kind. OWNER, verbatim choice: "Into the PERCEPTION unit (Recommended)".
+- Until PERCEPTION lands they are typed 'sourced, not executed, awaiting perception_filters'; never dropped.
+
+Next free id: D924.
