@@ -91,11 +91,6 @@ const FIXTURES: Readonly<Record<string, readonly string[]>> = {
     'const discover = import.meta.glob;',
     "export const modules = discover('./targets/*.ts');",
   ],
-  'glob-outside.ts': ["export const modules = import.meta.glob('../../../*.json');"],
-  // beforeAll adds linked-entry/alias.ts -> ../targets/one.ts and linked-base -> targets.
-  'linked-entry/real.ts': ["export const real = 'real';"],
-  'glob-linked-entry.ts': ["export const modules = import.meta.glob('./linked-entry/*.ts');"],
-  'glob-linked-base.ts': ["export const modules = import.meta.glob('./linked-base/*.ts');"],
   // The digest witnesses change these bytes, so they share nothing with the forms above.
   'witness-glob/entry.ts': ["export const modules = import.meta.glob('./handlers/*.ts', { eager: true });"],
   'witness-glob/handlers/move.ts': ["import { TABLE } from '../table';", 'export const move = TABLE;'],
@@ -107,12 +102,29 @@ const FIXTURES: Readonly<Record<string, readonly string[]>> = {
   'witness-dynamic/data.json': ['{ "version": 1 }'],
 };
 
+/**
+ * Symbolic links, in a directory of their own: a glob over the fixtures above
+ * must never meet one, or it would fail closed for that reason instead.
+ * beforeAll adds entry/alias.ts -> ../real-targets/one.ts and base -> real-targets.
+ */
+const LINK_FIXTURES: Readonly<Record<string, readonly string[]>> = {
+  'real-targets/one.ts': ["export const one = 'one';"],
+  'entry/real.ts': ["export const real = 'real';"],
+  'glob-linked-entry.ts': ["export const modules = import.meta.glob('./entry/*.ts');"],
+  'glob-linked-base.ts': ["export const modules = import.meta.glob('./base/*.ts');"],
+};
+
 let probeDirectory = '';
+let linkDirectory = '';
+/** Inside the repository but outside every module inventory root (beforeAll writes glob-outside.ts). */
+let outsideDirectory = '';
+let outsidePattern = '';
 let cacheRoot = '';
 
 const probePath = (name: string): string => join(probeDirectory, name);
-const repositoryName = (name: string): string =>
-  relative(repositoryRoot, probePath(name)).split('\\').join('/');
+const linkPath = (name: string): string => join(linkDirectory, name);
+const repositoryPath = (path: string): string => relative(repositoryRoot, path).split('\\').join('/');
+const repositoryName = (name: string): string => repositoryPath(probePath(name));
 const closureOf = (name: string): { closure: readonly string[]; unresolved: readonly string[] } =>
   buildClosure(probePath(name));
 const names = (...files: string[]): string[] =>
@@ -132,17 +144,27 @@ beforeAll(() => {
   const parent = join(repositoryRoot, 'tests/test-input-boundary-probes');
   mkdirSync(parent, { recursive: true });
   probeDirectory = mkdtempSync(`${parent}/closure-walker-`);
-  for (const [name, lines] of Object.entries(FIXTURES)) {
-    mkdirSync(join(probeDirectory, name, '..'), { recursive: true });
-    writeFileSync(probePath(name), `${lines.join('\n')}\n`, 'utf8');
+  linkDirectory = mkdtempSync(`${parent}/closure-walker-links-`);
+  for (const [directory, fixtures] of [[probeDirectory, FIXTURES], [linkDirectory, LINK_FIXTURES]] as const) {
+    for (const [name, lines] of Object.entries(fixtures)) {
+      mkdirSync(join(directory, name, '..'), { recursive: true });
+      writeFileSync(join(directory, name), `${lines.join('\n')}\n`, 'utf8');
+    }
   }
-  symlinkSync('../targets/one.ts', probePath('linked-entry/alias.ts'));
-  symlinkSync('targets', probePath('linked-base'));
+  symlinkSync('../real-targets/one.ts', linkPath('entry/alias.ts'));
+  symlinkSync('real-targets', linkPath('base'));
+  mkdirSync(join(repositoryRoot, '.tmp'), { recursive: true });
+  outsideDirectory = mkdtempSync(join(repositoryRoot, '.tmp/closure-walker-outside-'));
+  writeFileSync(join(outsideDirectory, 'data.json'), '{}\n', 'utf8');
+  outsidePattern = `../../../${repositoryPath(outsideDirectory)}/*.json`;
+  writeFileSync(probePath('glob-outside.ts'), `export const modules = import.meta.glob('${outsidePattern}');\n`, 'utf8');
   cacheRoot = mkdtempSync(join(tmpdir(), 'dnd-verdict-closure-walker-'));
 });
 
 afterAll(() => {
   rmSync(probeDirectory, { recursive: true, force: true });
+  rmSync(linkDirectory, { recursive: true, force: true });
+  rmSync(outsideDirectory, { recursive: true, force: true });
   rmSync(cacheRoot, { recursive: true, force: true });
 });
 
@@ -234,21 +256,23 @@ describe('the closure walker: import.meta.glob', () => {
   it('fails closed a glob outside the module inventory, where a new match would change no salt', () => {
     expect(closureOf('glob-outside.ts')).toEqual({
       closure: [],
-      unresolved: unresolvedAs('glob-outside.ts', '<unsupported import.meta.glob ../../../*.json>'),
+      unresolved: unresolvedAs('glob-outside.ts', `<unsupported import.meta.glob ${outsidePattern}>`),
     });
   });
 
   it('fails closed a glob over a directory holding a symbolic link, which the inventory does not list', () => {
-    expect(closureOf('glob-linked-entry.ts')).toEqual({
+    const entry = linkPath('glob-linked-entry.ts');
+    expect(buildClosure(entry)).toEqual({
       closure: [],
-      unresolved: unresolvedAs('glob-linked-entry.ts', '<unsupported import.meta.glob ./linked-entry/*.ts>'),
+      unresolved: [`${repositoryPath(entry)} -> <unsupported import.meta.glob ./entry/*.ts>`],
     });
   });
 
   it('fails closed a glob whose base is a symbolic link', () => {
-    expect(closureOf('glob-linked-base.ts')).toEqual({
+    const entry = linkPath('glob-linked-base.ts');
+    expect(buildClosure(entry)).toEqual({
       closure: [],
-      unresolved: unresolvedAs('glob-linked-base.ts', '<unsupported import.meta.glob ./linked-base/*.ts>'),
+      unresolved: [`${repositoryPath(entry)} -> <unsupported import.meta.glob ./base/*.ts>`],
     });
   });
 });
