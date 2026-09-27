@@ -1,5 +1,5 @@
 import type { SrdRuleId } from './rule-index';
-import { RULE_STATUS_NAMES, type RuleStatus, type RuleStatusName } from './rule-status-types';
+import { RULE_STATUS_NAMES, type RuleStatus, type RuleStatusName, type RuleStatusRecord } from './rule-status-types';
 import { CLASSES_STATUS } from './status/classes';
 import { EQUIPMENT_STATUS } from './status/equipment';
 import { MAGIC_ITEMS_STATUS } from './status/magic-items';
@@ -17,11 +17,13 @@ import { TOOLBOX_STATUS } from './status/toolbox';
  * kinds it covers (./status/*.ts) so the unit that types a kind edits one file.
  *
  * The first fill (RULE-INDEX unit) marks a rule `executed` or `typed_only` only
- * where a witness test or typed data already exists, cited beside the entry;
- * every other rule is `unrepresented`, naming the unit that will type it.
- * Nothing here is a guess at execution: the witness-resolution test proves
- * every witness exists, and the coverage matrix is a derived report
- * (`npm run srd:rule-coverage`), never a pinned expectation.
+ * where every clause of its printed text is quoted with a witness assertion or
+ * a typed declaration; every other rule is `unrepresented`, naming the unit
+ * that will type it. Nothing here is a guess at execution: the status test
+ * re-reads each rule's text, proves the quotes cover it, finds each quoted
+ * assertion inside its named test and each typed fact inside its named
+ * declaration. The coverage matrix is a derived report (`npm run
+ * srd:rule-coverage`), never a pinned expectation.
  */
 export const RULE_STATUS = {
   ...RULES_STATUS,
@@ -32,7 +34,7 @@ export const RULE_STATUS = {
   ...STAT_BLOCKS_STATUS,
   ...MAGIC_ITEMS_STATUS,
   ...TOOLBOX_STATUS,
-} as const satisfies { readonly [K in SrdRuleId]: RuleStatus };
+} as const satisfies RuleStatusRecord;
 
 export function ruleStatus(id: SrdRuleId): RuleStatus {
   return RULE_STATUS[id];

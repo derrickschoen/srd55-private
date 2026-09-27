@@ -35,7 +35,7 @@
  *
  * NOT units, deliberately: a table ROW other than weapons and armour (a CR row,
  * a travel-terrain row, a trinket), a clause inside a rule (that is a
- * `SubRuleId`, owned by the unit that types the rule's clause tuple), and a
+ * `ClauseQuote` in the rule's status, quoted from its text), and a
  * sub-heading below the Contents level inside a rule section (it is inside that
  * section's span).
  */

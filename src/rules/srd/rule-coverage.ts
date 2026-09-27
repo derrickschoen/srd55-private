@@ -1,5 +1,6 @@
 import { SRD_RULE_KINDS, type SrdRuleKind } from './rule-index-types';
 import { SRD_RULE_IDS, SRD_RULE_INDEX, type SrdRuleId } from './rule-index';
+import { OWNER_RULINGS } from './owner-rulings';
 import { RULE_STATUS } from './rule-status';
 import {
   CAPABILITY_OWNER,
@@ -40,8 +41,9 @@ export function nextOwner(status: RuleStatus): UnitId | 'owner_decision' | 'none
     case 'typed_only':
       return CAPABILITY_OWNER[status.awaiting[0]];
     case 'excluded_by_owner':
-    case 'source_disagreement':
       return 'owner_decision';
+    case 'source_disagreement':
+      return status.ruling === null ? 'owner_decision' : OWNER_RULINGS[status.ruling].executedBy[0];
     case 'unrepresented':
       return status.unit;
   }
@@ -97,6 +99,10 @@ export function formatRuleCoverage(coverage: RuleCoverage): string {
   const owners = Object.entries(coverage.byOwner)
     .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0) || a[0].localeCompare(b[0]))
     .map(([owner, count]) => `  ${owner}: ${String(count)}`);
+  const rulings = (Object.keys(OWNER_RULINGS) as (keyof typeof OWNER_RULINGS)[]).map((id) => {
+    const ruling = OWNER_RULINGS[id];
+    return `  ${id} (${ruling.decision}, ${ruling.kind}): ${String(ruling.rules.length)} rules; executed by ${ruling.executedBy.join(', ')}`;
+  });
   return [
     'SRD 5.2.1 rule coverage (derived from RULE_STATUS; a report, never a pinned expectation)',
     '',
@@ -105,6 +111,9 @@ export function formatRuleCoverage(coverage: RuleCoverage): string {
     '',
     'Next step owned by:',
     ...owners,
+    '',
+    'Owner rulings (data; each executed by its unit, failing test first):',
+    ...rulings,
     '',
   ].join('\n');
 }
