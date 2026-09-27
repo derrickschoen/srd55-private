@@ -2981,3 +2981,55 @@ READINGS (the owner can overturn):
    - Sizes and order against in-flight units.
 
 Next free id: D917.
+
+## D917 — 2026-09-27 10:25 — SRD-TYPED census harvested; a FINDING AGAINST MY OWN WORK (D915/D916 facts); 12 wrong-result rules; the ranked 22-unit plan
+
+CENSUS: workflow wf_6f0cdb1b-102, 4 read-only lenses + synthesis on clone dnd-probe-srdtyped-1f7e @ 33e71908. Reports in .tmp/runs/srd-typed/*/report.md; the synthesis is .tmp/runs/srd-typed/synthesis/report.md (789 lines). Agent-reported unless marked.
+
+FINDING AGAINST MY OWN WORK, full length:
+- D915 recorded "Three runtime modules import the SRD text", and D916 repeated it. I grepped for the three corpus files the IMPORT-SLIM synthesis named, not for every `docs/srd/…?raw` import.
+- VERIFIED by me: `grep -rln "docs/srd/.*?raw" src` (excluding tests) finds 18 production modules and 32 import sites. They cover 28 of the 33 extracts plus the full text. 16 of the 18 are character-side (sheet, builder, level-up, origins, feats, weapons, armour, skills); they seed SQLite or feed UI screens directly.
+- The combat reducer imports none; its rules are hand-typed.
+- Consequences for in-flight work: SRD-BUILDTIME (scoped by D915 to ALL runtime consumers) had converted 4 of 18 when observed. GUARD's R2 allowlist covers the 2 corpora I named, which reach only 3 of the 18 importers. Both are carried into their reviews.
+- Other D916 statements the census corrects:
+  - the "Wizard 136 … Sorcerer 1" counts are the manifest's 225 cited list entries, not SRD membership. The SRD prints 875 memberships.
+  - "typed partial note" is `partial?: string` on 161 rows; only 14 closed gap codes exist.
+  - "62 statblock ids" is a registry of 118: 60 SRD, 55 homebrew and 3 templates.
+
+COVERAGE (typed data, of SRD totals):
+- spells 189/339: 28 fully executed, 65 partly, 96 typed only, 150 absent (119 of them level 5–9). The DB catalogue holds all 339 as runtime-parsed strings.
+- stat blocks 60 SRD-typed of 336; magic items 1/258.
+- class features 64/137 (73 name-only); subclass headings 9/58; species traits 9/33; feat benefits 12/32.
+- glossary 117/156; condition clauses 48/48 typed, 33 fully executed.
+- Traps, poisons, environmental effects, contagions and travel are absent.
+
+WRONG RESULTS TODAY (rank above representation). V = verified by the synthesis; my own check is marked.
+1. Prone never ends: no stand-up command (V).
+2. Frightened gives Disadvantage only against its source (V).
+3. Poisoned ability-check Disadvantage and Exhaustion's D20 penalty are missing at some sites.
+4. Dodge gives no Advantage on Dex saves (V).
+5. Monster fly/climb/swim/burrow speeds are ignored (V).
+6. 6 of 8 weapon masteries are silently null (V).
+7. Grapple escape is Strength-only (V).
+8. A user-built PC enters combat with passive Perception 10, +0 Stealth/Perception and no Darkvision. VERIFIED by me by reading stored-character-party-member.ts:440-449 and party-pack.ts:2544-2545. Not yet shown by a test.
+9. A Dragonborn cannot be exported.
+10. Dispel Evil and Good lacks its M component (V: definitions.ts:407 against spell-descriptions.txt:2247).
+11. Catalogue: healing false for all 339; area 0/339; 8 material costs wrong.
+12. The one-slot-spell-per-turn rule is not enforced.
+- Four implicit rulings need the owner: temporary HP keeps the larger value; resistance halves per damage term; flying ignores difficult terrain; Touch = 5 ft.
+
+"REPRESENTED" (proposal):
+- every SRD rule has a generated id (SrdRuleId) and span;
+- its data is typed `as const satisfies`;
+- an exhaustive RULE_STATUS record holds executed | partial(missing clauses → capability) | typed_only | excluded_by_owner | not_executable | source_disagreement | unrepresented. The last is transitional; deleting it makes "all rules represented" a compile-time fact.
+- Consumers switch on status with no default arm and refuse by type (never `?? 0` or silent null).
+- Production rule: G = generated + byte drift test for tables and headers; H = hand-typed from a cited span with a span-text hash pin, where prose must be interpreted (D257 "parser is drift alarm, never authority").
+- Measured: `as const satisfies` on the 339-spell artifact costs no measurable tsc time.
+
+PLAN: 22 ranked units (synthesis §6.2).
+- 16 reach "represented"; most are off encounter.ts, so they run beside the D911 queue.
+- 6 grow execution.
+- Top: RULE-INDEX/RULE-STATUS/SRD-VOCAB; CONDITION-D20 (wrong results 1–4, 7, 12); PC-EXPORT-TRUTH (wrong results 8, 9 and masteries); CLASS-TABLES; SPELL-HEADERS/IDS; the MOVEMENT-MODES decision (parked ELEVATION-02).
+- Conflicts with standing rules that need rulings: D26/D35/D40 (Part A: some reference data stays text; four DB area shapes where Part A says six — a finding); D44/D102/D86/D55/D142/D61/D65 exclusions (proposed typed rows marked excluded_by_owner); whether CONDITION-D20 and PC-EXPORT-TRUTH land before REGEN (D911 one regeneration).
+
+Next free id: D918.
