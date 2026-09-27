@@ -2854,3 +2854,17 @@ QUESTION 2 (recorder research, D909/D911). OWNER, verbatim: "Do your recommendat
   - the output is a ranked proposal list for the owner. Nothing is refactored until the owner picks.
 
 Next free id: D913.
+
+## D913 — 2026-09-27 05:51 — owner: accept pcac's new survival baseline (f10cc246) and queue a PC-tactics tuning unit
+
+QUESTION (AskUserQuestion, recommendation "Accept"):
+- Rebased pcac (claude/pcac-onmain 57eb6d92) moves survival-seeds f9c357a1 → f10cc246.
+- PC drops go 41 → 50; incoming damage is +8.4%; 30/30 encounters are still won.
+- Agent attribution: cover6's coverself rule reached through pcac's projected cover (probe, rerank9, cc_ref; 0 mismatches).
+
+OWNER, verbatim choice: "Accept, and tune later".
+- f10cc246 is the landing value for survival-seeds when pcac lands, with that attribution. This is conditional on codex r6 of the rebase and pcac's timed pair (queue5).
+- New queued unit PC-TUNE: look for PC planner tactics that reduce drops under the correct rules. The drop count is a measure, never a pin to restore.
+- PC-TUNE comes after pcac lands and after COVER-EDGE+REGEN, because sealed walls change the same encounters.
+
+Next free id: D914.
