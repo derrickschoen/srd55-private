@@ -3293,3 +3293,45 @@ QUESTION (my recommendation was to keep the one-way ratchet). OWNER, verbatim ch
 - The owner question brainstorm (Q1–Q25) is complete: D921–D927.
 
 Next free id: D928.
+
+## D928 — 2026-09-27 17:55 — wave 4 harvested (FOOTPRINT implemented; SRD-BUILDTIME fix1; IMPORT-GUARD fix1); reviews of PC-EXPORT, RULE-INDEX and RECORDER-A r2 → wave 5
+
+HARVESTED (agent-reported; codex reviews running):
+- FOOTPRINT: claude/footprint 18f8722f, 5 commits on 0d3ef291.
+  - C1: the 19 illegal starting placements repaired, with a typed interim v5 amendment.
+  - C2: createEncounter and every decoder place whole bodies only.
+  - C3: session v13; old saves repaired and history archived (D919).
+  - C4: the whole-body anchor proof at every mint site, plus the cast guard.
+  - C5: the W9b summon edge.
+  - 36/36 mutants killed by assertion (M-TYPE through TS2578; the M-GUARD plants caught by check-command-outcomes). 320 affected spec files, 6,619 tests, pass.
+  - Pins: only blind-rows 19d81fe0 → c5c13584 and d569-cells fedcda76 → 5d17e63b move, both at C1. They are attributed to the 7 repaired brutal fixtures (7 rows; 21 cells whose stateHash = the repaired file's sha). The plan predicted exactly these.
+- SRD-BUILDTIME fix1, claude/srdbuild:
+  - production importers of docs/srd go 18 → 0;
+  - all 18 artifacts are `as const satisfies`, with typed tuples and closed vocabularies;
+  - per-source sha pins; 34 dist markers;
+  - 415/415 derived values equal; DB dump identical; pins unchanged; 16/16 mutants killed.
+- IMPORT-GUARD fix1, claude/importguard 3595745c:
+  - R2 covers all of docs/srd/, with the 18 importers allowlisted (removedBy SRD-BUILDTIME).
+  - The classifier agrees with recorder-A's walker on every file (0 disagreements).
+  - 23/23 mutants killed. D927 (automatic budget raises) goes into its review.
+
+REVIEWS → dispositions (all accepted):
+- PC-EXPORT-TRUTH r1 REVISE:
+  - P1 DB marker boot failure: the owner accepted a reset (D923 Q11), so the fix is a typed, actionable reset error, not a migration.
+  - P1 older packs get fallback numbers: refuse by type and regenerate the committed packs.
+  - P2 resistance resolver merges an unrelated authored grant.
+  - P2 Topple DC (D923 Q12).
+  - P2 existing Dragonborns: reset accepted.
+- RULE-INDEX r1 REVISE:
+  - P1: Burrow/Climb/Swim claimed typed_only without typed clauses.
+  - P2: the Death Save witness proves a prompt, not a save.
+  - P2: no independent pin for the total incl. rule_section.
+  - P2: the mutation harness counted compile failures as kills (7 of 17). This is a finding against the agent's report: its 16/17 overstated.
+  - P2: vocabulary gaps. Plus d3 (D920) and D921–D924 rulings as typed data.
+- RECORDER-A r2 REVISE:
+  - P2: a symlink added after a green verdict can leave it stale.
+  - P3: bare child_process and fs specifiers do not fail closed.
+- Wave 5 (wf_0ecbc06e-54d) runs these three fix rounds.
+- PATH-ONE (approved r2) waits for a quiet window for its timed pair.
+
+Next free id: D929.
