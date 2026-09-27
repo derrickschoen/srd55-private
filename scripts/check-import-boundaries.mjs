@@ -829,10 +829,11 @@ const SELF_TESTS = [
   {
     rule: 'R2',
     name: 'allowlist entries that are wrong in themselves',
-    expect: 4,
+    expect: 5,
     mentions: [
       'R2 allowlist entry tests/unit/extract.test.ts is a test',
       'R2 allowlist entry src/neither.ts must say either',
+      'R2 allowlist entry src/someday.ts must say either',
       'R2 allowlist entry src/both.ts must say either',
       'R2 allowlist entry src/twice.ts is listed twice',
     ],
@@ -840,6 +841,7 @@ const SELF_TESTS = [
       srdImporters: [
         { importer: 'tests/unit/extract.test.ts', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/feats.txt'] },
         { importer: 'src/neither.ts', files: ['docs/srd/source/feats.txt'] },
+        { importer: 'src/someday.ts', removedBy: 'a later unit', files: ['docs/srd/source/feats.txt'] },
         { importer: 'src/both.ts', removedBy: SRD_BUILDTIME, tooling: 'a tool', files: ['docs/srd/source/feats.txt'] },
         { importer: 'src/twice.ts', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/feats.txt'] },
         { importer: 'src/twice.ts', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/feats.txt'] },
@@ -848,6 +850,7 @@ const SELF_TESTS = [
     files: {
       'tests/unit/extract.test.ts': "import feats from '../../docs/srd/source/feats.txt?raw';\n",
       'src/neither.ts': "import feats from '../docs/srd/source/feats.txt?raw';\n",
+      'src/someday.ts': "import feats from '../docs/srd/source/feats.txt?raw';\n",
       'src/both.ts': "import feats from '../docs/srd/source/feats.txt?raw';\n",
       'src/twice.ts': "import feats from '../docs/srd/source/feats.txt?raw';\n",
       'docs/srd/source/feats.txt': 'feats',

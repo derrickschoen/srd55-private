@@ -185,13 +185,15 @@ describe('specifier resolution and the graph', () => {
     expect(passedGlob.unresolved).toEqual([{ file: 'src/g.ts', line: 2, specifier: '<import.meta.glob>', evaluation: 'static' }]);
   });
 
-  it('resolves a specifier held in a module-scope constant, unless the name is declared twice', () => {
+  it('resolves a specifier held in a module-scope constant, unless the name is declared twice or is a `let`', () => {
     const constantFiles: Readonly<Record<string, string>> = {
       'tests/t.ts': [
         "const LAZY_PATH = './lazy';",
         "const SHADOWED = './lazy';",
+        "let MUTABLE = './lazy';",
         'export const load = () => import(LAZY_PATH);',
         'export const other = (SHADOWED: string) => import(SHADOWED);',
+        'export const later = () => import(MUTABLE);',
       ].join('\n'),
       'tests/lazy.ts': 'export const lazy = 1;\n',
     };
@@ -201,9 +203,12 @@ describe('specifier resolution and the graph', () => {
       filesBelow: () => [],
     });
     expect(graph.edges.get('tests/t.ts')).toEqual([
-      { to: 'tests/lazy.ts', evaluation: 'dynamic', syntax: 'dynamic-import', line: 3, inlineTypeOnly: false },
+      { to: 'tests/lazy.ts', evaluation: 'dynamic', syntax: 'dynamic-import', line: 4, inlineTypeOnly: false },
     ]);
-    expect(graph.unresolved).toEqual([{ file: 'tests/t.ts', line: 4, specifier: '<non-literal>', evaluation: 'dynamic' }]);
+    expect(graph.unresolved).toEqual([
+      { file: 'tests/t.ts', line: 5, specifier: '<non-literal>', evaluation: 'dynamic' },
+      { file: 'tests/t.ts', line: 6, specifier: '<non-literal>', evaluation: 'dynamic' },
+    ]);
   });
 
   it('keeps a cycle apart from a module both cycles merely import', () => {
