@@ -14,14 +14,21 @@
  *                         evaluates './a'. Write `import type { A }`. The P8
  *                         codemod (.tmp/runs/import-guard/p8-codemod.mjs)
  *                         rewrites them.
- *   R2 SRD corpus         only the listed modules import the SRD corpora
- *      allowlist          (docs/srd/full/*, spell-descriptions.txt), in any
- *                         form. The list is exact: a stale entry fails too.
- *                         SRD-BUILDTIME removes the runtime entries (D915).
+ *   R2 SRD text           the SRD text is every file under docs/srd/ (the
+ *      allowlist          full SRD and every extract), referenced in any form.
+ *                         Tests may reference it. Any other module may only
+ *                         if it is listed, with exactly what it references:
+ *                         today's runtime importers (D917), each removed by
+ *                         SRD-BUILDTIME, and SRD tooling. A stale entry fails,
+ *                         so the list only shrinks; with the runtime entries
+ *                         gone the SRD is read by tests and tooling only
+ *                         (D915). No other module may reach the SRD through a
+ *                         test or a tool either.
  *   R3 forbidden          no path, however indirect, from an entry to a
- *      reachability       forbidden module. A `pending` entry is one that does
- *                         not hold yet; it fails once it holds, so the unit
- *                         that makes it hold also makes it active.
+ *      reachability       forbidden module (or any file under a directory). A
+ *                         `pending` entry is one that does not hold yet; it
+ *                         fails once it holds, so the unit that makes it hold
+ *                         also makes it active.
  *   R4 cycle allowlist    the static-edge cycles (SCCs) are exactly the listed
  *                         ones: a new, grown, shrunk or vanished SCC fails.
  *   R5 closure budgets    each sentinel's static closure stays within
@@ -50,40 +57,146 @@ const SCAN_ROOTS = ['src', 'tools', 'tests', 'scripts', 'db'];
 const BUDGETS_FILE = 'scripts/import-budgets.json';
 const STATIC = [EVALUATION.STATIC];
 const RUNTIME = [EVALUATION.STATIC, EVALUATION.DYNAMIC];
-
-/** R2: the SRD text corpora (repository paths, matched without a query). */
-const SRD_CORPORA = [
-  { label: 'the full SRD', matches: (file) => file.startsWith('docs/srd/full/') },
-  { label: 'the SRD spell descriptions', matches: (file) => file === 'docs/srd/source/spell-descriptions.txt' },
-];
+/** R2 follows every reference that loads or ships a file: an asset URL puts the file in the build too. */
+const SHIPS = [EVALUATION.STATIC, EVALUATION.DYNAMIC, EVALUATION.ASSET];
 
 /**
- * R2: who may import a corpus today. SRD-BUILDTIME (D915) turns the runtime
- * derivations into generated data and deletes each `runtime` entry in the
- * same commit; the goal is that only the generator and its drift tests
- * remain.
+ * R2: the SRD text, `docs/srd/**`: the full SRD, every extract under
+ * docs/srd/source/ and their provenance notes. A reference in any form counts:
+ * a static or dynamic import with or without a query (`?raw`, `?url`), an
+ * eager or lazy glob, or `new URL(..., import.meta.url)`.
  */
-const SRD_CORPUS_IMPORTERS = [
-  { importer: 'src/rules/class-resources-srd.ts', corpus: 'docs/srd/full/srd-5.2.1.txt', runtime: true },
-  { importer: 'src/rules/spells-srd.ts', corpus: 'docs/srd/source/spell-descriptions.txt', runtime: true },
-  { importer: 'src/simulation/coverage.ts', corpus: 'docs/srd/full/srd-5.2.1.txt', runtime: true },
-  { importer: 'src/simulation/coverage.ts', corpus: 'docs/srd/source/spell-descriptions.txt', runtime: true },
-  { importer: 'tests/unit/rules/class-resources-srd.test.ts', corpus: 'docs/srd/full/srd-5.2.1.txt' },
-  { importer: 'tests/unit/simulation/gate-pattern-sentence-start-lookbehind.test.ts', corpus: 'docs/srd/full/srd-5.2.1.txt' },
+const SRD_TEXT = 'docs/srd/';
+
+/** R2: tests reference the SRD text freely; they are its drift tests and the extract tests. */
+const SRD_TEST_PREFIX = 'tests/';
+
+/**
+ * R2: every reference in src/ (the app and the engine) must resolve, or R2
+ * cannot prove it reads no SRD text; a computed `import()` is the case R0
+ * leaves open.
+ */
+const SRD_PROVEN_PREFIX = 'src/';
+
+/** R2's policy apart from the allowlist; the self-test runs it unchanged. */
+const SRD_POLICY = Object.freeze({ text: SRD_TEXT, testPrefix: SRD_TEST_PREFIX, provenPrefix: SRD_PROVEN_PREFIX });
+
+/** R2: the unit that removes every runtime entry below (D915, D917). */
+const SRD_BUILDTIME = 'SRD-BUILDTIME';
+
+/**
+ * R2: every module outside tests/ that references the SRD text, with exactly
+ * the files it references (the check fails on a file an entry does not list,
+ * and on a listed file the module no longer references).
+ *
+ * `removedBy: 'SRD-BUILDTIME'`: TODAY's runtime importers, the D917 census (18
+ * modules, 32 references to 28 extracts and the full SRD). Each parses the SRD
+ * text at runtime. SRD-BUILDTIME turns each derivation into generated typed
+ * data and, because a stale entry fails, deletes the file (and the entry,
+ * when it is the last) in the commit that removes the import. When the last
+ * runtime entry goes, R2 means: tests, the generator and its drift tests only.
+ *
+ * `tooling`: a build-time tool that reads the SRD text, with why. The
+ * SRD-BUILDTIME generator is listed here when it lands.
+ */
+const SRD_TEXT_IMPORTERS = [
   {
-    importer: 'tests/unit/simulation/gate-pattern-sentence-start-lookbehind.test.ts',
-    corpus: 'docs/srd/source/spell-descriptions.txt',
+    importer: 'scripts/srd/dehyphenate.mjs',
+    tooling: 'reflows the spell-description extract in place (a maintenance CLI)',
+    files: ['docs/srd/source/spell-descriptions.txt'],
   },
-  { importer: 'tests/unit/simulation/save-damage-coverage-freezing.test.ts', corpus: 'docs/srd/source/spell-descriptions.txt' },
-  { importer: 'tests/unit/tools/engine-child-bundle.test.ts', corpus: 'docs/srd/full/srd-5.2.1.txt' },
-  { importer: 'tests/unit/tools/engine-child-bundle.test.ts', corpus: 'docs/srd/source/spell-descriptions.txt' },
+  {
+    importer: 'src/rules/ability-score-generation-srd.ts',
+    removedBy: SRD_BUILDTIME,
+    files: ['docs/srd/source/ability-score-generation.txt'],
+  },
+  { importer: 'src/rules/armor-srd.ts', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/armor-table.txt'] },
+  {
+    importer: 'src/rules/class-choice-entitlements-srd.ts',
+    removedBy: SRD_BUILDTIME,
+    files: ['docs/srd/source/class-expertise.txt', 'docs/srd/source/class-spell-replacement.txt'],
+  },
+  {
+    importer: 'src/rules/class-equipment-srd.ts',
+    removedBy: SRD_BUILDTIME,
+    files: ['docs/srd/source/class-starting-equipment.txt'],
+  },
+  {
+    importer: 'src/rules/class-level-features-srd.ts',
+    removedBy: SRD_BUILDTIME,
+    files: ['docs/srd/source/class-level-tables.txt'],
+  },
+  {
+    importer: 'src/rules/class-resources-srd.ts',
+    removedBy: SRD_BUILDTIME,
+    files: ['docs/srd/full/srd-5.2.1.txt', 'docs/srd/source/class-level-tables.txt'],
+  },
+  {
+    importer: 'src/rules/class-traits-srd.ts',
+    removedBy: SRD_BUILDTIME,
+    files: ['docs/srd/source/attack-class-features.txt', 'docs/srd/source/class-core-traits.txt'],
+  },
+  {
+    importer: 'src/rules/draconic-resilience-srd.ts',
+    removedBy: SRD_BUILDTIME,
+    files: ['docs/srd/source/draconic-resilience.txt'],
+  },
+  {
+    importer: 'src/rules/extra-attack-srd.ts',
+    removedBy: SRD_BUILDTIME,
+    files: ['docs/srd/source/extra-attack-other-sources.txt'],
+  },
+  { importer: 'src/rules/feats-srd.ts', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/feats.txt'] },
+  {
+    importer: 'src/rules/multiclass-entry-srd.ts',
+    removedBy: SRD_BUILDTIME,
+    files: ['docs/srd/source/multiclass-entry-grants.txt'],
+  },
+  {
+    importer: 'src/rules/origins-srd.ts',
+    removedBy: SRD_BUILDTIME,
+    files: ['docs/srd/source/backgrounds.txt', 'docs/srd/source/species-descriptions.txt'],
+  },
+  { importer: 'src/rules/skills.ts', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/skills-table.txt'] },
+  {
+    importer: 'src/rules/spells-srd.ts',
+    removedBy: SRD_BUILDTIME,
+    files: [
+      'docs/srd/source/bard-spell-list.txt',
+      'docs/srd/source/cleric-spell-list.txt',
+      'docs/srd/source/druid-spell-list.txt',
+      'docs/srd/source/paladin-spell-list.txt',
+      'docs/srd/source/ranger-spell-list.txt',
+      'docs/srd/source/sorcerer-spell-list.txt',
+      'docs/srd/source/spell-descriptions.txt',
+      'docs/srd/source/warlock-spell-list.txt',
+      'docs/srd/source/wizard-spell-list.txt',
+    ],
+  },
+  { importer: 'src/rules/srd-subclasses.ts', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/subclasses.txt'] },
+  {
+    importer: 'src/rules/unarmored-defense-srd.ts',
+    removedBy: SRD_BUILDTIME,
+    files: ['docs/srd/source/unarmored-defense.txt'],
+  },
+  {
+    importer: 'src/rules/weapons-srd.ts',
+    removedBy: SRD_BUILDTIME,
+    files: ['docs/srd/source/weapon-mastery-progression.txt', 'docs/srd/source/weapons-table.txt'],
+  },
+  {
+    importer: 'src/simulation/coverage.ts',
+    removedBy: SRD_BUILDTIME,
+    files: ['docs/srd/full/srd-5.2.1.txt', 'docs/srd/source/spell-descriptions.txt'],
+  },
 ];
 
 /**
  * R3: `from` is a repository path or a directory prefix ending in `/`; `to` a
- * graph node (a resource carries its query); `via` the edges followed:
- * `runtime` (static and dynamic imports) or `static` (what loads with the
- * module, such as an entry's boot chunk).
+ * graph node (a resource carries its query) or a directory prefix ending in
+ * `/`, which stands for every file below it in any form; `via` the edges
+ * followed: `runtime` (static and dynamic imports) or `static` (what loads
+ * with the module, such as an entry's boot chunk).
  */
 const FORBIDDEN_REACHABILITY = [
   {
@@ -103,9 +216,9 @@ const FORBIDDEN_REACHABILITY = [
   {
     status: 'pending',
     from: 'tools/engine-mcp-server.ts',
-    to: 'docs/srd/full/srd-5.2.1.txt?raw',
+    to: SRD_TEXT,
     via: 'runtime',
-    why: 'the engine child must not carry the SRD text (SRD-BUILDTIME, D915)',
+    why: 'the engine child must not carry the SRD text, any of it (SRD-BUILDTIME, D915)',
   },
   {
     status: 'pending',
@@ -117,9 +230,9 @@ const FORBIDDEN_REACHABILITY = [
   {
     status: 'pending',
     from: 'src/main.ts',
-    to: 'docs/srd/full/srd-5.2.1.txt?raw',
+    to: SRD_TEXT,
     via: 'static',
-    why: 'the boot chunk must not carry the SRD text (SRD-BUILDTIME P3, D915)',
+    why: 'the boot chunk must not carry the SRD text, any of it (SRD-BUILDTIME P3, D915)',
   },
   {
     status: 'pending',
@@ -176,30 +289,113 @@ function ruleR1(graph) {
   return { diagnostics, notes: [] };
 }
 
-function ruleR2(graph, corpora, allowed) {
+/**
+ * `srd`: `{ text, testPrefix, provenPrefix, importers }`: the SRD text's
+ * directory, the tests' directory, the directory whose every reference must
+ * resolve for R2 to prove it (the app and engine, src/), and the allowlist.
+ */
+function ruleR2(graph, srd) {
   const diagnostics = [];
-  const seen = new Set();
+  const isTest = (file) => file.startsWith(srd.testPrefix);
+  const entries = new Map();
+  for (const entry of srd.importers) {
+    const problems = [];
+    if (isTest(entry.importer)) problems.push('is a test, and tests need no entry');
+    if (entries.has(entry.importer)) problems.push('is listed twice');
+    const removed = entry.removedBy === SRD_BUILDTIME;
+    const tooling = typeof entry.tooling === 'string' && entry.tooling.trim() !== '';
+    if (removed === tooling) problems.push(`must say either removedBy: '${SRD_BUILDTIME}' or, for a tool, tooling: '<why>'`);
+    if (!Array.isArray(entry.files) || entry.files.length === 0 || entry.files.some((file) => !file.startsWith(srd.text))) {
+      problems.push(`must list the ${srd.text} files it references`);
+    }
+    for (const problem of problems) diagnostics.push(`R2 allowlist entry ${entry.importer} ${problem}`);
+    entries.set(entry.importer, entry);
+  }
+  const isTooling = (file) => typeof entries.get(file)?.tooling === 'string';
+
+  // Direct references: importer -> SRD file -> the first edge naming it.
+  const referenced = new Map();
   for (const [importer, edges] of graph.edges) {
     for (const edge of edges) {
-      if (!RUNTIME.includes(edge.evaluation)) continue;
       const file = nodeFile(edge.to);
-      const corpus = corpora.find((candidate) => candidate.matches(file));
-      if (corpus === undefined) continue;
-      const key = `${importer}\0${file}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      if (!allowed.some((entry) => entry.importer === importer && entry.corpus === file)) {
-        diagnostics.push(`R2 ${importer}:${String(edge.line)}: imports ${corpus.label} (${edge.to}) ` +
-          'but is not on the SRD corpus allowlist; derive the data at build time instead');
+      if (!SHIPS.includes(edge.evaluation) || !file.startsWith(srd.text)) continue;
+      const files = referenced.get(importer) ?? new Map();
+      if (!files.has(file)) files.set(file, edge);
+      referenced.set(importer, files);
+    }
+  }
+  for (const [importer, files] of referenced) {
+    if (isTest(importer)) continue;
+    const entry = entries.get(importer);
+    for (const [file, edge] of files) {
+      if (entry === undefined) {
+        diagnostics.push(`R2 ${importer}:${String(edge.line)}: references the SRD text (${edge.to}) but is not on the ` +
+          `SRD text allowlist; only tests and listed tooling read the SRD, so derive the data at build time (${SRD_BUILDTIME}, D915)`);
+      } else if (!(entry.files ?? []).includes(file)) {
+        diagnostics.push(`R2 ${importer}:${String(edge.line)}: references ${edge.to}, which its allowlist entry does not ` +
+          'list; an entry only ever shrinks');
       }
     }
   }
-  for (const entry of allowed) {
-    if (!seen.has(`${entry.importer}\0${entry.corpus}`)) {
-      diagnostics.push(`R2 stale allowlist entry: ${entry.importer} no longer imports ${entry.corpus}; delete the entry`);
+  for (const entry of srd.importers) {
+    for (const file of Array.isArray(entry.files) ? entry.files : []) {
+      if (referenced.get(entry.importer)?.has(file) !== true) {
+        diagnostics.push(`R2 stale allowlist entry: ${entry.importer} no longer references ${file}; delete it from ` +
+          'the entry, and the entry with its last file');
+      }
     }
   }
-  return { diagnostics, notes: [] };
+
+  // Carriers: tests and tools that reach the SRD text. A module that is
+  // neither may not load one (it may load a listed runtime importer, which is
+  // accounted for above and removed by SRD-BUILDTIME).
+  const importersOf = new Map();
+  for (const [importer, edges] of graph.edges) {
+    for (const edge of edges) {
+      if (!RUNTIME.includes(edge.evaluation)) continue;
+      const list = importersOf.get(edge.to) ?? [];
+      list.push({ importer, line: edge.line });
+      importersOf.set(edge.to, list);
+    }
+  }
+  const carries = new Map();
+  for (const [importer, files] of referenced) {
+    if (isTest(importer) || isTooling(importer)) carries.set(importer, [...files.keys()][0]);
+  }
+  const queue = [...carries.keys()];
+  const crossings = new Set();
+  while (queue.length > 0) {
+    const carrier = queue.shift();
+    for (const { importer, line } of importersOf.get(carrier) ?? []) {
+      if (carries.has(importer)) continue;
+      if (isTest(importer) || isTooling(importer)) {
+        carries.set(importer, carries.get(carrier));
+        queue.push(importer);
+        continue;
+      }
+      crossings.add(`R2 ${importer}:${String(line)}: reaches the SRD text (${carries.get(carrier)}) through ${carrier}, ` +
+        'a test or a tool; outside tests and tooling the SRD is reached only through a listed runtime importer');
+    }
+  }
+  diagnostics.push(...crossings);
+
+  // A computed reference might name the SRD text; a literal one names its
+  // path. Static ones are R0's.
+  for (const reference of graph.unresolved) {
+    if (!reference.file.startsWith(srd.provenPrefix) || reference.evaluation === EVALUATION.STATIC) continue;
+    const named = reference.specifier.startsWith('<')
+      ? undefined
+      : path.posix.join(path.posix.dirname(reference.file), reference.specifier.split(/[?#]/u)[0]);
+    if (named !== undefined && !named.startsWith(srd.text)) continue;
+    diagnostics.push(`R2 ${reference.file}:${String(reference.line)}: cannot resolve ${reference.evaluation} reference ` +
+      `'${reference.specifier}', so R2 cannot prove it reads no SRD text; name the file literally`);
+  }
+
+  const runtimeEntries = srd.importers.filter((entry) => entry.removedBy === SRD_BUILDTIME);
+  const runtimeFiles = runtimeEntries.reduce((sum, entry) => sum + (entry.files?.length ?? 0), 0);
+  const notes = [`R2 ${String(runtimeEntries.length)} runtime importer(s) of the SRD text, ${String(runtimeFiles)} ` +
+    `file reference(s), left for ${SRD_BUILDTIME} to remove`];
+  return { diagnostics, notes };
 }
 
 function entryFiles(graph, from) {
@@ -207,7 +403,14 @@ function entryFiles(graph, from) {
   return [...graph.edges.keys()].filter((file) => file.startsWith(from)).sort();
 }
 
-function ruleR3(graph, entries, isFile) {
+/** The first node in a closure that is `to`, or any file below `to` when it ends in `/`. */
+function reachedTarget(reached, to) {
+  if (!to.endsWith('/')) return reached.has(to) ? to : undefined;
+  return [...reached.keys()].filter((id) => nodeFile(id).startsWith(to)).sort()[0];
+}
+
+/** `host`: `{ isFile, filesBelow }`, as for buildModuleGraph. */
+function ruleR3(graph, entries, host) {
   const diagnostics = [];
   const notes = [];
   const unresolvedByFile = new Map();
@@ -223,7 +426,10 @@ function ruleR3(graph, entries, isFile) {
       diagnostics.push(`R3 ${entry.from}: no such module; fix or delete the entry`);
       continue;
     }
-    if (!isFile(nodeFile(entry.to))) {
+    const exists = entry.to.endsWith('/')
+      ? host.filesBelow(entry.to.slice(0, -1)).length > 0
+      : host.isFile(nodeFile(entry.to));
+    if (!exists) {
       diagnostics.push(`R3 ${entry.to}: no such target, so the entry could never fail; fix or delete it`);
       continue;
     }
@@ -231,7 +437,8 @@ function ruleR3(graph, entries, isFile) {
     const unproven = [];
     for (const start of starts) {
       const reached = closure(graph, start, evaluations);
-      if (reached.has(entry.to)) violations.push(pathTo(reached, entry.to).join(' -> '));
+      const hit = reachedTarget(reached, entry.to);
+      if (hit !== undefined) violations.push(pathTo(reached, hit).join(' -> '));
       for (const file of reached.keys()) {
         for (const reference of unresolvedByFile.get(file) ?? []) {
           if (evaluations.includes(reference.evaluation)) {
@@ -340,8 +547,8 @@ function runRules(graph, policy) {
   const results = {
     R0: ruleR0(graph),
     R1: ruleR1(graph),
-    R2: ruleR2(graph, policy.corpora, policy.corpusImporters),
-    R3: ruleR3(graph, policy.forbidden, policy.isFile),
+    R2: ruleR2(graph, policy.srd),
+    R3: ruleR3(graph, policy.forbidden, policy),
     R4: ruleR4(graph, policy.cycles),
     R5: ruleR5(graph, policy.budgets, policy.sizeOf),
   };
@@ -418,13 +625,13 @@ function runCheckout(root, update) {
   const built = performance.now();
   const budgets = readBudgets(root);
   const results = runRules(graph, {
-    corpora: SRD_CORPORA,
-    corpusImporters: SRD_CORPUS_IMPORTERS,
+    srd: { ...SRD_POLICY, importers: SRD_TEXT_IMPORTERS },
     forbidden: FORBIDDEN_REACHABILITY,
     cycles: ALLOWED_CYCLES,
     budgets,
     sizeOf: host.sizeOf,
     isFile: host.isFile,
+    filesBelow: host.filesBelow,
   });
   const diagnostics = Object.values(results).flatMap((result) => result.diagnostics);
   for (const note of Object.values(results).flatMap((result) => result.notes)) console.log(note);
@@ -468,14 +675,15 @@ function fixtureResults(files, policy = {}) {
   const host = fixtureHost(files);
   const graph = buildModuleGraph(Object.keys(files).filter(isCodeFile), host);
   return runRules(graph, {
-    corpora: [{ label: 'the corpus', matches: (file) => file.startsWith('docs/corpus/') }],
-    corpusImporters: [],
     forbidden: [],
     cycles: [],
     budgets: { marginPercent: { files: 10, bytes: 10 }, sentinels: {} },
     sizeOf: host.sizeOf,
     isFile: host.isFile,
+    filesBelow: host.filesBelow,
     ...policy,
+    // The real SRD policy, with the fixture's allowlist.
+    srd: { ...SRD_POLICY, importers: policy.srdImporters ?? [] },
   });
 }
 
@@ -515,36 +723,146 @@ const SELF_TESTS = [
   },
   {
     rule: 'R2',
-    name: 'an allowlisted importer and a non-corpus raw import',
+    name: 'a listed runtime importer and its importer, a listed tool, tests in every form, a non-SRD raw import',
     expect: 0,
-    policy: { corpusImporters: [{ importer: 'src/allowed.ts', corpus: 'docs/corpus/srd.txt' }] },
+    policy: {
+      srdImporters: [
+        { importer: 'src/rules/armor-srd.ts', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/armor-table.txt'] },
+        { importer: 'scripts/srd/tool.mjs', tooling: 'a maintenance CLI', files: ['docs/srd/full/srd.txt'] },
+      ],
+    },
     files: {
-      'src/allowed.ts': "import srd from '../docs/corpus/srd.txt?raw';\nimport other from '../docs/other.txt?raw';\n",
-      'docs/corpus/srd.txt': 'SRD',
+      'src/rules/armor-srd.ts': "import table from '../../docs/srd/source/armor-table.txt?raw';\nexport const armor = table;\n",
+      'src/sheet.ts': "import { armor } from './rules/armor-srd';\nimport notes from '../docs/other.txt?raw';\n",
+      'scripts/srd/tool.mjs': "export const text = new URL('../../docs/srd/full/srd.txt', import.meta.url);\n",
+      'tests/unit/extracts.test.ts': "import table from '../../docs/srd/source/armor-table.txt?raw';\n" +
+        "import full from '../../docs/srd/full/srd.txt?raw';\n" +
+        "export const all = import.meta.glob('../../docs/srd/source/*.txt', { query: '?raw', eager: true });\n" +
+        "export const url = new URL('../../docs/srd/source/feats.txt', import.meta.url);\n",
+      'tests/helpers/srd-text.ts': "export const load = () => import('../../docs/srd/source/feats.txt?raw');\n",
+      'tests/unit/feats.test.ts': "import { load } from '../helpers/srd-text';\nimport { text } from '../../scripts/srd/tool.mjs';\n",
+      'docs/srd/source/armor-table.txt': 'armor',
+      'docs/srd/source/feats.txt': 'feats',
+      'docs/srd/full/srd.txt': 'SRD',
       'docs/other.txt': 'other',
     },
   },
   {
     rule: 'R2',
-    name: 'off-list static, dynamic and eager-glob raw imports of the corpus',
-    expect: 3,
-    mentions: ['src/static.ts:1', 'src/dynamic.ts:1', 'src/glob.ts:1'],
-    policy: { corpusImporters: [{ importer: 'src/allowed.ts', corpus: 'docs/corpus/srd.txt' }] },
+    name: 'a planted new importer of an extract no entry lists (the r1 P1 case)',
+    expect: 1,
+    mentions: ['R2 src/rules/sheet-math-srd.ts:1: references the SRD text (docs/srd/source/sheet-math.txt?raw)'],
+    policy: {
+      srdImporters: [{ importer: 'src/rules/armor-srd.ts', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/armor-table.txt'] }],
+    },
     files: {
-      'src/allowed.ts': "import srd from '../docs/corpus/srd.txt?raw';\n",
-      'src/static.ts': "import srd from '../docs/corpus/srd.txt?raw';\n",
-      'src/dynamic.ts': "export const load = () => import('../docs/corpus/srd.txt?raw');\n",
-      'src/glob.ts': "export const all = import.meta.glob('../docs/corpus/*.txt', { query: '?raw', eager: true });\n",
-      'docs/corpus/srd.txt': 'SRD',
+      'src/rules/armor-srd.ts': "import table from '../../docs/srd/source/armor-table.txt?raw';\n",
+      'src/rules/sheet-math-srd.ts': "import sheetMath from '../../docs/srd/source/sheet-math.txt?raw';\n",
+      'docs/srd/source/armor-table.txt': 'armor',
+      'docs/srd/source/sheet-math.txt': 'sheet math',
     },
   },
   {
     rule: 'R2',
-    name: 'a stale allowlist entry',
+    name: 'an unlisted `?url` import, dynamic import, eager glob and asset URL of the SRD text',
+    expect: 4,
+    mentions: ['src/static-url.ts:1', 'src/dynamic.ts:1', 'src/glob.ts:1', 'src/asset.ts:1'],
+    files: {
+      'src/static-url.ts': "import href from '../docs/srd/full/srd.txt?url';\n",
+      'src/dynamic.ts': "export const load = () => import('../docs/srd/source/feats.txt?raw');\n",
+      'src/glob.ts': "export const all = import.meta.glob('../docs/srd/source/*.txt', { query: '?raw', eager: true });\n",
+      'src/asset.ts': "export const url = new URL('../docs/srd/full/srd.txt', import.meta.url);\n",
+      'docs/srd/source/feats.txt': 'feats',
+      'docs/srd/full/srd.txt': 'SRD',
+    },
+  },
+  {
+    rule: 'R2',
+    name: 'a listed importer that takes a new extract, and entries gone stale',
+    expect: 3,
+    mentions: [
+      'R2 src/rules/armor-srd.ts:2: references docs/srd/source/feats.txt?raw, which its allowlist entry does not list',
+      'stale allowlist entry: src/rules/armor-srd.ts no longer references docs/srd/source/weapons-table.txt',
+      'stale allowlist entry: src/rules/skills.ts no longer references docs/srd/source/skills-table.txt',
+    ],
+    policy: {
+      srdImporters: [
+        {
+          importer: 'src/rules/armor-srd.ts',
+          removedBy: SRD_BUILDTIME,
+          files: ['docs/srd/source/armor-table.txt', 'docs/srd/source/weapons-table.txt'],
+        },
+        { importer: 'src/rules/skills.ts', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/skills-table.txt'] },
+      ],
+    },
+    files: {
+      'src/rules/armor-srd.ts': "import table from '../../docs/srd/source/armor-table.txt?raw';\n" +
+        "import feats from '../../docs/srd/source/feats.txt?raw';\n",
+      'src/rules/skills.ts': "import { SKILLS } from './skills.generated';\n",
+      'src/rules/skills.generated.ts': 'export const SKILLS = [] as const;\n',
+      'docs/srd/source/armor-table.txt': 'armor',
+      'docs/srd/source/feats.txt': 'feats',
+    },
+  },
+  {
+    rule: 'R2',
+    name: 'modules that reach the SRD text through a tool and through a test helper',
+    expect: 2,
+    mentions: [
+      'R2 src/rules/generated-user.ts:1: reaches the SRD text (docs/srd/source/feats.txt) through scripts/srd/generate.ts',
+      'R2 src/leak.ts:1: reaches the SRD text (docs/srd/full/srd.txt) through tests/helpers/srd-reexport.ts',
+    ],
+    policy: {
+      srdImporters: [{ importer: 'scripts/srd/generate.ts', tooling: 'the generator', files: ['docs/srd/source/feats.txt'] }],
+    },
+    files: {
+      'scripts/srd/generate.ts': "import feats from '../../docs/srd/source/feats.txt?raw';\nexport const generate = () => feats;\n",
+      'src/rules/generated-user.ts': "import { generate } from '../../scripts/srd/generate';\n",
+      'tests/helpers/srd-text.ts': "import full from '../../docs/srd/full/srd.txt?raw';\nexport const text = full;\n",
+      'tests/helpers/srd-reexport.ts': "export { text } from './srd-text';\n",
+      'src/leak.ts': "export const later = () => import('../tests/helpers/srd-reexport');\n",
+      'tests/unit/drift.test.ts': "import { text } from '../helpers/srd-text';\nimport { generate } from '../../scripts/srd/generate';\n",
+      'docs/srd/source/feats.txt': 'feats',
+      'docs/srd/full/srd.txt': 'SRD',
+    },
+  },
+  {
+    rule: 'R2',
+    name: 'allowlist entries that are wrong in themselves',
+    expect: 4,
+    mentions: [
+      'R2 allowlist entry tests/unit/extract.test.ts is a test',
+      'R2 allowlist entry src/neither.ts must say either',
+      'R2 allowlist entry src/both.ts must say either',
+      'R2 allowlist entry src/twice.ts is listed twice',
+    ],
+    policy: {
+      srdImporters: [
+        { importer: 'tests/unit/extract.test.ts', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/feats.txt'] },
+        { importer: 'src/neither.ts', files: ['docs/srd/source/feats.txt'] },
+        { importer: 'src/both.ts', removedBy: SRD_BUILDTIME, tooling: 'a tool', files: ['docs/srd/source/feats.txt'] },
+        { importer: 'src/twice.ts', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/feats.txt'] },
+        { importer: 'src/twice.ts', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/feats.txt'] },
+      ],
+    },
+    files: {
+      'tests/unit/extract.test.ts': "import feats from '../../docs/srd/source/feats.txt?raw';\n",
+      'src/neither.ts': "import feats from '../docs/srd/source/feats.txt?raw';\n",
+      'src/both.ts': "import feats from '../docs/srd/source/feats.txt?raw';\n",
+      'src/twice.ts': "import feats from '../docs/srd/source/feats.txt?raw';\n",
+      'docs/srd/source/feats.txt': 'feats',
+    },
+  },
+  {
+    rule: 'R2',
+    name: 'a computed dynamic import in src/ (a tool\'s is not R2\'s to prove)',
     expect: 1,
-    mentions: ['stale allowlist entry: src/allowed.ts'],
-    policy: { corpusImporters: [{ importer: 'src/allowed.ts', corpus: 'docs/corpus/srd.txt' }] },
-    files: { 'src/allowed.ts': 'export const nothing = 0;\n', 'docs/corpus/srd.txt': 'SRD' },
+    mentions: ["R2 src/load.ts:1: cannot resolve dynamic reference '<non-literal>'"],
+    files: {
+      'src/load.ts': 'export const load = (name: string) => import(`../docs/srd/source/${name}.txt?raw`);\n',
+      'tools/run.ts': 'export const run = (name: string) => import(name);\n',
+      'docs/srd/source/feats.txt': 'feats',
+    },
   },
   {
     rule: 'R3',
@@ -620,6 +938,35 @@ const SELF_TESTS = [
       ],
     },
     files: { 'src/main.ts': 'export const small = 1;\n', 'src/big.ts': 'export const big = 1;\n' },
+  },
+  {
+    rule: 'R3',
+    name: 'a directory target that a static entry reaches only lazily',
+    expect: 0,
+    policy: { forbidden: [{ status: 'active', from: 'src/main.ts', to: 'docs/big/', via: 'static', why: 'x' }] },
+    files: {
+      'src/main.ts': "import { mid } from './mid';\nexport const later = () => import('../docs/big/part/b.txt?raw');\n",
+      'src/mid.ts': "import notes from '../docs/other.txt?raw';\nexport const mid = 1;\n",
+      'docs/big/part/b.txt': 'big',
+      'docs/other.txt': 'other',
+    },
+  },
+  {
+    rule: 'R3',
+    name: 'a directory target reached by a file below it, and a directory target with no files',
+    expect: 2,
+    mentions: ['src/main.ts:1 -> src/mid.ts:1 -> docs/big/part/b.txt?raw', 'docs/gone/: no such target'],
+    policy: {
+      forbidden: [
+        { status: 'active', from: 'src/main.ts', to: 'docs/big/', via: 'runtime', why: 'x' },
+        { status: 'active', from: 'src/main.ts', to: 'docs/gone/', via: 'runtime', why: 'x' },
+      ],
+    },
+    files: {
+      'src/main.ts': "import { mid } from './mid';\n",
+      'src/mid.ts': "import big from '../docs/big/part/b.txt?raw';\nexport const mid = 1;\n",
+      'docs/big/part/b.txt': 'big',
+    },
   },
   {
     rule: 'R4',
