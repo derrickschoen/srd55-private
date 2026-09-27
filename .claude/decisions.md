@@ -3284,3 +3284,12 @@ Q24 (disk cleanup; I asked to list first). OWNER, verbatim: "Delete landed and c
 - The WASM clone was deleted as a closed experiment. Its D911/D914 quiet re-bench is therefore dropped; D912's "no WASM" stands, and the flat-kernel code is archived as refs/archive/clones/dnd-probe-wasm-7dcb for COVER-SWEEP-FLAT.
 
 Next free id: D927.
+
+## D927 — 2026-09-27 17:50 — owner Q25: the import guard's closure budgets may be raised automatically
+
+QUESTION (my recommendation was to keep the one-way ratchet). OWNER, verbatim choice: "Allow automatic raises".
+- scripts/import-budgets.json: the guard's --update may raise a budget as well as lower it.
+- Carried into IMPORT-GUARD's next review or fix round (the running fix1 was briefed with "only --update can lower"). The change: --update writes the current closure sizes in both directions, and the review diff still shows every budget change.
+- The owner question brainstorm (Q1–Q25) is complete: D921–D927.
+
+Next free id: D928.
