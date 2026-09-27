@@ -132,12 +132,18 @@ export interface CombatTokenSetup {
 }
 
 /**
- * A token of an EncounterState (on the board or absent). Its anchor is a BoardCell: a cell of the
- * state's own grid, minted only by createEncounter, the reducers' checked mints and the state
- * decoders (token-placement.ts decodeBoardTokens, decodeAbsentTokens), so an off-grid anchor does not
- * compile into a state.
+ * A token on an EncounterState's board. Its anchor carries the whole-body proof for the square its placement mode
+ * controls (TokenFor), minted only by grid.ts and token-placement.ts (createEncounter, the reducers' checked mints
+ * and decodeBoardTokens): a body past the edge, or a mode and an anchor that do not belong together, does not
+ * compile into a state (owner D900). Each of its 11 members pairs one placement mode with its proof.
  */
-export interface CombatToken {
+export type CombatToken = TokenFor<SerializedPlacementMode>;
+
+/**
+ * A token off the board (a banished creature): its anchor is the cell it returns from, a BoardCell of the grid, not
+ * a placed body. A CombatToken is an AbsentToken; an AbsentToken returns to the board only through a mint.
+ */
+export interface AbsentToken {
   readonly id: TokenId;
   readonly combatantId: CombatantId;
   readonly position: BoardCell;

@@ -40,7 +40,7 @@ import type {
 } from '../../../src/combat/spells/types';
 import type { TacticalAttackRange } from '../../../src/combat/tactical-evaluator';
 import { monsterProfile, placedToken, playerProfile } from './fixtures';
-import { onBoard } from '../../helpers/board-cell';
+import { movedTo, onBoard } from '../../helpers/board-cell';
 
 const EXPECTED_LEVEL_TOTALS: Readonly<Record<SpellLevel, number>> = {
   0: 22,
@@ -961,7 +961,7 @@ function withTokenAt(
 ): EncounterState {
   return {
     ...state,
-    tokens: state.tokens.map((entry) => entry.combatantId === id ? { ...entry, position: onBoard(state.bounds, cell) } : entry),
+    tokens: state.tokens.map((entry) => entry.combatantId === id ? movedTo(state, entry, cell) : entry),
   };
 }
 
@@ -1376,7 +1376,7 @@ describe('spell foundations and implemented value pins', () => {
     const outOfRange = {
       ...state,
       tokens: state.tokens.map((entry) =>
-        entry.combatantId === target.id ? { ...entry, position: onBoard(state.bounds, { column: 3, row: 1 }) } : entry),
+        entry.combatantId === target.id ? movedTo(state, entry, { column: 3, row: 1 }) : entry),
     };
     expect(() => reduceEncounter(outOfRange, castCommand(definition, caster, target), () => 0.5)).toThrow(
       'out of range',
@@ -1396,7 +1396,7 @@ describe('spell foundations and implemented value pins', () => {
     const obstructed = {
       ...state,
       tokens: state.tokens.map((entry) => entry.combatantId === target.id
-        ? { ...entry, position: onBoard(state.bounds, { column: 4, row: 3 }) }
+        ? movedTo(state, entry, { column: 4, row: 3 })
         : entry),
       // A full-height wall crosses all four corner lines between the offset spaces.
       blockedCells: [0, 1, 2, 3, 4, 5].map((row) => ({ column: 2, row })),

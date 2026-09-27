@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { decodeEncounterStateV1 } from '../../../src/vtt/encounter-state-codec';
+import { remintedState } from '../../helpers/board-cell';
 import { defaultEncounterAlertingState, yellingDistance } from '../../../src/combat/alerting';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import type { EncounterCommand } from '../../../src/combat/events';
@@ -53,7 +55,7 @@ describe('D420 NPC help-calling', () => {
     const legacyRecord = JSON.parse(serialized) as unknown;
 
     const result = reduceEncounter(
-      legacyRecord as EncounterState,
+      decodeEncounterStateV1(legacyRecord, 'session'),
       { type: 'roll_initiative' },
       fixedD20(10),
     );
@@ -140,7 +142,7 @@ describe('D420 NPC help-calling', () => {
       inside.id,
     ]);
     const serialized = JSON.stringify(result.state);
-    const roundTripped = JSON.parse(serialized) as unknown as EncounterState;
+    const roundTripped = remintedState(JSON.parse(serialized) as unknown);
     expect(JSON.stringify(roundTripped)).toBe(serialized);
     expect(requiredAlerting(roundTripped)).toEqual(requiredAlerting(result.state));
   });

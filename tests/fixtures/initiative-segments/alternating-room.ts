@@ -1,7 +1,7 @@
 import type { EncounterState } from '../../../src/combat/encounter';
 import { statblockId } from '../../../src/combat/values';
 import { loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
-import { onBoard } from '../../helpers/board-cell';
+import { onBoard, movedTo } from '../../helpers/board-cell';
 
 const INITIATIVE_BONUSES: Readonly<Record<string, number>> = {
   'combatant:fighter': 3,
@@ -58,7 +58,7 @@ export async function alternatingInitiativeRoom(options: {
     })),
     tokens: source.tokens.map((token) => {
       const placed = options.layout === 'generated' ? undefined : POSITIONS[token.combatantId];
-      return { ...token, position: placed === undefined ? token.position : onBoard(source.bounds, placed) };
+      return placed === undefined ? token : movedTo(source, token, placed);
     }),
   };
 }

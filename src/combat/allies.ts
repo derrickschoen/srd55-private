@@ -7,8 +7,11 @@ import type { CombatantId } from './values';
 export const MONSTER_SIDE = 'monster_side' as const;
 export type CombatantFaction = typeof MONSTER_SIDE | 'player_character_side';
 
+/** What a side relation reads: the combatants and the effects (summon ownership). */
+type SideContext = Pick<EncounterState, 'combatants' | 'effects'>;
+
 function profileKind(
-  state: EncounterState,
+  state: SideContext,
   id: CombatantId,
 ): CombatantProfile['kind'] {
   const subject = state.combatants.find((candidate) => candidate.profile.id === id);
@@ -18,7 +21,7 @@ function profileKind(
 
 /** Summons inherit the summoner's side while retaining their monster statblock profile. */
 export function combatantSide(
-  state: EncounterState,
+  state: SideContext,
   id: CombatantId,
 ): CombatantProfile['kind'] {
   let current = id;
@@ -37,13 +40,13 @@ export function combatantSide(
 }
 
 export function combatantsAreAllies(
-  state: EncounterState,
+  state: SideContext,
   left: CombatantId,
   right: CombatantId,
 ): boolean {
   return combatantFaction(state, left) === combatantFaction(state, right);
 }
 
-export function combatantFaction(state: EncounterState, id: CombatantId): CombatantFaction {
+export function combatantFaction(state: SideContext, id: CombatantId): CombatantFaction {
   return combatantSide(state, id) === 'monster' ? MONSTER_SIDE : 'player_character_side';
 }

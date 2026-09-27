@@ -46,7 +46,7 @@ import {
   createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
-import { onBoard } from '../../helpers/board-cell';
+import { movedTo, onBoard } from '../../helpers/board-cell';
 
 class RegistryTransport implements RpcTransport {
   readonly #messages = new Set<(event: MessageEvent<RpcResponse>) => void>();
@@ -735,7 +735,7 @@ describe('player-character AlgorithmController policy', () => {
           }
         : candidate),
       tokens: composed.state.tokens.map((token) => token.combatantId === caster.profile.id
-        ? { ...token, position: onBoard(composed.state.bounds, { column: 4, row: 6 }) }
+        ? movedTo(composed.state, token, { column: 4, row: 6 })
         : token),
       eventLog: [...composed.state.eventLog, {
         sequence: composed.state.nextEventSequence,

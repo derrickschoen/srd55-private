@@ -46,7 +46,7 @@ import { runCommandBoundaryTransaction } from '../../../src/vtt/engine-round-app
 import { reduceSessionEncounter } from '../../../src/vtt/session-encounter-reducer';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
-import { onBoard } from '../../helpers/board-cell';
+import { movedTo, onBoard, placedAt } from '../../helpers/board-cell';
 
 const REQUEST: EngineRoundCapsuleRequest = {
   runId: encounterSessionId('encounter:engine-round-session-test'),
@@ -103,10 +103,8 @@ function fixedPositions(
     narrowOpeningRegions: [],
       lightRegions: [], obscurementRegions: [], difficultTerrainRegions: [], movementRegions: [],
     },
-    tokens: generated.tokens.map((token, index) => ({
-      ...token,
-      position: onBoard({ columns, rows: 20 }, positions.get(token.combatantId) ?? { column: 10 + index, row: 10 }),
-    })),
+    tokens: generated.tokens.map((token, index) =>
+      movedTo({ ...generated, bounds: { columns, rows: 20 } }, token, positions.get(token.combatantId) ?? { column: 10 + index, row: 10 })),
   });
 }
 
@@ -294,7 +292,7 @@ describe('authoritative engine round session', () => {
         ? { ...candidate, hitPoints: LION.hitPointMaximum, profile: lionProfile }
         : candidate),
       tokens: positioned.tokens.map((placed) => placed.combatantId === BRUTE_ID
-        ? { ...combatToken(lionProfile, placed.position), position: placed.position }
+        ? placedAt({ ...positioned, combatants: [{ profile: lionProfile }] }, combatToken(lionProfile, placed.position), placed.position, combatToken(lionProfile, placed.position).placementMode)
         : placed),
     };
     const lion = authorized(state, attackProposal(state, BRUTE_ID, 'rend', FOCUS_ID));
@@ -995,7 +993,7 @@ describe('authoritative engine round session', () => {
         return candidate;
       }),
       tokens: positioned.tokens.map((placed) => placed.combatantId === BRUTE_ID
-        ? { ...combatToken(lionProfile, placed.position), position: placed.position }
+        ? placedAt({ ...positioned, combatants: [{ profile: lionProfile }] }, combatToken(lionProfile, placed.position), placed.position, combatToken(lionProfile, placed.position).placementMode)
         : placed),
     };
     const lion = authorized(state, attackProposal(state, BRUTE_ID, 'rend', FOCUS_ID));
@@ -1074,7 +1072,7 @@ describe('authoritative engine round session', () => {
     const displacedState: EncounterState = {
       ...authorizationState,
       tokens: authorizationState.tokens.map((token) => token.combatantId === FOCUS_ID
-        ? { ...token, position: onBoard(authorizationState.bounds, { column: 129, row: 0 }) }
+        ? movedTo(authorizationState, token, { column: 129, row: 0 })
         : token),
     };
     const earlierDodge = authorized(displacedState, dodgeProposal(displacedState, KILLER_ID));
@@ -1142,9 +1140,9 @@ describe('authoritative engine round session', () => {
     const displacedState: EncounterState = {
       ...authorizationState,
       tokens: authorizationState.tokens.map((token) => {
-        if (token.combatantId === FOCUS_ID) return { ...token, position: onBoard(authorizationState.bounds, { column: 129, row: 0 }) };
-        if (token.combatantId === CLERIC_ID) return { ...token, position: onBoard(authorizationState.bounds, { column: 128, row: 0 }) };
-        if (token.combatantId === WIZARD_ID) return { ...token, position: onBoard(authorizationState.bounds, { column: 127, row: 0 }) };
+        if (token.combatantId === FOCUS_ID) return movedTo(authorizationState, token, { column: 129, row: 0 });
+        if (token.combatantId === CLERIC_ID) return movedTo(authorizationState, token, { column: 128, row: 0 });
+        if (token.combatantId === WIZARD_ID) return movedTo(authorizationState, token, { column: 127, row: 0 });
         return token;
       }),
     };

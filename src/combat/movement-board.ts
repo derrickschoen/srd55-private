@@ -185,7 +185,17 @@ export function buildMovementBoard(
     }
   }
   const openings = compressedRows(cellCount, regions.map((opening) => opening.cells), at);
-  const occupancy = compressedRows(cellCount, occupantCells, at);
+  // Authored cells off the grid mark nothing (above). An occupant's cell is part of a placed body, and a placed
+  // body lies wholly on its grid (FOOTPRINT, D900: CombatToken carries the proof), so one off the grid is a broken
+  // state (a state spread onto another grid), refused here rather than dropped.
+  const occupantAt = (cell: GridCell): CellIndex => {
+    const index = at(cell);
+    if (index === null) {
+      throw new RangeError(`A creature body square ${JSON.stringify(cell)} is off the ${String(columns)} x ${String(rows)} movement board.`);
+    }
+    return index;
+  };
+  const occupancy = compressedRows(cellCount, occupantCells, occupantAt);
 
   return {
     columns,

@@ -17,7 +17,8 @@ import {
   type CreatureSpace,
 } from '../combat/creature-space';
 import type { AppliedCondition, ExhaustionLevel } from '../combat/conditions';
-import { adjacentCells, gridDistance, requireBoardCell, type GridCell } from '../combat/grid';
+import { adjacentCells, footprintAnchor, gridDistance, type GridCell } from '../combat/grid';
+import { controlledSizeOf, footprintSideOf, movedToken } from '../combat/token-placement';
 import { findPath, findPathToAny, findPathToBest, findReachableCells } from '../combat/movement';
 import { encounterMovementWorld } from '../combat/encounter-movement-world';
 import {
@@ -1444,7 +1445,7 @@ function stateWithActorAt(
   return {
     ...state,
     tokens: state.tokens.map((token) => token.combatantId === actorId
-      ? { ...token, position: requireBoardCell(state.bounds, position, `Combatant ${actorId} hypothetical anchor`) }
+      ? movedToken(state, token, position, `Combatant ${actorId} hypothetical`)
       : token),
   };
 }
@@ -1491,6 +1492,22 @@ function movementHazards(state: EncounterState): readonly {
   return values;
 }
 
+/**
+ * The neighbours of `start` where the actor's whole body lies on the grid (FOOTPRINT §6.5): a Large actor one
+ * column from the east edge has 8 neighbours and 5 candidates. A candidate outside this set is no destination
+ * (the movement board refuses it), and its hypothetical state is not constructible.
+ */
+export function wholeBodyMovementCandidates(
+  state: EncounterState,
+  actorId: CombatantId,
+  start: GridCell,
+): readonly GridCell[] {
+  const actorToken = state.tokens.find((token) => token.combatantId === actorId);
+  if (actorToken === undefined) return [];
+  const side = footprintSideOf(controlledSizeOf(actorToken.placementMode));
+  return adjacentCells(state.bounds, start).filter((cell) => footprintAnchor(state.bounds, cell, side) !== null);
+}
+
 function movementOptions(
   state: EncounterState,
   actorId: CombatantId,
@@ -1529,7 +1546,7 @@ function movementOptions(
     },
   });
   const candidateMap = new Map<string, GridCell>();
-  for (const candidate of adjacentCells(state.bounds, start)) {
+  for (const candidate of wholeBodyMovementCandidates(state, actorId, start)) {
     candidateMap.set(cellKey(candidate), candidate);
   }
   if (firstLegal.kind === 'found') {
@@ -1800,7 +1817,7 @@ export function projectedMovementOptions(
     },
   });
   const candidateMap = new Map<string, GridCell>();
-  for (const candidate of adjacentCells(state.bounds, start)) {
+  for (const candidate of wholeBodyMovementCandidates(state, request.actorId, start)) {
     candidateMap.set(cellKey(candidate), candidate);
   }
   if (firstLegal.kind === 'found') {
@@ -1966,7 +1983,7 @@ export function compareTacticalAllocations(
       const attackState = resolution.valid ? {
         ...state,
         tokens: state.tokens.map((token) => token.combatantId === choice.actorId
-          ? { ...token, position: requireBoardCell(state.bounds, resolution.mechanics.finalPosition, `Combatant ${choice.actorId} final anchor`) }
+          ? movedToken(state, token, resolution.mechanics.finalPosition, `Combatant ${choice.actorId} final`)
           : token),
       } : state;
       for (const actionId of actionIds) {

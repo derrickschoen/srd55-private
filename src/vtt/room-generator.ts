@@ -391,12 +391,16 @@ function generatedWorldObject<const Kind extends 'hazard' | 'light-source'>(
   };
 }
 
+/**
+ * Each generated combatant with the anchor its whole body takes (D514 from its preferred anchor), zipped, so no
+ * combatant can be placed without its checked anchor (FOOTPRINT: createEncounter mints every token).
+ */
 function legalGeneratedPositions(
   profiles: readonly CombatantProfile[],
   preferredPositions: readonly GridCell[],
   dimensions: RoomSpec['dimensions'],
   blockedCells: readonly GridCell[],
-): readonly GridCell[] {
+): readonly { readonly profile: CombatantProfile; readonly anchor: GridCell }[] {
   const blocked = new Set(blockedCells.map(cellKey));
   const occupied: CreatureSpace<KnownCreatureSize>[] = [];
   return profiles.map((profile, index) => {
@@ -423,7 +427,7 @@ function legalGeneratedPositions(
     }
     if (acceptedSpace === undefined) throw new Error(`Generated space for ${profile.id} disappeared.`);
     occupied.push(acceptedSpace);
-    return relocated.placement.anchor;
+    return { profile, anchor: relocated.placement.anchor };
   });
 }
 
@@ -1034,7 +1038,7 @@ function generateLegacyRoom(seed: number, options: GenerateRoomOptions): Generat
     }
   }
   const combatants = [...partyProfiles, ...roster.profiles];
-  const positions = legalGeneratedPositions(
+  const placed = legalGeneratedPositions(
     combatants,
     [...partyPositions, ...monsterPositions],
     dimensions,
@@ -1043,10 +1047,7 @@ function generateLegacyRoom(seed: number, options: GenerateRoomOptions): Generat
   const fresh = createEncounter({
     bounds: dimensions,
     combatants,
-    tokens: combatants.map((profile, index) => combatToken(
-      profile,
-      positions[index] ?? { column: 0, row: 0 },
-    )),
+    tokens: placed.map(({ profile, anchor }) => combatToken(profile, anchor)),
     blockedCells,
     worldObjects: terrain.flatMap((feature) =>
       feature.kind === 'hazard-object' || feature.kind === 'light-source' ? [feature.object] : []),

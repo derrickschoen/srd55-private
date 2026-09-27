@@ -1,0 +1,13 @@
+id: no-unknown-v12-checkpoint
+valid:
+  - >-
+    const placement = { kind: 'recorded', anchor, placementMode };
+  - >-
+    if (placement.kind === 'unknown_v12') return pending;
+  - >-
+    type CheckpointPlacement = { readonly kind: 'unknown_v12'; readonly anchor: GridCell };
+invalid:
+  - >-
+    const placement = { kind: 'unknown_v12', anchor, size, candidateModes };
+  - >-
+    checkpoint = { ...checkpoint, tokenPlacement: { kind: "unknown_v12", anchor, size: 'Large', candidateModes: [] } };

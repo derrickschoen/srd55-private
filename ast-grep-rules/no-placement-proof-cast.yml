@@ -1,0 +1,19 @@
+id: no-placement-proof-cast
+language: TypeScript
+severity: error
+message: >-
+  A placement proof is minted, never cast (FOOTPRINT, owner D900): build tokens with token-placement.ts
+  (placedToken, movedToken, decodeBoardTokens, decodeAbsentTokens) and decoded states with assembleDecodedState.
+  Cast a decoder's rest to DecodedStateRest, which holds no token.
+files:
+  - src/**/*.ts
+  - tools/**/*.ts
+  - tests/**/*.ts
+ignores:
+  - src/combat/grid.ts
+  - src/combat/token-placement.ts
+rule:
+  pattern: $EXPRESSION as $TYPE
+constraints:
+  TYPE:
+    regex: ^(?:readonly\s+)?(?:CombatToken|AbsentToken|BoardCell|FootprintAnchor<[^>]*>|EncounterState|SessionRevision)(?:\[\])?$|^(?:CombatToken\['position'\]|EncounterState\['(?:tokens|absentTokens)'\])$

@@ -11,14 +11,8 @@ import type { KnownCreatureSize } from '../../src/domain/enums';
  * `greenforge:shape-curse`; `packSource` is the homebrew pack fixture's parsed JSON.
  */
 export function shapeCursePack(packSource: Readonly<Record<string, unknown>>, formSize: KnownCreatureSize): LoadedContentPack {
-  const source = structuredClone(packSource) as Record<string, unknown> & { spells: Record<string, unknown>[] };
-  source.packId = 'footprint-shape-curse';
-  const template = source.spells[0];
-  if (template === undefined) throw new Error('The homebrew pack fixture has no spell template.');
-  source.spells = [{
-    ...template,
-    recordId: 'shape-curse', name: 'Shape Curse', level: 1,
-    duration: { kind: 'rounds', rounds: 10 }, concentration: true,
+  return homebrewSpellPack(packSource, 'footprint-shape-curse', [{
+    recordId: 'shape-curse', concentration: true,
     targeting: { kind: 'single', rangeFeet: 30, willing: false },
     operation: {
       kind: 'shared_outcome',
@@ -50,8 +44,36 @@ export function shapeCursePack(packSource: Readonly<Record<string, unknown>>, fo
       }],
       onSuccess: [],
     },
-  }];
+  }]);
+}
+
+/**
+ * A pack of level-1 homebrew spells from the pack fixture's spell template, each with the given targeting and
+ * engine operation (ids `greenforge:<recordId>`).
+ */
+export function homebrewSpellPack(
+  packSource: Readonly<Record<string, unknown>>,
+  packId: string,
+  spells: readonly {
+    readonly recordId: string;
+    readonly concentration: boolean;
+    readonly targeting: Readonly<Record<string, unknown>>;
+    readonly operation: Readonly<Record<string, unknown>>;
+  }[],
+): LoadedContentPack {
+  const source = structuredClone(packSource) as Record<string, unknown> & { spells: Record<string, unknown>[] };
+  source.packId = packId;
+  const template = source.spells[0];
+  if (template === undefined) throw new Error('The homebrew pack fixture has no spell template.');
+  source.spells = spells.map((spell) => ({
+    ...template,
+    recordId: spell.recordId, name: spell.recordId, level: 1,
+    duration: spell.concentration ? { kind: 'rounds', rounds: 10 } : { kind: 'instantaneous' },
+    concentration: spell.concentration,
+    targeting: spell.targeting,
+    operation: spell.operation,
+  }));
   const loaded = loadContentPack(source);
-  if (loaded.status !== 'loaded') throw new Error(`The shape-curse pack was refused: ${JSON.stringify(loaded.refusal)}`);
+  if (loaded.status !== 'loaded') throw new Error(`The ${packId} pack was refused: ${JSON.stringify(loaded.refusal)}`);
   return loaded.content;
 }

@@ -41,7 +41,7 @@ import {
 } from '../../../src/vtt/survival-harness';
 import type { HandlerContext } from '../../../src/worker/handler';
 import { createSeededRpcHarness, type RpcHarness } from '../../helpers/rpc-harness';
-import { onBoard } from '../../helpers/board-cell';
+import { movedTo, onBoard } from '../../helpers/board-cell';
 
 class RegistryTransport implements RpcTransport {
   readonly #messages = new Set<(event: MessageEvent<RpcResponse>) => void>();
@@ -1221,7 +1221,7 @@ describe('D382 survival package', () => {
     const adjacent: EncounterState = {
       ...active,
       tokens: active.tokens.map((token) => token.combatantId === target.profile.id
-        ? { ...token, position: onBoard(active.bounds, { column: brannToken.position.column + 1, row: brannToken.position.row + 1 }) }
+        ? movedTo(active, token, { column: brannToken.position.column + 1, row: brannToken.position.row + 1 })
         : token),
     };
     const topple = composed.turnLegalActions(adjacent, brann.profile.id).actions.find((action) =>

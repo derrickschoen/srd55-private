@@ -301,6 +301,11 @@ describe('FOOTPRINT session v13: a save v13 cannot express is repaired and archi
       type: 'resolve_pending_placement', combatant: huge, reason: 'whole_body_placement_pending', size: 'Large', anchor: { column: 3, row: 0 },
     }, () => 0.5));
     expect(otherSize instanceof PendingPlacementRuleError && otherSize.code === 'size_not_allowed', String(otherSize)).toBe(true);
+    // W9 (pending placement): at its own size, the former anchor (3,0) is refused with the typed outside_bounds code.
+    const edge = thrown(() => reduceEncounter(root.encounterState, {
+      type: 'resolve_pending_placement', combatant: huge, reason: 'whole_body_placement_pending', size: 'Huge', anchor: { column: 3, row: 0 },
+    }, () => 0.5));
+    expect(edge instanceof PendingPlacementRuleError && edge.code === 'outside_bounds', String(edge)).toBe(true);
   });
 
   it('W21f-sq: a pending v12 checkpoint whose geometry allows one mode is recorded squeezed, and the spend restores it', () => {

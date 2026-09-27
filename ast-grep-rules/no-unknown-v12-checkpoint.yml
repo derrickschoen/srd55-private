@@ -1,0 +1,20 @@
+id: no-unknown-v12-checkpoint
+language: TypeScript
+severity: error
+message: >-
+  Only the v12 -> v13 session migration (src/vtt/session-v13-migration.ts) builds an unknown_v12 checkpoint: the
+  reducer records the placement mode it knows (FOOTPRINT §6.3), and an unknown mode is never guessed elsewhere.
+files:
+  - src/**/*.ts
+  - tools/**/*.ts
+ignores:
+  - src/vtt/session-v13-migration.ts
+rule:
+  kind: pair
+  all:
+    - has:
+        field: key
+        regex: ^kind$
+    - has:
+        field: value
+        regex: ^['"]unknown_v12['"]$

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { remintedState } from '../../helpers/board-cell';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import type { EncounterCommand } from '../../../src/combat/events';
@@ -101,7 +102,7 @@ describe('D420 persistent monster-side search memory', () => {
       'area_effect_over_region',
     ]);
     const serialized = JSON.stringify(state);
-    const roundTripped = JSON.parse(serialized) as unknown as EncounterState;
+    const roundTripped = remintedState(JSON.parse(serialized) as unknown);
     expect(JSON.stringify(roundTripped)).toBe(serialized);
     expect(requiredSearchMemories(roundTripped)).toEqual(requiredSearchMemories(state));
   });

@@ -21,7 +21,7 @@ import { generateRoom } from '../../../src/vtt/room-generator';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { placedToken, playerProfile } from '../combat/fixtures';
-import { onBoard } from '../../helpers/board-cell';
+import { onBoard, movedTo } from '../../helpers/board-cell';
 
 const SEED = 3_943_001;
 const ACTOR_ID = combatantId('combatant:generated-3943001-monster-2');
@@ -51,7 +51,7 @@ function placedState(
     },
     tokens: state.tokens.flatMap((token) => {
       const position = positions.get(token.combatantId);
-      return position === undefined ? [] : [{ ...token, position: onBoard(rows === undefined ? state.bounds : { ...state.bounds, rows }, position) }];
+      return position === undefined ? [] : [movedTo({ ...state, bounds: rows === undefined ? state.bounds : { ...state.bounds, rows } }, token, position)];
     }),
   });
 }

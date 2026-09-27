@@ -2516,6 +2516,13 @@ function takeUiFeedback(path: string | null): EngineUiFeedback | null {
   return engineUiFeedbackSchema.parse(JSON.parse(encoded) as unknown);
 }
 
+/** The in-process tool session this tool builds carries the simulated state it plays (simulatedToolSession). */
+function isSimulatedToolSession(
+  session: AgentToolSession,
+): session is AgentToolSession & { readonly simulatedEncounterState: EncounterState } {
+  return 'simulatedEncounterState' in session;
+}
+
 async function driveScriptedMcp(
   cwd: string,
   launcherPath: string,
@@ -2538,9 +2545,8 @@ async function driveScriptedMcp(
     kind: 'binding',
     binding: manifest.offerEnvironment,
   });
-  const state = inProcessToolSession !== undefined &&
-    'simulatedEncounterState' in inProcessToolSession
-    ? structuredClone(inProcessToolSession.simulatedEncounterState as EncounterState)
+  const state = inProcessToolSession !== undefined && isSimulatedToolSession(inProcessToolSession)
+    ? structuredClone(inProcessToolSession.simulatedEncounterState)
     : await loadArenaFixture(manifest.fixturePath);
   const client = inProcessToolSession === undefined ? startMcpClient(cwd, launcherPath) : null;
   const abortClient = (): void => { client?.child.kill('SIGTERM'); };

@@ -22,7 +22,7 @@ import {
   exhaustionPenalty,
   isIncapacitated,
 } from './conditions';
-import { combatToken, type CombatantProfile, type CombatRulesProfile, type CombatToken, type CombatTokenSetup } from './combatant';
+import { combatToken, type CombatantProfile, type CombatRulesProfile, type AbsentToken, type CombatToken, type CombatTokenSetup } from './combatant';
 import {
   automaticSaveFailure,
   combatantSpace,
@@ -107,7 +107,7 @@ import {
   type GridCell,
 } from './grid';
 import { assertSupportedGrid } from './grid-size';
-import { placedToken, type PlacementContext } from './token-placement';
+import { movedToken, movedTokenOrNull, placedToken, type PlacementContext } from './token-placement';
 import {
   applySizeSteps,
   autoRelocatePlacement,
@@ -824,7 +824,7 @@ export interface EncounterState {
   /** One-way migration preserves unknowable legacy facts for explicit DM adjudication. */
   readonly adjudicationPending: readonly MigrationAdjudicationPending[];
   /** Tokens owned by temporary board-absence effects, including their return cells. */
-  readonly absentTokens?: readonly CombatToken[];
+  readonly absentTokens?: readonly AbsentToken[];
   readonly initiative: readonly InitiativeEntry[];
   readonly activeCombatant: CombatantId | null;
   readonly activeInitiativeIndex: number | null;
@@ -1001,7 +1001,7 @@ export {
 
 /** Dying and stable combatants remain on their side; only `dead` removes one. */
 export function nonDeadEncounterSides(
-  state: EncounterState,
+  state: Pick<EncounterState, 'combatants' | 'effects' | 'alerting'>,
 ): ReadonlySet<'player_character' | 'monster'> {
   return new Set(state.combatants
     .filter((subject) =>
@@ -1010,8 +1010,8 @@ export function nonDeadEncounterSides(
 }
 
 export function encounterConclusionAfter(
-  before: EncounterState,
-  after: EncounterState,
+  before: Pick<EncounterState, 'combatants' | 'effects' | 'alerting' | 'phase'>,
+  after: Pick<EncounterState, 'combatants' | 'effects' | 'alerting' | 'round' | 'revision'>,
 ): Extract<EncounterPhase, { readonly kind: 'concluded' }> | null {
   if (before.phase.kind === 'concluded') return null;
   const beforeSides = nonDeadEncounterSides(before);
@@ -1020,7 +1020,7 @@ export function encounterConclusionAfter(
 }
 
 function encounterConclusionFromCurrentState(
-  state: EncounterState,
+  state: Pick<EncounterState, 'combatants' | 'effects' | 'alerting' | 'round' | 'revision'>,
 ): Extract<EncounterPhase, { readonly kind: 'concluded' }> | null {
   const afterSides = nonDeadEncounterSides(state);
   if (afterSides.has('player_character') && afterSides.has('monster')) return null;
@@ -3126,15 +3126,25 @@ function endEffects(
   for (const target of movementTargets) refreshActiveTurnMovement(context, target);
 }
 
-function nearestReturnPosition(
+/**
+ * Where and how a banished creature returns (FOOTPRINT §6.2): in its stored mode when that mode is of its current
+ * effective size, else in the normal mode of that size (a size effect may have ended while it was away); at the
+ * nearest legal anchor to its return origin by the D514 rule. A placement rule for a creature entering the board,
+ * like growth; the opening-aware version belongs to SQUEEZE-THROUGH.
+ */
+function returnPlacement(
   state: EncounterState,
   target: CombatantId,
-  stored: CombatToken,
-): GridCell {
-  const sized = sizedCombatantState(effectiveCreatureSize(state, target));
+  stored: AbsentToken,
+): { readonly anchor: GridCell; readonly placementMode: SerializedPlacementMode } {
+  const size = effectiveCreatureSize(state, target);
+  const sized = sizedCombatantState(size);
+  const placementMode = stored.placementMode.actual === size
+    ? stored.placementMode
+    : serializedPlacementMode(normalPlacementFor(sized));
   const mode = placementFromSerialized(sized, {
     anchor: stored.position,
-    mode: stored.placementMode,
+    mode: placementMode,
   }).mode;
   const result = autoRelocatePlacement(sized, stored.position, mode, state.bounds, (space) =>
     space.cells.every((cell) => !movementBlocked(state, cell)) &&
@@ -3147,7 +3157,7 @@ function nearestReturnPosition(
   if (result.kind !== 'placed') {
     throw new EncounterRuleError('validation', 'A banished combatant has no unoccupied return space.');
   }
-  return result.placement.anchor;
+  return { anchor: result.placement.anchor, placementMode };
 }
 
 function restoreBanishedTargets(
@@ -3160,10 +3170,9 @@ function restoreBanishedTargets(
     const absentTokens = context.state.absentTokens ?? [];
     const stored = absentTokens.find((candidate) => candidate.combatantId === target);
     if (stored === undefined) continue;
-    const position = requireBoardCell(
-      context.state.bounds, nearestReturnPosition(context.state, target, stored), `Combatant ${target} return anchor`,
-    );
-    const returned = { ...stored, position };
+    const placement = returnPlacement(context.state, target, stored);
+    const returned = placedToken(context.state, stored, placement.anchor, placement.placementMode, `Combatant ${target} return`);
+    const position = returned.position;
     context.state = {
       ...context.state,
       tokens: [...context.state.tokens, returned],
@@ -3243,11 +3252,7 @@ function stateAfterSizeTransition(
   return {
     ...withCombatant,
     tokens: withCombatant.tokens.map((entry) => entry.combatantId === target
-      ? {
-          ...entry,
-          position: requireBoardCell(state.bounds, result.placement.anchor, `Combatant ${target} relocated anchor`),
-          placementMode: serializedPlacementMode(result.placement.mode),
-        }
+      ? placedToken(withCombatant, entry, result.placement.anchor, serializedPlacementMode(result.placement.mode), `Combatant ${target} relocated`)
       : entry),
     sharedSpaceRelations: withCombatant.sharedSpaceRelations.filter((relation) =>
       relation.first !== target && relation.second !== target),
@@ -5161,10 +5166,11 @@ function moveForLegendaryAction(
   }
   for (const step of path.cells) {
     const sourceSpace = combatantSpace(context.state, actor);
+    const state = context.state;
     context.state = {
-      ...context.state,
-      tokens: context.state.tokens.map((candidate) => candidate.combatantId === actor
-        ? { ...candidate, position: { ...step } }
+      ...state,
+      tokens: state.tokens.map((candidate) => candidate.combatantId === actor
+        ? movedToken(state, candidate, step, `Combatant ${actor} legendary move`)
         : candidate),
     };
     processEnteredCells(
@@ -5362,10 +5368,11 @@ function processMove(
     }
     if (combatant(context.state, command.actor).life !== 'living') break;
     const sourceSpace = combatantSpace(context.state, command.actor);
+    const beforeStep = context.state;
     context.state = {
-      ...context.state,
-      tokens: context.state.tokens.map((candidate) => candidate.combatantId === command.actor
-        ? { ...candidate, position: step.to }
+      ...beforeStep,
+      tokens: beforeStep.tokens.map((candidate) => candidate.combatantId === command.actor
+        ? movedToken(beforeStep, candidate, step.to, `Combatant ${command.actor} move`)
         : candidate),
     };
     const destinationSpace = combatantSpace(context.state, command.actor);
@@ -8638,18 +8645,18 @@ function forceMove(
   const traversed: GridCell[] = [];
   for (let distance = 0; distance + 5 <= distanceFeet; distance += 5) {
     const candidate = { column: position.column + columnStep, row: position.row + rowStep };
-    const candidateSpace = combatantSpaceAt(context.state, target, candidate);
-    if (!spaceFitsBounds(candidateSpace, context.state.bounds) ||
-      candidateSpace.cells.some((cell) => movementBlocked(context.state, cell)) ||
+    // The grid's edge stops the push like any other blocker: a body that would leave the grid is not minted.
+    const pushed = movedTokenOrNull(context.state, token(context.state, target), candidate);
+    if (pushed === null) break;
+    const candidateSpace = combatantSpaceAt(context.state, target, pushed.position);
+    if (candidateSpace.cells.some((cell) => movementBlocked(context.state, cell)) ||
       context.state.tokens.some((entry) => entry.combatantId !== target &&
         spacesIntersect(candidateSpace, combatantSpace(context.state, entry.combatantId)))) break;
     const sourceSpace = combatantSpace(context.state, target);
-    const anchor = requireBoardCell(context.state.bounds, candidate, `Combatant ${target} forced-movement anchor`);
-    position = anchor;
+    position = pushed.position;
     context.state = {
       ...context.state,
-      tokens: context.state.tokens.map((entry) =>
-        entry.combatantId === target ? { ...entry, position: anchor } : entry),
+      tokens: context.state.tokens.map((entry) => entry.combatantId === target ? pushed : entry),
     };
     traversed.push({ ...position });
     processEnteredCells(
@@ -10144,9 +10151,14 @@ function resolveSummon(
     wildShapeUses: null,
     spellSlots: [],
   }));
+  const summonContext: PlacementContext = {
+    bounds: context.state.bounds,
+    combatants: [...context.state.combatants, ...summonedStates],
+    effects: context.state.effects,
+  };
   const tokens = profiles.map((profile, index): CombatToken => {
     const summoned = combatToken(profile, { ...(destinations[index] as GridCell) });
-    return { ...summoned, position: requireBoardCell(context.state.bounds, summoned.position, `Summoned ${String(profile.id)} anchor`) };
+    return placedToken(summonContext, summoned, summoned.position, summoned.placementMode, `Summoned ${String(profile.id)}`);
   });
   context.state = {
     ...context.state,
@@ -10851,10 +10863,11 @@ function executeSpellOperation(
       for (const [index, mover] of movers.entries()) {
         const destination = destinations[index]?.destination;
         if (destination === undefined) throw new EncounterRuleError('validation', `${definition.name} requires one destination per teleported creature.`);
+        const beforeTeleport = context.state;
         context.state = {
-          ...context.state,
-          tokens: context.state.tokens.map((placed) => placed.combatantId === mover
-            ? { ...placed, position: requireBoardCell(context.state.bounds, destination, `Combatant ${mover} teleport anchor`) }
+          ...beforeTeleport,
+          tokens: beforeTeleport.tokens.map((placed) => placed.combatantId === mover
+            ? movedToken(beforeTeleport, placed, destination, `Combatant ${mover} teleport`)
             : placed),
         };
         const movement = combatant(context.state, mover).turn.movement;
@@ -12218,12 +12231,13 @@ function resolveMigrationPendingPlacement(
   const recordIndex = remaining.indexOf(head);
   if (recordIndex < 0) throw new PendingPlacementRuleError('not_queue_head', command.combatant);
   remaining.splice(recordIndex, 1);
-  const tokenPlacement: CombatToken = {
-    id: head.originatingToken?.id ?? combatant(next, head.combatant).profile.tokenId,
-    combatantId: head.combatant,
-    position: requireBoardCell(next.bounds, placement.anchor, `Combatant ${head.combatant} placement anchor`),
-    placementMode: serializedPlacementMode(placement.mode),
-  };
+  const tokenPlacement: CombatToken = placedToken(
+    next,
+    { id: head.originatingToken?.id ?? combatant(next, head.combatant).profile.tokenId, combatantId: head.combatant },
+    placement.anchor,
+    serializedPlacementMode(placement.mode),
+    `Combatant ${head.combatant} placement`,
+  );
   const withoutResolvedToken = next.tokens.filter((candidate) =>
     candidate.combatantId !== head.combatant);
   next = {
@@ -12381,11 +12395,12 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
         throw new EncounterRuleError('validation', 'An adjudicated destination must be unoccupied and unblocked.');
       }
       const existing = token(context.state, command.target);
+      const beforeAdjudication = context.state;
       context.state = {
-        ...context.state,
-        tokens: context.state.tokens.map((candidate) =>
+        ...beforeAdjudication,
+        tokens: beforeAdjudication.tokens.map((candidate) =>
           candidate.combatantId === command.target
-            ? { ...candidate, position: requireBoardCell(context.state.bounds, consequence.to, `Combatant ${command.target} adjudicated anchor`) }
+            ? movedToken(beforeAdjudication, candidate, consequence.to, `Combatant ${command.target} adjudicated destination`)
             : candidate,
         ),
       };

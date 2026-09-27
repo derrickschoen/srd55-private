@@ -38,7 +38,7 @@ import {
   MemoryMirrorSink,
 } from '../../../src/vtt/session-persistence';
 import { declareTestInputs } from '../../helpers/test-inputs';
-import { onBoard } from '../../helpers/board-cell';
+import { movedTo, onBoard } from '../../helpers/board-cell';
 import { statedPlainMemberFields } from '../../helpers/party-pack-stated';
 import { monsterProfile, playerProfile } from '../combat/fixtures';
 
@@ -74,17 +74,38 @@ function moved<State extends Readonly<Record<string, unknown>> & { readonly toke
 
 /** A state whose token `index` stands on `position` of its own grid: the anchor is minted, so no cast. */
 function anchoredAt(state: EncounterState, index: number, position: GridCell): EncounterState {
-  return { ...state, tokens: state.tokens.map((token, at) => at === index ? { ...token, position: onBoard(state.bounds, position) } : token) };
+  return { ...state, tokens: state.tokens.map((token, at) => at === index ? movedTo(state, token, position) : token) };
 }
 
 /**
- * A corrupted state: token `index` forced to an off-grid `position`. The EncounterState type refuses
- * it, so only this cast can build it; the exporter checksums it like a real save.
+ * The saved bytes of a one-revision session of `state` as a v13 revision bundle, with `edit` applied to the
+ * persisted encounter state and the revision checksum and bundle fingerprint recomputed: a corrupted save as a
+ * decoder meets it. The EncounterState type refuses the corruption, so it is built as JSON, never cast.
  */
-function forcedOffGrid(state: EncounterState, index: number, position: GridCell, key: 'tokens' | 'absentTokens' = 'tokens'): EncounterState {
-  const tokens = (key === 'tokens' ? state.tokens : state.absentTokens ?? [])
-    .map((token, at) => at === index ? { ...token, position: position as CombatToken['position'] } : token);
-  return { ...state, [key]: tokens };
+function savedWith(state: EncounterState, id: string, edit: (encounterState: Record<string, any>) => void = () => undefined): string {
+  const store = new MemoryBrowserSessionStore();
+  const sessionId = encounterSessionId(`session:${id}`);
+  EncounterSessionJournal.create({
+    sessionId,
+    branchId: encounterBranchId('branch:main'),
+    encounterState: state,
+    coordinatorState: { requestSequence: 1, pendingRequest: null, pendingCommand: null, continuation: { kind: 'idle' }, pause: null },
+    controllers: [],
+    rng: mulberry32(6_203_001),
+    store,
+    mirror: new MemoryMirrorSink(),
+  });
+  const { checksum: _checksum, ...body } = JSON.parse(canonicalJson(store.revisions(sessionId)[0])) as Record<string, any>;
+  edit(body['encounterState'] as Record<string, any>);
+  const revision = { ...body, checksum: sha256(canonicalJson(body)) };
+  const bundle = { format: 'vtt-session-revisions', schemaVersion: 13, sessionId, revisions: [revision] };
+  return canonicalJson({ ...bundle, fingerprint: sha256(canonicalJson(bundle)) });
+}
+
+/** `value`, asserted present (a fixture's token by index). */
+function required<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error('Expected a fixture value.');
+  return value;
 }
 
 /** Canonical JSON of `state`, as a decoder receives it. */
@@ -205,7 +226,8 @@ describe('loaded token anchors are decoded against the grid', () => {
     const sessionId = accepted(() => importSavedSession(imported, exported(edge)));
     expect(imported.revisions(sessionId).at(-1)?.encounterState.tokens[0]?.position).toEqual({ column: 9, row: 6 });
     // Only a decoder can meet this state: createEncounter refuses it too (last test).
-    const error = thrown(() => importSavedSession(new MemoryBrowserSessionStore(), exported(forcedOffGrid(created, 0, { column: 10, row: 6 }))));
+    const error = thrown(() => importSavedSession(new MemoryBrowserSessionStore(),
+      savedWith(created, 'loaded-anchor-bounds-off', (loaded) => { loaded['tokens'][0].position = { column: 10, row: 6 }; })));
     expect(offGrid(error, 'Persisted encounter tokens[0] anchor', { column: 10, row: 6 }, 10, 7), String(error)).toBe(true);
   });
 
@@ -311,7 +333,7 @@ describe('a token anchor is an in-bounds cell in the EncounterState type', () =>
 
   it('every decoder installs the minted anchors, never the loaded objects, board and absent tokens alike', () => {
     const created = createEncounter(referenceEncounterSetup());
-    const withAbsent: EncounterState = { ...created, absentTokens: [anchoredAt(created, 3, { column: 9, row: 6 }).tokens[3] as CombatToken] };
+    const withAbsent: EncounterState = { ...created, absentTokens: [required(anchoredAt(created, 3, { column: 9, row: 6 }).tokens[3])] };
     const loaded = json(withAbsent);
     const absentLoaded = loaded['absentTokens'] as readonly JsonState[];
 
@@ -363,17 +385,9 @@ describe('a token anchor is an in-bounds cell in the EncounterState type', () =>
     const codec = thrown(() => decodeEncounterStateV1(absentAt(offBoard), 'session'));
     expect(offGrid(codec, 'state.absentTokens[0] anchor', offBoard, 10, 7), String(codec)).toBe(true);
 
-    const withAbsent: EncounterState = { ...created, absentTokens: [created.tokens[3] as CombatToken] };
-    const session = thrown(() => importSavedSession(new MemoryBrowserSessionStore(), EncounterSessionJournal.create({
-      sessionId: encounterSessionId('session:loaded-anchor-absent'),
-      branchId: encounterBranchId('branch:main'),
-      encounterState: forcedOffGrid(withAbsent, 0, offBoard, 'absentTokens'),
-      coordinatorState: { requestSequence: 1, pendingRequest: null, pendingCommand: null, continuation: { kind: 'idle' }, pause: null },
-      controllers: [],
-      rng: mulberry32(6_203_003),
-      store: new MemoryBrowserSessionStore(),
-      mirror: new MemoryMirrorSink(),
-    }).export()));
+    const withAbsent: EncounterState = { ...created, absentTokens: [required(created.tokens[3])] };
+    const session = thrown(() => importSavedSession(new MemoryBrowserSessionStore(),
+      savedWith(withAbsent, 'loaded-anchor-absent', (loaded) => { loaded['absentTokens'][0].position = offBoard; })));
     expect(offGrid(session, 'Persisted encounter absentTokens[0] anchor', offBoard, 10, 7), String(session)).toBe(true);
 
     const serializedEncounterState = canonicalJson(absentAt(offBoard));
@@ -399,7 +413,7 @@ describe('a token anchor is an in-bounds cell in the EncounterState type', () =>
 
   it('the engine round session re-mints anchors after its canonical JSON round trip, and refuses a state spread off its grid', () => {
     const created = createEncounter(referenceEncounterSetup());
-    const withAbsent: EncounterState = { ...created, absentTokens: [anchoredAt(created, 3, { column: 9, row: 6 }).tokens[3] as CombatToken] };
+    const withAbsent: EncounterState = { ...created, absentTokens: [required(anchoredAt(created, 3, { column: 9, row: 6 }).tokens[3])] };
     const canonical = canonicalEncounterState(withAbsent);
     const parsed = (JSON.parse(canonical.fixtureJson) as { readonly encounter: { readonly state: JsonState } }).encounter.state;
     expect(json(canonical.state)).toEqual(json(withAbsent));
@@ -598,9 +612,9 @@ describe('FOOTPRINT W3: every decoder places whole bodies only', () => {
     const sessionId = accepted(() => importSavedSession(store, sessionExport(state, 'accepted')));
     expect(store.revisions(sessionId).at(-1)?.encounterState.tokens[0]?.position).toEqual({ column: 5, row: 3 });
     for (const refusal of refusals) {
-      // The export checksums what it is given, so an edited save is built as a corrupted state (the only cast).
-      const edited = hugeEdited(refusal.edit) as unknown as EncounterState;
-      const error = thrown(() => importSavedSession(new MemoryBrowserSessionStore(), sessionExport(edited, refusal.name)));
+      // The edited save is built as JSON, its checksums recomputed (a corrupted save as the decoder meets it).
+      const saved = savedWith(state, `w3-${refusal.name}`, (loaded) => { loaded['tokens'] = hugeEdited(refusal.edit).tokens; });
+      const error = thrown(() => importSavedSession(new MemoryBrowserSessionStore(), saved));
       expect(refusedAs(error, 'Persisted encounter tokens[0]', refusal.body), `${refusal.name}: ${String(error)}`).toBe(true);
     }
     const absent = { ...state, absentTokens: [{ ...state.tokens[0]!, position: onBoard(state.bounds, { column: 6, row: 3 }) }] };
@@ -632,10 +646,18 @@ describe('FOOTPRINT W3: every decoder places whole bodies only', () => {
   it('the engine round session re-mints the flush Huge and refuses a state whose Huge body leaves the grid', () => {
     const state = isolated();
     expect(accepted(() => canonicalEncounterState(state)).state.tokens[0]?.position).toEqual({ column: 5, row: 3 });
-    for (const refusal of refusals) {
-      const edited = hugeEdited(refusal.edit) as unknown as EncounterState;
-      const error = thrown(() => canonicalEncounterState(edited));
-      expect(refusedAs(error, 'Canonical engine state tokens[0]', refusal.body), `${refusal.name}: ${String(error)}`).toBe(true);
-    }
+    // In memory, a typed state can still be spread onto a smaller grid, or its creature resized, without a mint (the
+    // brand does not name its grid): one column fewer, one row fewer, or a Large Huge are refused here.
+    const narrow = thrown(() => canonicalEncounterState({ ...state, bounds: { columns: 7, rows: 6 } }));
+    expect(offGridBody(narrow, 'Canonical engine state tokens[0]', { column: 5, row: 3 }, 3, 'Huge', 7, 6), String(narrow)).toBe(true);
+    const short = thrown(() => canonicalEncounterState({ ...state, bounds: { columns: 8, rows: 5 } }));
+    expect(offGridBody(short, 'Canonical engine state tokens[0]', { column: 5, row: 3 }, 3, 'Huge', 8, 5), String(short)).toBe(true);
+    const resized = thrown(() => canonicalEncounterState({
+      ...state,
+      combatants: state.combatants.map((entry) => entry.profile.id === HUGE
+        ? { ...entry, profile: { ...entry.profile, rules: { ...entry.profile.rules, sizeCategory: 'Large' as const } } }
+        : entry),
+    }));
+    expect(refusedAs(resized, 'Canonical engine state tokens[0]', null), String(resized)).toBe(true);
   });
 });

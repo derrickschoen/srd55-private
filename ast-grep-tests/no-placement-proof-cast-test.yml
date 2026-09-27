@@ -1,0 +1,35 @@
+id: no-placement-proof-cast
+valid:
+  - >-
+    const rest = state as unknown as DecodedStateRest;
+  - >-
+    const effects = raw as unknown as EncounterState['effects'];
+  - >-
+    const transition = raw as unknown as SessionRevision['transition'];
+  - >-
+    const token = movedToken(state, current, anchor, 'label');
+  - >-
+    const cells = raw as readonly GridCell[];
+invalid:
+  - >-
+    const token = raw as CombatToken;
+  - >-
+    const token = raw as AbsentToken;
+  - >-
+    const tokens = raw as readonly CombatToken[];
+  - >-
+    const tokens = raw as CombatToken[];
+  - >-
+    const cell = raw as BoardCell;
+  - >-
+    const proof = raw as FootprintAnchor<3>;
+  - >-
+    const state = JSON.parse(text) as unknown as EncounterState;
+  - >-
+    const revision = { ...value, encounterState } as unknown as SessionRevision;
+  - >-
+    const position = raw as CombatToken['position'];
+  - >-
+    const tokens = raw as EncounterState['tokens'];
+  - >-
+    const absent = raw as EncounterState['absentTokens'];

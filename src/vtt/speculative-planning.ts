@@ -7,7 +7,7 @@ import {
   type LifeState,
 } from '../combat/encounter';
 import { isIncapacitated } from '../combat/conditions';
-import { requireBoardCell } from '../combat/grid';
+import { movedTokenOrNull } from '../combat/token-placement';
 import { persistentAreaTouchesSpace } from '../combat/persistent-areas';
 import type { CombatantId } from '../combat/values';
 import { sha256 } from '../crypto/sha256';
@@ -509,16 +509,18 @@ function factCanChangeThroughMovement(atom: ScenarioFactAtom): boolean {
     atom.kind === 'visibility_is' || atom.kind === 'zone_occupancy_is';
 }
 
+/** The state with the player's token at `destination`; null when its whole body would not be on the grid there. */
 function movedState(
   state: EncounterState,
   playerId: CombatantId,
   destination: { readonly column: number; readonly row: number },
-): EncounterState {
+): EncounterState | null {
+  const current = state.tokens.find((token) => token.combatantId === playerId);
+  const placed = current === undefined ? undefined : movedTokenOrNull(state, current, destination);
+  if (placed === null) return null;
   const moved: EncounterState = {
     ...state,
-    tokens: state.tokens.map((token) => token.combatantId === playerId
-      ? { ...token, position: requireBoardCell(state.bounds, destination, `Combatant ${playerId} speculative anchor`) }
-      : token),
+    tokens: state.tokens.map((token) => token.combatantId === playerId && placed !== undefined ? placed : token),
   };
   return {
     ...moved,
@@ -572,6 +574,8 @@ export function canPlayerFlipScenarioFact(
   for (let row = 0; row < state.bounds.rows; row += 1) {
     for (let column = 0; column < state.bounds.columns; column += 1) {
       const candidate = movedState(state, playerId, { column, row });
+      // A destination the player's whole body does not fit is no destination (the path query refuses it too).
+      if (candidate === null) continue;
       if (!evaluateScenarioFact(candidate, flipped, queries).matches) continue;
       const path = queries.path(state, {
         actorId: playerId,

@@ -35,7 +35,7 @@ import {
   type VaneWarrenFightId,
 } from '../../../src/vtt/vane-warren';
 import { playerProfile } from '../combat/fixtures';
-import { onBoard } from '../../helpers/board-cell';
+import { movedTo, onBoard } from '../../helpers/board-cell';
 import { statedPlainMemberFields } from '../../helpers/party-pack-stated';
 
 function faceOne(): number {
@@ -385,7 +385,7 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
       encounter: {
         ...state.encounter,
         tokens: state.encounter.tokens.map((token) => token.combatantId === drummer
-          ? { ...token, position: onBoard(state.encounter.bounds, { column: 2, row: 2 }) }
+          ? movedTo(state.encounter, token, { column: 2, row: 2 })
           : token),
       },
     };
@@ -405,10 +405,7 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
       encounter: {
         ...state.encounter,
         tokens: state.encounter.tokens.map((token) => token.combatantId === drummer
-          ? {
-              ...token,
-              position: onBoard(state.encounter.bounds, { column: warDrum.position.column + 2, row: warDrum.position.row }),
-            }
+          ? movedTo(state.encounter, token, { column: warDrum.position.column + 2, row: warDrum.position.row })
           : token),
       },
     };
@@ -776,7 +773,7 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
       encounter: {
         ...initial.encounter,
         tokens: initial.encounter.tokens.map((token) => token.combatantId === drummer
-          ? { ...token, position: onBoard(initial.encounter.bounds, { column: 9, row: 5 }) }
+          ? movedTo(initial.encounter, token, { column: 9, row: 5 })
           : token),
       },
     };
@@ -1005,7 +1002,7 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
       encounter: {
         ...bundled.encounter,
         tokens: bundled.encounter.tokens.map((token) => token.combatantId === target.id
-          ? { ...token, position: onBoard(bundled.encounter.bounds, ignitionCell) }
+          ? movedTo(bundled.encounter, token, ignitionCell)
           : token),
       },
     };

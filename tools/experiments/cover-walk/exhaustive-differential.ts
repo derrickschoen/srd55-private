@@ -36,7 +36,7 @@ import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import * as candidate from '../../../src/combat/cover';
 import type { EncounterState } from '../../../src/combat/encounter';
 import type { GridCell } from '../../../src/combat/grid';
-import { requireBoardCell } from '../../../src/combat/grid';
+import { movedToken } from '../../../src/combat/token-placement';
 import type { CombatantId } from '../../../src/combat/values';
 import type { WorldObject } from '../../../src/combat/world-objects';
 import { armorClass, worldObjectId } from '../../../src/combat/values';
@@ -161,7 +161,7 @@ function densify(state: EncounterState, seed: number): EncounterState {
 function withTokenAt(state: EncounterState, mover: CombatantId, anchor: GridCell): EncounterState {
   return {
     ...state,
-    tokens: state.tokens.map((token) => token.combatantId === mover ? { ...token, position: requireBoardCell(state.bounds, anchor, 'test anchor') } : token),
+    tokens: state.tokens.map((token) => token.combatantId === mover ? movedToken(state, token, anchor, 'Differential token') : token),
   };
 }
 

@@ -252,8 +252,10 @@ export function regretTurnLegalActions(
     !combatantsAreAllies(state, actor, candidate.profile.id) && candidate.life !== 'dead');
   const actions: EncounterCommand[] = [];
   if (acting.turn.movement.remaining >= 5) {
-    const movementWorld = encounterMovementWorld(state);
+    // The actor's own anchor first: a state spread off its grid is refused naming the actor, before the movement
+    // board refuses the first body square off it.
     const origin = requireBoardCell(state.bounds, position(state, actor), `Combatant ${actor} anchor`);
+    const movementWorld = encounterMovementWorld(state);
     for (const cell of adjacentCells(state.bounds, origin)) {
       const destination = combatantSpaceAt(state, actor, cell);
       if (

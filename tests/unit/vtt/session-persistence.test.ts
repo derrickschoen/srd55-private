@@ -569,10 +569,10 @@ describe('event-sourced encounter persistence', () => {
 
     const replayRevision = structuredClone(source.revisions(encounterSessionId('session:persistence-test'))[0]);
     if (replayRevision === undefined) throw new Error('Replay transition fixture is missing.');
-    const forged = {
+    const forged: SessionRevision = {
       ...replayRevision,
-      transition: { kind: 'transition_from_the_future' },
-    } as unknown as SessionRevision;
+      transition: { kind: 'transition_from_the_future' } as unknown as SessionRevision['transition'],
+    };
     expect(() => replaySessionRevisions([forged])).toThrowError(
       new UnknownSessionTransitionKindError('transition_from_the_future'),
     );

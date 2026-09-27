@@ -1,5 +1,6 @@
 import type { EncounterState } from '../../combat/encounter';
-import { requireBoardCell, type GridCell } from '../../combat/grid';
+import type { GridCell } from '../../combat/grid';
+import { movedToken } from '../../combat/token-placement';
 import type { CombatantId } from '../../combat/values';
 import type { PlanMaterialityReasonCode } from '../plan-materiality';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../intent-resolver';
@@ -85,7 +86,7 @@ function stateWithActorAt(
   return {
     ...state,
     tokens: state.tokens.map((token) => token.combatantId === actorId
-      ? { ...token, position: requireBoardCell(state.bounds, position, `Combatant ${actorId} hypothetical anchor`) }
+      ? movedToken(state, token, position, `Combatant ${actorId} hypothetical`)
       : token),
   };
 }

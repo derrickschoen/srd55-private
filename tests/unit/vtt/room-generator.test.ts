@@ -27,7 +27,7 @@ import { availableEngineActorOptions, resolveEngineActorOption } from '../../../
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { declareTestInputs } from '../../helpers/test-inputs';
-import { onBoard } from '../../helpers/board-cell';
+import { onBoard, placedAt } from '../../helpers/board-cell';
 import { FOOTPRINT_FIXTURE_MOVES, withFootprintMoves } from '../../helpers/footprint-fixture-moves';
 
 const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
@@ -280,7 +280,8 @@ function expectedCreatureSpaceFixture(bytes: string): string {
   const blocked = new Set(legacy.spec.blockedCells.map((cell) => `${String(cell.column)},${String(cell.row)}`));
   const tokens = legacy.encounter.state.tokens.map((token) => {
     const size = sizes.get(String(token.combatantId));
-    if (size === undefined) throw new Error(`Frozen token ${token.id} has no sized combatant.`);
+    const owner = legacy.encounter.state.combatants.find((combatant) => combatant.profile.id === token.combatantId)?.profile;
+    if (size === undefined || owner === undefined) throw new Error(`Frozen token ${token.id} has no sized combatant.`);
     const width = footprintWidth(size);
     const candidates = Array.from(
       { length: legacy.spec.dimensions.columns * legacy.spec.dimensions.rows },
@@ -313,7 +314,10 @@ function expectedCreatureSpaceFixture(bytes: string): string {
         occupied.add(`${String(column)},${String(row)}`);
       }
     }
-    return { ...token, position: onBoard(legacy.encounter.state.bounds, position), placementMode: { kind: 'normal' as const, actual: size } };
+    return placedAt(
+      { bounds: legacy.encounter.state.bounds, combatants: [{ profile: { ...owner, rules: { ...owner.rules, sizeCategory: size } } }], effects: [] },
+      token, position, { kind: 'normal', actual: size },
+    );
   });
   const upgraded: GeneratedRoom = {
     ...legacy,

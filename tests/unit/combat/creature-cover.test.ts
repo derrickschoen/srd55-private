@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { movedTo } from '../../helpers/board-cell';
 import {
   coverBetweenCombatants,
   traceCombatantLine,
@@ -150,7 +151,7 @@ function slit(cell: GridCell): WorldObject {
 function withMoverAt(state: EncounterState, mover: CombatantId, anchor: GridCell): EncounterState {
   return {
     ...state,
-    tokens: state.tokens.map((token) => token.combatantId === mover ? { ...token, position: requireBoardCell(state.bounds, anchor, 'test anchor') } : token),
+    tokens: state.tokens.map((token) => token.combatantId === mover ? movedTo(state, token, anchor) : token),
   };
 }
 

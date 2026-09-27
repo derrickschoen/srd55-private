@@ -2762,7 +2762,7 @@ function migrationOriginatingToken(value: unknown): MigrationOriginatingToken | 
   };
 }
 
-function migrateV10EncounterState(value: unknown): EncounterState {
+function migrateV10EncounterState(value: unknown): DecodedStateRest {
   if (!isRecord(value) || !Array.isArray(value.combatants) || !Array.isArray(value.tokens) ||
     !Array.isArray(value.effects) || !isRecord(value.environment)) {
     throw new TypeError('VTT session v10 encounter state is malformed.');
@@ -2879,7 +2879,7 @@ function migrateV10EncounterState(value: unknown): EncounterState {
     environment: { ...value.environment, narrowOpeningRegions: [] },
     sharedSpaceRelations: [],
     adjudicationPending: orderedPending,
-  } as unknown as EncounterState;
+  } as unknown as DecodedStateRest;
   return {
     ...migrated,
     phase: awaitingPlacementPhase(
@@ -2956,7 +2956,7 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
             ...oldBody,
             schemaVersion: 4 as const,
             branchRngStateFingerprint: branchRngStateFingerprint(
-              revision.encounterState as unknown as EncounterState,
+              revision.encounterState as unknown as DecodedStateRest,
             ),
           };
           return { ...body, checksum: sha256(canonicalJson(body)) };
@@ -3011,7 +3011,7 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
             priorDeathMoments.set(id, deathAt);
             return { ...combatant, deathAt };
           });
-          const migratedEncounterState = { ...encounterState, combatants } as unknown as EncounterState;
+          const migratedEncounterState = { ...encounterState, combatants } as unknown as DecodedStateRest;
           const { checksum: _oldChecksum, ...oldBody } = revision;
           const body = {
             ...oldBody,
@@ -3052,7 +3052,7 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
           const migratedEncounterState = {
             ...legacyEncounterState,
             hiddenRolls: hideDeathSaveRolls ? ['death_saves'] : [],
-          } as unknown as EncounterState;
+          } as unknown as DecodedStateRest;
           const { checksum: _oldChecksum, ...oldBody } = revision;
           const body = {
             ...oldBody,
@@ -3082,7 +3082,7 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
         if (!Array.isArray(bundle.revisions)) {
           throw new TypeError('VTT session v6 revisions are malformed.');
         }
-        const migratedByRevision = new Map<number, EncounterState>();
+        const migratedByRevision = new Map<number, DecodedStateRest>();
         const revisions = bundle.revisions.map((revision) => {
           if (
             !isRecord(revision) ||
@@ -3094,7 +3094,7 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
           const activeEncounterState = {
             ...revision.encounterState,
             phase: { kind: 'active' as const },
-          } as unknown as EncounterState;
+          } as unknown as DecodedStateRest;
           const parent = typeof revision.parentRevision === 'number'
             ? migratedByRevision.get(revision.parentRevision)
             : undefined;
@@ -3346,7 +3346,7 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
           const encounterState = {
             ...revision.encounterState,
             observationHistory: [],
-          } as unknown as EncounterState;
+          } as unknown as DecodedStateRest;
           const body = {
             ...oldBody,
             schemaVersion: 12 as const,

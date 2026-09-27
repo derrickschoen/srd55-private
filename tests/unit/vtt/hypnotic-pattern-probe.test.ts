@@ -22,7 +22,7 @@ import {
 } from '../../../src/vtt/renderer-profile';
 import { readFileSync } from '../../helpers/test-filesystem';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
-import { onBoard } from '../../helpers/board-cell';
+import { onBoard, movedTo } from '../../helpers/board-cell';
 
 const FIXTURE = 'tests/fixtures/arena-scenarios/hypnotic-pattern-cc.json';
 const CASTER = combatantId('combatant:d432-incubus');
@@ -283,10 +283,7 @@ describe('D432 Hypnotic Pattern control probe', () => {
       ...state,
       bounds: { columns: 6, rows: 6 },
       blockedCells: [],
-      tokens: state.tokens.map((token, index) => ({
-        ...token,
-        position: onBoard({ columns: 6, rows: 6 }, { column: index, row: index }),
-      })),
+      tokens: state.tokens.map((token, index) => movedTo({ ...state, bounds: { columns: 6, rows: 6 } }, token, { column: index, row: index })),
     };
     const option = hypnoticOption(availableEngineActorOptions(crowded, CASTER, OFFER_ENVIRONMENT));
     const cast = option.actionSlots.find((slot) => slot.use.kind === 'cast_spell')?.use;

@@ -45,7 +45,7 @@ import {
   type BoardSnapshotDomEvidence,
 } from '../../../tools/ai-dm-board-snapshot';
 import { installInteractiveDocument, interactiveElement } from '../../fixtures/interactive-dom';
-import { onBoard } from '../../helpers/board-cell';
+import { onBoard, movedTo } from '../../helpers/board-cell';
 
 const CONTROL_FIXTURES = Array.from(
   { length: 10 },
@@ -73,13 +73,10 @@ function movedState(state: EncounterState): EncounterState {
   return {
     ...state,
     tokens: state.tokens.map((token, index) => index === 0
-      ? {
-          ...token,
-          position: onBoard(state.bounds, {
-            column: Math.min(token.position.column + 1, state.bounds.columns - 1),
-            row: token.position.row,
-          }),
-        }
+      ? movedTo(state, token, {
+          column: Math.min(token.position.column + 1, state.bounds.columns - 1),
+          row: token.position.row,
+        })
       : token),
   };
 }
