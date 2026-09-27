@@ -37,6 +37,7 @@ const DISABLING_ENVIRONMENT = ['SQL_QUERY_LOG', 'AI_BRIDGE_LIVE'];
  * ICU); the Vitest main process, its config and its global setups (CI,
  * NODE_ENV and STATIC_APP_CACHE_DIR among them); and module-scope reads, which
  * a worker running several files (isolate: false) makes for the first only.
+ * The recorder's header comment states both attribution limits in full.
  */
 const HASHED_ENVIRONMENT = [
   'AI_BRIDGE_FAKE',
@@ -175,11 +176,32 @@ function literalText(expression, constants) {
   return undefined;
 }
 
-function importMetaUrl(node) {
+function importMetaProperty(node, name) {
   return ts.isPropertyAccessExpression(node) &&
-    node.name.text === 'url' &&
+    node.name.text === name &&
     ts.isMetaProperty(node.expression) &&
-    node.expression.keywordToken === ts.SyntaxKind.ImportKeyword;
+    node.expression.keywordToken === ts.SyntaxKind.ImportKeyword &&
+    node.expression.name.text === 'meta';
+}
+
+function importMetaUrl(node) {
+  return importMetaProperty(node, 'url');
+}
+
+/**
+ * Whether an import or re-export declaration loads its module at runtime.
+ * Both tsconfigs set verbatimModuleSyntax, under which only the type-marked
+ * forms are erased: `import type ...` and `export type ... from`. An import
+ * whose bindings are all inline `type` is emitted as `import {} from` and
+ * loads its module; so does `export { type A } from`.
+ *
+ * The one definition of a runtime edge for the verdict cache. The import
+ * boundary guard (GUARD, D915) has its own classifier and has not landed;
+ * whichever of the two lands second makes them share one.
+ */
+function loadsModuleAtRuntime(declaration) {
+  if (ts.isImportDeclaration(declaration)) return declaration.importClause?.isTypeOnly !== true;
+  return declaration.moduleSpecifier !== undefined && !declaration.isTypeOnly;
 }
 
 function newUrlSpecifier(expression, constants) {
@@ -235,13 +257,109 @@ function globRegex(pattern) {
   return new RegExp(`${regex}$`, 'u');
 }
 
-function expandGlob(importer, pattern) {
-  if (!pattern.startsWith('.')) return undefined;
-  const base = dirname(importer);
-  const matcher = globRegex(posixPath(pattern));
-  return filesBelow(base)
-    .filter((path) => matcher.test(`./${posixPath(relative(base, path))}`))
+/**
+ * Every regular file below `directory`; undefined when a link or special file
+ * could hide one, since the module inventory would not see a file added there.
+ */
+function regularFilesBelow(directory) {
+  if (!existsSync(directory)) return [];
+  if (realpathSync(directory) !== directory) return undefined;
+  if (!statSync(directory).isDirectory()) return [];
+  const files = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = resolve(directory, entry.name);
+    if (entry.isDirectory()) {
+      const below = regularFilesBelow(path);
+      if (below === undefined) return undefined;
+      files.push(...below);
+    } else if (entry.isFile()) {
+      files.push(path);
+    } else {
+      return undefined;
+    }
+  }
+  return files;
+}
+
+// Glob syntax the matcher below does not implement (braces, classes,
+// extglobs, escapes), so a pattern using it fails closed.
+const UNMATCHED_GLOB_SYNTAX = /[{}[\]()!+@\\]/u;
+
+/**
+ * The files one `import.meta.glob` pattern can load, or undefined when the
+ * walker cannot say and the call fails closed. A pattern is relative to its
+ * importer and uses only `*`, `**` and `?`. Its static base must lie in a
+ * MODULE_INVENTORY_ROOTS directory, so a matching file added later changes the
+ * global salt. Matching is looser than Vite's (a dotfile matches), which can
+ * only add inputs.
+ */
+function globTargets(importer, pattern) {
+  if (!pattern.startsWith('./') && !pattern.startsWith('../')) return undefined;
+  if (UNMATCHED_GLOB_SYNTAX.test(pattern)) return undefined;
+  const segments = pattern.split('/');
+  const firstWildcard = segments.findIndex((segment) => /[*?]/u.test(segment));
+  const staticLength = firstWildcard < 0 ? segments.length - 1 : firstWildcard;
+  const base = resolve(dirname(importer), ...segments.slice(0, staticLength));
+  const inventoried = MODULE_INVENTORY_ROOTS.some((directory) => {
+    const inventoryRoot = resolve(root, directory);
+    return base === inventoryRoot || base.startsWith(`${inventoryRoot}${sep}`);
+  });
+  if (!inventoried) return undefined;
+  const matcher = globRegex(segments.slice(staticLength).join('/'));
+  const files = regularFilesBelow(base);
+  if (files === undefined) return undefined;
+  return files
+    .filter((path) => matcher.test(posixPath(relative(base, path))))
     .sort((left, right) => repositoryPath(left).localeCompare(repositoryPath(right)));
+}
+
+/**
+ * The files an `import.meta.glob(patterns, options)` call can load, pushing a
+ * reason to `unresolved` for what the walker cannot follow. A negative
+ * pattern is ignored: it can only remove a file. The `base` option moves
+ * every pattern and fails closed; the others (eager, import, query) change
+ * how a match loads, not which files match.
+ */
+function globCallTargets(importer, call, constants, unresolved) {
+  const [patternArgument, options] = call.arguments;
+  const patternExpressions = patternArgument === undefined
+    ? []
+    : ts.isArrayLiteralExpression(patternArgument)
+      ? patternArgument.elements
+      : [patternArgument];
+  const patterns = patternExpressions.map((expression) => literalText(expression, constants));
+  if (patterns.length === 0 || patterns.some((pattern) => pattern === undefined)) {
+    unresolved.push('<computed import.meta.glob>');
+    return [];
+  }
+  if (options !== undefined) {
+    if (!ts.isObjectLiteralExpression(options)) {
+      unresolved.push('<computed import.meta.glob options>');
+      return [];
+    }
+    for (const property of options.properties) {
+      const name = ts.isPropertyAssignment(property) &&
+        (ts.isIdentifier(property.name) || ts.isStringLiteralLike(property.name))
+        ? property.name.text
+        : undefined;
+      if (name === undefined) {
+        unresolved.push('<computed import.meta.glob options>');
+        return [];
+      }
+      if (name === 'base') {
+        unresolved.push('<unsupported import.meta.glob option base>');
+        return [];
+      }
+    }
+  }
+  const targets = [];
+  for (const pattern of patterns) {
+    if (pattern.startsWith('!')) continue;
+    const paths = globTargets(importer, pattern);
+    if (paths === undefined) unresolved.push(`<unsupported import.meta.glob ${pattern}>`);
+    else targets.push(...paths);
+  }
+  return targets;
 }
 
 function fsBindings(source) {
@@ -285,24 +403,15 @@ function runtimeReferences(path, content) {
 
   const visit = (node) => {
     if (ts.isImportDeclaration(node)) {
-      const clause = node.importClause;
-      const allNamedBindingsAreTypes =
-        clause?.namedBindings !== undefined &&
-        ts.isNamedImports(clause.namedBindings) &&
-        clause.namedBindings.elements.length > 0 &&
-        clause.namedBindings.elements.every((element) => element.isTypeOnly);
-      if (clause?.isTypeOnly !== true && !allNamedBindingsAreTypes) {
-        add(node.moduleSpecifier, '<non-literal import>');
-      }
+      if (loadsModuleAtRuntime(node)) add(node.moduleSpecifier, '<non-literal import>');
     } else if (ts.isExportDeclaration(node)) {
-      if (!node.isTypeOnly && node.moduleSpecifier !== undefined) {
-        add(node.moduleSpecifier, '<non-literal export>');
-      }
+      if (loadsModuleAtRuntime(node)) add(node.moduleSpecifier, '<non-literal export>');
     } else if (
       ts.isCallExpression(node) &&
       node.expression.kind === ts.SyntaxKind.ImportKeyword &&
-      node.arguments.length === 1
+      node.arguments.length > 0
     ) {
+      // A second argument holds import attributes; the first names the file.
       add(node.arguments[0], '<computed dynamic import>');
     } else if (
       ts.isCallExpression(node) &&
@@ -320,26 +429,12 @@ function runtimeReferences(path, content) {
       node.arguments.length > 0
     ) {
       add(node.arguments[0], `<computed vi.${node.expression.name.text}>`);
-    } else if (
-      ts.isCallExpression(node) &&
-      ts.isPropertyAccessExpression(node.expression) &&
-      node.expression.name.text === 'glob' &&
-      ts.isPropertyAccessExpression(node.expression.expression) &&
-      ts.isMetaProperty(node.expression.expression.expression)
-    ) {
-      const patterns = node.arguments.length === 0
-        ? []
-        : ts.isArrayLiteralExpression(node.arguments[0])
-          ? node.arguments[0].elements.map((element) => literalText(element, constants))
-          : [literalText(node.arguments[0], constants)];
-      if (patterns.length === 0 || patterns.some((pattern) => pattern === undefined)) {
-        unresolved.push('<computed import.meta.glob>');
+    } else if (importMetaProperty(node, 'glob')) {
+      // Vite expands only a direct call; any other use hides what it loads.
+      if (ts.isCallExpression(node.parent) && node.parent.expression === node) {
+        globbedPaths.push(...globCallTargets(path, node.parent, constants, unresolved));
       } else {
-        for (const pattern of patterns) {
-          const paths = expandGlob(path, pattern);
-          if (paths === undefined) unresolved.push(`<unsupported import.meta.glob ${pattern}>`);
-          else globbedPaths.push(...paths);
-        }
+        unresolved.push('<import.meta.glob not called directly>');
       }
     } else if (
       ts.isNewExpression(node) &&
