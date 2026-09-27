@@ -3,6 +3,8 @@ import {
   canonicalContentIdentityJson,
 } from '../../../src/catalog/content-identity';
 import { parseSourceCatalogRecord } from '../../../src/catalog/source-catalog-records';
+import { projectAuthoredContentAggregateV1 } from '../../../src/catalog/stored-authored-content-projector-v1';
+import type { SpeciesContentAggregate } from '../../../src/authoring/contracts';
 import { SourceCatalogSpeciesSensesError } from '../../../src/catalog/source-catalog-records-errors';
 import {
   canonicalSpeciesSenses,
@@ -97,5 +99,30 @@ describe('a species sense statement', () => {
       .toMatchObject({ senses: [{ kind: 'darkvision', range_feet: 60 }] });
     expect(() => record({ ...aggregate, senses: [{ kind: 'darkvision', range_feet: 5_000 }] }))
       .toThrow(new SourceCatalogSpeciesSensesError('aggregate.senses', 0, 'range_out_of_bounds'));
+  });
+
+  it('projects a statement into identity only when the species states one', () => {
+    const species = {
+      kind: 'species',
+      name: 'Projected Folk',
+      rules_edition: 'expanded',
+      reference_text: '',
+      repeatable: false,
+      creature_type: 'Humanoid',
+      primary_size: 'Medium',
+      alternate_size: null,
+      walking_speed_feet: 30,
+      traits: [],
+      grants: [],
+    } as unknown as SpeciesContentAggregate;
+    const canonicalPayload = (aggregate: SpeciesContentAggregate) =>
+      JSON.parse(canonicalContentIdentityJson(projectAuthoredContentAggregateV1(aggregate).payload)) as
+        Readonly<Record<string, unknown>>;
+    // Unstated: no key, so a fingerprint minted before the field keeps its bytes.
+    expect(Object.hasOwn(canonicalPayload(species), 'senses')).toBe(false);
+    // Stated: the key, even when empty — "normal sight only" is not "unstated".
+    expect(canonicalPayload({ ...species, senses: [] }).senses).toEqual([]);
+    expect(canonicalPayload({ ...species, senses: [{ kind: 'truesight', range_feet: 30 }] }).senses)
+      .toEqual([{ kind: 'truesight', range_feet: 30 }]);
   });
 });

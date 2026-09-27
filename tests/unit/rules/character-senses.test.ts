@@ -8,6 +8,7 @@ import {
   SENSE_FEATURE_CAPABILITY_OWNER,
   SENSE_FEATURES,
   type CharacterSenseInputs,
+  type LineageDarkvision,
 } from '../../../src/rules/character-senses';
 import { SRD_SPECIES_SENSES, type SrdSpeciesName } from '../../../src/rules/generated/species-srd-tables';
 import { bundledSpeciesTemplates } from '../../../src/rules/origins-srd';
@@ -148,6 +149,42 @@ describe('a character\'s standing senses', () => {
       .toBe('5a4d0a64acd87d3811282a73427f63e783d932d5d623ac8dd77b2f6d1dcafb12');
     expect(spanText(SENSE_FEATURES.Stonecunning.span)).toContain('Stonecunning. As a Bonus Action, you gain Trem-');
     expect(spanText(SENSE_FEATURES["Devil's Sight"].span)).toContain('You can see normally in Dim Light and Darkness—');
+  });
+
+  it('starts an authored species from exactly the senses it states (owner D923 Q10)', () => {
+    const stated = (lineageDarkvision: LineageDarkvision) => characterSenses(inputs({
+      species: {
+        kind: 'stated_species',
+        name: 'Deep Folk',
+        senses: [{ kind: 'tremorsense', rangeFeet: 15 }, { kind: 'darkvision', rangeFeet: 60 }],
+        lineageDarkvision,
+      },
+    }));
+    expect(stated(null)).toEqual({
+      status: 'sourced',
+      senses: [
+        { kind: 'normal_sight' },
+        { kind: 'tremorsense', rangeFeet: 15 },
+        { kind: 'darkvision', rangeFeet: 60 },
+      ],
+      // Sense features are SRD species' and options'; an authored one holds none.
+      senseFeatures: [],
+    });
+    // A lineage choice owning the Darkvision range replaces that one sense and
+    // keeps every other sense the species states.
+    expect(stated({ kind: 'known', value: 120 })).toEqual({
+      status: 'sourced',
+      senses: [
+        { kind: 'normal_sight' },
+        { kind: 'tremorsense', rangeFeet: 15 },
+        { kind: 'darkvision', rangeFeet: 120 },
+      ],
+      senseFeatures: [],
+    });
+    // "Normal sight only" is a statement too.
+    expect(characterSenses(inputs({
+      species: { kind: 'stated_species', name: 'Plain Folk', senses: [], lineageDarkvision: null },
+    }))).toEqual({ status: 'sourced', senses: [{ kind: 'normal_sight' }], senseFeatures: [] });
   });
 
   it('pins the feature spans it was hand-typed from', () => {
