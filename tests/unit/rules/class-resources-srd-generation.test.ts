@@ -49,6 +49,18 @@ describe('class-resources artifact generation freshness', () => {
     expect(JSON.stringify(bundledSrdClassResourceFormulaManifest())).toBe(JSON.stringify(derived));
   });
 
+  it('is shared deeply frozen, so no caller can change the catalog for the next one', () => {
+    const barbarian = bundledSrdClassResourceManifest()[0];
+    const fighter = bundledSrdClassResourceFormulaManifest().formulas.find(
+      (entry) => entry.resource_kind === 'action_surge',
+    );
+    expect(Object.isFrozen(barbarian?.ladders[0]?.maxima)).toBe(true);
+    expect(Object.isFrozen(fighter?.formula)).toBe(true);
+    expect(fighter?.formula.kind === 'fixed_count_by_class_level'
+      ? Object.isFrozen(fighter.formula.steps[1])
+      : null).toBe(true);
+  });
+
   it('carries the Arcane Recovery prose the reader derives', () => {
     expect(SRD_ARCANE_RECOVERY_DESCRIPTION).toBe(srdArcaneRecoveryDescription(srdFullText));
   });

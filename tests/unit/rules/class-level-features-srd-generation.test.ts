@@ -30,4 +30,13 @@ describe('class-level-features artifact generation freshness', () => {
     expect(bundledSrdClassLevelFeatures()).toStrictEqual(derived);
     expect(JSON.stringify(bundledSrdClassLevelFeatures())).toBe(JSON.stringify(derived));
   });
+
+  it('is shared deeply frozen, so no caller can change the tables for the next one', () => {
+    const [barbarian] = bundledSrdClassLevelFeatures();
+    const [first] = barbarian?.levels ?? [];
+    expect(Object.isFrozen(bundledSrdClassLevelFeatures())).toBe(true);
+    expect(Object.isFrozen(barbarian)).toBe(true);
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(Object.isFrozen(first?.entitlements)).toBe(true);
+  });
 });

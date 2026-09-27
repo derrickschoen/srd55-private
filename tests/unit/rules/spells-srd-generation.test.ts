@@ -55,6 +55,13 @@ describe('spell catalog artifact generation freshness', () => {
     expect(JSON.stringify(bundledSrdSpellDescriptions())).toBe(JSON.stringify(derived));
   });
 
+  it('is shared deeply frozen, so no caller can change the catalog for the next one', () => {
+    expect(Object.isFrozen(bundledSrdSpellDescriptions())).toBe(true);
+    expect(Object.isFrozen(bundledSrdSpellDescriptions()[0])).toBe(true);
+    expect(Object.isFrozen(bundledSrdSpellListMemberships())).toBe(true);
+    expect(Object.isFrozen(bundledSrdSpellListMemberships()[0])).toBe(true);
+  });
+
   it('seeds from exactly the class-list memberships the reader parses, in list order', () => {
     const derived = parseSrdSpellListMemberships(lists);
     expect(bundledSrdSpellListMemberships()).toStrictEqual(derived);
