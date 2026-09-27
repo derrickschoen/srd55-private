@@ -44,6 +44,11 @@ export declare function isCodeFile(fileName: string): boolean;
 export declare function parseModule(fileName: string, text: string): ts.SourceFile;
 export declare function classifyModuleReference(node: ts.Node): ModuleReference | undefined;
 export declare function moduleReferences(sourceFile: ts.SourceFile): LocatedModuleReference[];
+export declare function moduleStringConstants(sourceFile: ts.SourceFile): Map<string, string>;
+export declare function specifierText(
+  expression: ts.Expression | undefined,
+  constants: ReadonlyMap<string, string>,
+): string | undefined;
 
 export type ResolvedSpecifier =
   | { readonly kind: 'external' | 'unresolved'; readonly id: string }

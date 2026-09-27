@@ -14,17 +14,33 @@
  *                                             evaluated with the importer
  *   import.meta.glob('./x/*.ts', { eager: true })
  *                                             evaluated with the importer
- *   import('./a'); require('./a');
+ *   import('./a'); import('./a', { with: { type: 'json' } }); require('./a');
  *   import.meta.glob('./x/*.ts')              evaluated when the call runs
  *   new URL('./a', import.meta.url)           an asset the module fetches or
  *                                             starts (a worker, a wasm file)
+ *   f(import.meta.glob)                       not expandable: Vite expands
+ *                                             only a direct call, so this
+ *                                             fails closed (unsupported glob)
  *
  * The third and fourth lines are the trap: the bindings are types, yet the
  * module is still evaluated. The verdict cache once read them as erased (the
- * IMPORT-SLIM synthesis, item 0) while Vite evaluated them. Two definitions of
- * a runtime edge that disagree is exactly that bug, so the import-boundary
- * guard (scripts/check-import-boundaries.mjs), the verdict cache and every
- * import census classify through this module and nothing else.
+ * IMPORT-SLIM synthesis, item 0) while Vite evaluated them; it also missed
+ * every glob, testing for `import.meta` as a property access where the parser
+ * gives a MetaProperty, and every `import()` with options. Two definitions of
+ * a runtime edge that disagree is exactly that bug.
+ *
+ * Who classifies through this module: the import-boundary guard
+ * (scripts/check-import-boundaries.mjs) and the import censuses. The verdict
+ * cache (scripts/test-affected.mjs) still has its own copy: RECORDER-A fixed
+ * its two holes on its own branch with the semantics above, and whichever of
+ * the two units lands second switches it to `classifyModuleReference` (D919).
+ * The switch is mechanical: a declaration loads its module unless its
+ * `evaluation` is `erased`; `specifiers` are the expressions naming the
+ * target (an `import()`'s first argument, a glob's patterns), which
+ * `specifierText` reads: a string literal, or a module-scope string constant
+ * (`moduleStringConstants`), as the verdict cache has always read them. What
+ * the verdict cache tracks beyond module references (vi.mock paths, file
+ * reads, environment variables) stays its own.
  *
  * One caveat: a file that no tsconfig project includes (drizzle.config.ts,
  * vitest.stryker.config.ts, docs/) is transformed without
@@ -134,7 +150,9 @@ function namedBindingsAreAllInlineTypes(elements) {
  * - `specifiers`: the expressions naming the target (a glob's patterns);
  * - `inlineTypeOnly`: an import or re-export that is kept only for its side
  *   effect because every binding is an inline `type` (guard rule R1);
- * - `glob`: for a glob, `{ supported, eager, query }`.
+ * - `glob`: for a glob, `{ supported, eager, query }`; `import.meta.glob`
+ *   used other than as a direct callee is a glob with no patterns and
+ *   `supported: false`.
  */
 export function classifyModuleReference(node) {
   if (ts.isImportDeclaration(node)) {
@@ -166,9 +184,23 @@ export function classifyModuleReference(node) {
       [node.moduleReference.expression],
     );
   }
+  if (ts.isPropertyAccessExpression(node) && node.name.text === 'glob' && isImportMeta(node.expression)) {
+    // A direct call is classified at the call. Any other use (passed, stored,
+    // called through a variable) cannot be expanded, so it fails closed.
+    const parent = node.parent;
+    if (parent !== undefined && ts.isCallExpression(parent) && parent.expression === node) return undefined;
+    return {
+      syntax: 'glob',
+      evaluation: EVALUATION.STATIC,
+      specifiers: [],
+      inlineTypeOnly: false,
+      glob: { supported: false, eager: true, query: undefined },
+    };
+  }
   if (!ts.isCallExpression(node) && !ts.isNewExpression(node)) return undefined;
   const callArguments = node.arguments ?? [];
   if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+    // The first argument names the module; a second holds import attributes.
     return reference('dynamic-import', EVALUATION.DYNAMIC, callArguments.slice(0, 1));
   }
   if (
@@ -247,7 +279,8 @@ export function resolveModuleSpecifier(importer, specifier, isFile) {
   const queryIndex = withoutFragment.indexOf('?');
   const bare = queryIndex < 0 ? withoutFragment : withoutFragment.slice(0, queryIndex);
   const query = queryIndex < 0 ? '' : withoutFragment.slice(queryIndex + 1);
-  const base = path.posix.normalize(path.posix.join(path.posix.dirname(importer), bare));
+  // './dir/' names the directory: its index, never a 'dir//index.ts' node.
+  const base = path.posix.normalize(path.posix.join(path.posix.dirname(importer), bare)).replace(/(?<=.)\/+$/u, '');
   if (base.startsWith('../') || base === '..') return { kind: 'unresolved', id: specifier };
   const candidates = [base];
   const extension = path.posix.extname(base);
@@ -316,13 +349,62 @@ export function expandGlob(importer, patterns, filesBelow) {
     .sort();
 }
 
-function literalText(expression) {
-  return expression !== undefined && ts.isStringLiteralLike(expression) ? expression.text : undefined;
+/** Declarations that bind an identifier, for moduleStringConstants' shadowing check. */
+function declaredName(node) {
+  if (
+    ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isBindingElement(node) ||
+    ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isClassDeclaration(node) ||
+    ts.isClassExpression(node) || ts.isImportSpecifier(node) || ts.isImportClause(node) ||
+    ts.isNamespaceImport(node) || ts.isImportEqualsDeclaration(node) || ts.isEnumDeclaration(node)
+  ) {
+    return node.name !== undefined && ts.isIdentifier(node.name) ? node.name.text : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * The module-scope `const NAME = '<string>'` bindings a specifier may name,
+ * as in `const COVERAGE_PATH = '../src/simulation/coverage'; import(COVERAGE_PATH)`.
+ * A name declared anywhere else in the file too is left out, since the
+ * specifier might mean the other binding; the reference then fails closed.
+ */
+export function moduleStringConstants(sourceFile) {
+  const declarations = new Map();
+  const visit = (node) => {
+    const name = declaredName(node);
+    if (name !== undefined) declarations.set(name, (declarations.get(name) ?? 0) + 1);
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  const constants = new Map();
+  for (const statement of sourceFile.statements) {
+    if (!ts.isVariableStatement(statement) || (statement.declarationList.flags & ts.NodeFlags.Const) === 0) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      if (
+        ts.isIdentifier(declaration.name) &&
+        declaration.initializer !== undefined &&
+        ts.isStringLiteralLike(declaration.initializer) &&
+        declarations.get(declaration.name.text) === 1
+      ) {
+        constants.set(declaration.name.text, declaration.initializer.text);
+      }
+    }
+  }
+  return constants;
+}
+
+/** A specifier's text: a string literal, or an identifier bound by moduleStringConstants. */
+export function specifierText(expression, constants) {
+  if (expression === undefined) return undefined;
+  if (ts.isStringLiteralLike(expression)) return expression.text;
+  if (ts.isIdentifier(expression)) return constants.get(expression.text);
+  return undefined;
 }
 
 /**
  * Builds the module graph from `roots` (repository paths of code files) and
- * every code file they reach, read through `host`:
+ * every code file they reach, read through `host`. A specifier is read by
+ * `specifierText`, so a module-scope string constant resolves:
  * - `host.isFile(path)`: whether a repository file exists;
  * - `host.readFile(path)`: its text;
  * - `host.filesBelow(directory)`: the repository files under a directory.
@@ -343,6 +425,7 @@ export function buildModuleGraph(roots, host) {
   while (queue.length > 0) {
     const file = queue.shift();
     const sourceFile = parseModule(file, host.readFile(file));
+    const constants = moduleStringConstants(sourceFile);
     const out = [];
     const enqueue = (to) => {
       if (!to.includes('?') && isCodeFile(to) && !queued.has(to)) {
@@ -357,11 +440,11 @@ export function buildModuleGraph(roots, host) {
           file,
           line: found.line,
           syntax: found.syntax,
-          specifier: literalText(found.specifiers[0]) ?? '<non-literal>',
+          specifier: specifierText(found.specifiers[0], constants) ?? '<non-literal>',
         });
       }
       if (found.syntax === 'glob') {
-        const patterns = found.specifiers.map(literalText);
+        const patterns = found.specifiers.map((expression) => specifierText(expression, constants));
         const matched = !found.glob.supported || patterns.length === 0 || patterns.includes(undefined)
           ? undefined
           : expandGlob(file, patterns, host.filesBelow);
@@ -377,7 +460,7 @@ export function buildModuleGraph(roots, host) {
         }
         continue;
       }
-      const specifier = literalText(found.specifiers[0]);
+      const specifier = specifierText(found.specifiers[0], constants);
       if (specifier === undefined) {
         if (found.evaluation !== EVALUATION.ERASED) {
           unresolved.push({ file, line: found.line, specifier: '<non-literal>', evaluation: found.evaluation });

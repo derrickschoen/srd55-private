@@ -20,8 +20,9 @@ import {
 
 /**
  * `scripts/runtime-import-edges.mjs` is the one definition of a runtime import
- * edge (D915), shared by the import-boundary guard, the verdict cache and the
- * import censuses. Its claims are checked here against the transformer that
+ * edge (D915), used by the import-boundary guard and the import censuses; the
+ * verdict cache switches to it once RECORDER-A and IMPORT-GUARD have both
+ * landed (D919). Its claims are checked here against the transformer that
  * actually runs this repository: Vite's own `transformWithEsbuild`, which
  * reads the tsconfig that owns each file (both projects set
  * `verbatimModuleSyntax`).
@@ -76,6 +77,9 @@ describe('the runtime-edge classifier', () => {
 
   it('classifies calls: dynamic imports and require run later, an eager glob loads with the module', () => {
     expect(only("export const m = () => import('./m');").evaluation).toBe('dynamic');
+    const withOptions = only("export const m = () => import('./m.json', { with: { type: 'json' } });");
+    expect([withOptions.syntax, withOptions.evaluation, withOptions.specifiers.map((specifier) => specifier.getText())])
+      .toEqual(['dynamic-import', 'dynamic', ["'./m.json'"]]);
     expect(only("const m = require('./m');").evaluation).toBe('dynamic');
     const lazy = only("export const all = import.meta.glob('./x/*.ts');");
     expect([lazy.syntax, lazy.evaluation, lazy.glob?.supported]).toEqual(['glob', 'dynamic', true]);
@@ -83,6 +87,10 @@ describe('the runtime-edge classifier', () => {
     expect([eager.evaluation, eager.glob?.eager, eager.glob?.query, eager.specifiers.length]).toEqual(['static', true, 'raw', 2]);
     const computed = only("export const all = import.meta.glob('./x/*.ts', { ...options });");
     expect([computed.evaluation, computed.glob?.supported]).toEqual(['static', false]);
+    // Vite expands only a direct call, so `import.meta.glob` passed as a value fails closed.
+    const passed = only('register(import.meta.glob);');
+    expect([passed.syntax, passed.evaluation, passed.glob?.supported, passed.specifiers.length])
+      .toEqual(['glob', 'static', false, 0]);
     expect(only("export const url = new URL('./m.wasm', import.meta.url);").evaluation).toBe('asset');
   });
 
@@ -90,6 +98,8 @@ describe('the runtime-edge classifier', () => {
     const source = parseModule('src/probe.ts', [
       'export const url = import.meta.url;',
       "export const other = helpers.glob('./x/*.ts');",
+      "export const named = importMeta.glob('./x/*.ts');",
+      "export const deeper = import.meta.env.glob('./x/*.ts');",
       "export const notMeta = new URL('./m', base);",
       'export { local };',
       'const local = 1;',
@@ -133,6 +143,7 @@ describe('specifier resolution and the graph', () => {
     expect(resolveModuleSpecifier('src/a.ts', './b', isFile)).toEqual({ kind: 'module', id: 'src/b.ts', file: 'src/b.ts' });
     expect(resolveModuleSpecifier('src/a.ts', './b.js', isFile)).toEqual({ kind: 'module', id: 'src/b.ts', file: 'src/b.ts' });
     expect(resolveModuleSpecifier('src/a.ts', './dir', isFile)).toEqual({ kind: 'module', id: 'src/dir/index.ts', file: 'src/dir/index.ts' });
+    expect(resolveModuleSpecifier('src/a.ts', './dir/', isFile)).toEqual({ kind: 'module', id: 'src/dir/index.ts', file: 'src/dir/index.ts' });
     expect(resolveModuleSpecifier('src/a.ts', '../docs/x.txt?raw', isFile))
       .toEqual({ kind: 'resource', id: 'docs/x.txt?raw', file: 'docs/x.txt' });
     expect(resolveModuleSpecifier('src/a.ts', './missing', isFile)).toEqual({ kind: 'unresolved', id: './missing' });
@@ -166,6 +177,33 @@ describe('specifier resolution and the graph', () => {
     expect(cycles(graph, ['static'])).toEqual([['src/a.ts', 'src/b.ts']]);
     expect(graph.inlineTypeOnly).toEqual([{ file: 'src/a.ts', line: 2, syntax: 'import', specifier: './c' }]);
     expect(graph.unresolved).toEqual([]);
+    const passedGlob = buildModuleGraph(['src/g.ts'], {
+      isFile: (path) => path === 'src/g.ts',
+      readFile: () => "export const all = import.meta.glob('./x/*.ts');\nregister(import.meta.glob);\n",
+      filesBelow: () => [],
+    });
+    expect(passedGlob.unresolved).toEqual([{ file: 'src/g.ts', line: 2, specifier: '<import.meta.glob>', evaluation: 'static' }]);
+  });
+
+  it('resolves a specifier held in a module-scope constant, unless the name is declared twice', () => {
+    const constantFiles: Readonly<Record<string, string>> = {
+      'tests/t.ts': [
+        "const LAZY_PATH = './lazy';",
+        "const SHADOWED = './lazy';",
+        'export const load = () => import(LAZY_PATH);',
+        'export const other = (SHADOWED: string) => import(SHADOWED);',
+      ].join('\n'),
+      'tests/lazy.ts': 'export const lazy = 1;\n',
+    };
+    const graph = buildModuleGraph(['tests/t.ts'], {
+      isFile: (path) => Object.hasOwn(constantFiles, path),
+      readFile: (path) => constantFiles[path] ?? '',
+      filesBelow: () => [],
+    });
+    expect(graph.edges.get('tests/t.ts')).toEqual([
+      { to: 'tests/lazy.ts', evaluation: 'dynamic', syntax: 'dynamic-import', line: 3, inlineTypeOnly: false },
+    ]);
+    expect(graph.unresolved).toEqual([{ file: 'tests/t.ts', line: 4, specifier: '<non-literal>', evaluation: 'dynamic' }]);
   });
 
   it('keeps a cycle apart from a module both cycles merely import', () => {
