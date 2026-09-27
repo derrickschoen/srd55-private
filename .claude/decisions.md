@@ -2948,3 +2948,36 @@ Order and ownership:
 - Each needs a codex review, a timed pair and a landing.
 
 Next free id: D916.
+
+## D916 — 2026-09-27 09:29 — owner: "all of the rules represented in the codebase, biased towards storing as much domain data in the types"
+
+OWNER, verbatim: "What are the details on what the parsed srd is used for? I want all of the rules represented in the codebase, biased towards storing as much domain data in the types".
+
+ANSWER GIVEN (verified by me in the code at main 0b688fbe):
+- src/rules/class-resources-srd.ts (1,000 lines).
+  - It parses class-level-tables.txt and the full SRD at DB boot into per-class resource ladders: maxima per level for kinds like Rage or Channel Divinity.
+  - It parses formula resources (ClassResourceFormula, e.g. an ability-modifier count).
+  - It lists unmodelled features ('mystic_arcanum' | 'signature_spells').
+  - It seeds the SQLite tables class_resources and class_resource_formulas (bootstrap.ts). Its readers are sheet-feature-values.ts and sheet-content-lookup.ts: the character sheet.
+- src/rules/spells-srd.ts (1,073 lines).
+  - It parses spell-descriptions.txt and the class spell lists into SrdSpellDescription rows and list memberships, seeded into the DB (bootstrap.ts, catalog/bundled-content-registry-v1.ts) for the spell catalogue and builder.
+  - Several fields are plain strings: casting_time, range, components, duration, description.
+- src/simulation/coverage.ts (2,316 lines).
+  - This is the DPR probability engine's source-of-truth audit: two readings of every spell body must agree, save-for-damage clauses are derived, and there is a sha256 oracle of the reviewed bodies.
+  - It supplies citation refs (bundledSrdSourceRef) and evidence helpers that probability.ts and headline.ts import. That import is why combat code pulls in the full SRD.
+- The combat engine's own rules are already typed TS, with no runtime parse:
+  - src/combat/spells/definitions.ts and manifest.ts: 189 spells, all 'implemented', many with a typed 'partial' note. List memberships: Wizard 136, Cleric 69, Druid 6, Bard 4, Ranger 4, Paladin 3, Warlock 2, Sorcerer 1.
+  - src/combat/statblocks/*: 62 statblock ids.
+
+READINGS (the owner can overturn):
+1. SRD-BUILDTIME output is TYPED TS modules, never JSON with a decoder.
+   - Literal data `as const satisfies <DomainType>`, with closed unions and branded types, so the compiler carries the facts. Example: a resource ladder's maxima are a fixed-length tuple typed per class.
+   - It is still written by the generator and never hand-edited, and a drift test re-derives it from the SRD text.
+   - The running SRD-BUILDTIME agent's brief allowed "TS modules or JSON with a typed decoder". If it chose JSON, that is a finding at its review and the fix round converts it.
+2. New program SRD-TYPED ("all of the rules represented in the codebase"). It starts with a CENSUS, a read-only analysis; no refactor until the owner picks from its ranked plan.
+   - Every SRD 5.2.1 rule area: classes and subclasses, species, backgrounds, feats, the spell list (all spells, not just the engine's 189), equipment, weapons and armour (tables), conditions, the rules glossary, monsters/statblocks, and the multiclassing rules. docs/srd/source/*.txt is the extract inventory.
+   - Each area is classed as: typed domain data executed by the engine; typed data not executed; stringly-typed data (e.g. SrdSpellDescription's range/duration/components strings); or absent.
+   - Proposed type designs for the stringly and absent areas (closed unions for casting time, range, duration and components; typed tables for weapons and armour).
+   - Sizes and order against in-flight units.
+
+Next free id: D917.
