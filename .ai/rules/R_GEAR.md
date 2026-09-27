@@ -31,7 +31,7 @@ Q: which mastery property does each weapon have; can you choose a weapon's maste
 A: Each weapon has exactly ONE fixed mastery property assigned by the Weapons table — the wielder picks which WEAPONS to master, never which property a weapon gets: Greatsword/Glaive=Graze, Greataxe/Halberd=Cleave, Longsword/Mace/Flail=Sap, Rapier/Shortsword/Handaxe=Vex, Maul/Quarterstaff/Battleaxe=Topple, Longbow/Whip/Club=Slow, Dagger/Scimitar/Sickle=Nick, Pike/Greatclub/Warhammer=Push.
 QUOTE: "Greatsword 2d6 Slashing Heavy, Two-Handed Graze"
 SRC: docs/srd/source/weapons-table.txt
-CODE: src/rules/weapons-srd.ts mastery_property (TRAILING_MASTERY column parse, rejects rows without one)
+CODE: src/rules/weapons-srd-reader.ts mastery_property (TRAILING_MASTERY column parse, rejects rows without one; run at build time)
 TRAP: Treating the mastery property as chosen per character rather than fixed per weapon, or recalling the 2014 weapons table (which had no Mastery column) and concluding weapons have none. The property effects themselves are R-COMBAT-018..025; this entry is the weapon-to-property map they lacked.
 
 ### R-GEAR-005 versatile-weapon-two-handed-die

@@ -55,9 +55,13 @@ const mutations = {
   // the declared map is the whole mutation: the exercised-entries guard
   // iterates its entries, so with none declared it has nothing to defend and
   // the parse quietly produces gear again, exactly the pre-fix state.
+  // The parse runs at build time now (SRD-BUILDTIME), so the mutation lands in
+  // the reader: `tests/unit/tools/srd-artifacts-fresh.test.ts` fails because
+  // the committed artifact is no longer what the reader derives, and the
+  // seeded-row controls fail once `npm run srd:artifacts` regenerates it.
   plural: [
     edit(
-      'src/rules/class-equipment-srd.ts',
+      'src/rules/class-equipment-srd-reader.ts',
       `const DECLARED_WEAPON_EQUIPMENT = new Map<string, string>([
   ['Daggers', 'Dagger'],
   ['Handaxes', 'Handaxe'],

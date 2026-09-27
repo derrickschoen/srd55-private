@@ -203,7 +203,7 @@ Q: what does extra attack do; how many attacks per attack action at fighter barb
 A: With Extra Attack (class level 5 in these martial classes) you attack TWICE instead of once whenever you take the Attack action on your turn.
 QUOTE: "You can attack twice instead of once whenever you"
 SRC: docs/srd/source/attack-class-features.txt
-CODE: src/rules/extra-attack-srd.ts parseSrdNamedExtraAttackFeatures
+CODE: src/rules/extra-attack-srd-reader.ts parseSrdNamedExtraAttackFeatures (run at build time; the runtime reads src/rules/generated/extra-attack-srd.ts)
 TRAP: Simulating one attack per Attack action for a level 5-7 martial (halves DPR), or granting it at total character level 5 instead of class level 5. Source sentence is COLUMN-INTERLEAVED with Second Wind text, so the entry needs a CHECK asserting two spans, both proven present: this quote plus 'take the Attack action on your turn.'
 
 ### R-COMBAT-027 grapple-shove-unarmed-strike-save-dc

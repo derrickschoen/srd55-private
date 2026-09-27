@@ -47,5 +47,5 @@ Q: multiclassing into a class saving throw proficiency; what does a monk sorcere
 A: Multiclassing INTO any of the twelve classes NEVER grants saving throw proficiency, and entering Monk, Sorcerer, or Wizard grants ONLY the Hit Point Die — no armor, weapon, tool, or skill proficiency at all.
 QUOTE: "Gain the Hit Point Die trait from the Core Monk Traits table."
 SRC: docs/srd/source/multiclass-entry-grants.txt
-CODE: src/rules/multiclass-entry-srd.ts parseSrdMulticlassEntryGrants
+CODE: src/rules/multiclass-entry-srd-reader.ts parseSrdMulticlassEntryGrants (run at build time; the runtime reads src/rules/generated/multiclass-entry-srd.ts)
 TRAP: Computing a dip from the class's full Core Traits row over-grants: a Barbarian dip wrongly adds Con save proficiency, a Wizard dip wrongly adds weapon proficiencies. The no-saving-throws half is proven by ABSENCE — 'saving' appears nowhere in the twelve clauses (verified; it occurs only in the extract's commentary header) — so that facet needs a CHECK-style absence assertion, not a quote.
