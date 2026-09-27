@@ -11,6 +11,12 @@ import type { SrdRuleKind } from './rule-index-types';
  * fails to compile. `RULE_STATUS` (./rule-status.ts) is keyed by it and
  * exhaustive, so a rule the generator adds has no status until someone gives it
  * one — and the build fails until then.
+ *
+ * COMPILE COST, MEASURED: the types below are written as `Extract` over the
+ * id and entry unions, not as generic mapped or indexed-access types over all
+ * 1,766 keys. A generic `SrdRuleIndex[SrdRuleIdOfKind<K>]['name']` alias alone
+ * cost about 1.8 s of every type check (its variance is measured over every
+ * key); these forms cost about 0.1 s.
  */
 export { SRD_RULE_INDEX };
 
@@ -19,13 +25,14 @@ export type SrdRuleIndex = typeof SRD_RULE_INDEX;
 /** The closed union of every rule unit's id. */
 export type SrdRuleId = keyof SrdRuleIndex;
 
-/** The ids of one or more kinds. */
-export type SrdRuleIdOfKind<K extends SrdRuleKind> = {
-  readonly [I in SrdRuleId]: SrdRuleIndex[I]['kind'] extends K ? I : never;
-}[SrdRuleId];
+/** The union of every rule unit's entry. */
+export type SrdRuleEntry = SrdRuleIndex[SrdRuleId];
 
-/** The printed names of one or more kinds. */
-export type SrdRuleNameOfKind<K extends SrdRuleKind> = SrdRuleIndex[SrdRuleIdOfKind<K>]['name'];
+/**
+ * The ids of one or more kinds. An id is its kind, a dot, and the unit's name
+ * segments; `SRD_RULE_IDS_START_WITH_THEIR_KIND` below proves it for every id.
+ */
+export type SrdRuleIdOfKind<K extends SrdRuleKind> = Extract<SrdRuleId, `${K}.${string}`>;
 
 /** Every id, in index order (kind, then printed order). */
 export const SRD_RULE_IDS = Object.keys(SRD_RULE_INDEX) as readonly SrdRuleId[];
@@ -42,14 +49,26 @@ export function isSrdRuleId(value: string): value is SrdRuleId {
 
 type Equal<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
 
-type ParentOf<I extends SrdRuleId> = SrdRuleIndex[I] extends { readonly parent: infer P } ? P : never;
-type Parents = { readonly [I in SrdRuleId]: ParentOf<I> }[SrdRuleId];
+type KindPrefixMismatch = {
+  readonly [I in SrdRuleId]: I extends `${SrdRuleIndex[I]['kind']}.${string}` ? never : I;
+}[SrdRuleId];
+
+/** Every id starts with its own kind, which is what `SrdRuleIdOfKind` relies on. */
+export const SRD_RULE_IDS_START_WITH_THEIR_KIND: [KindPrefixMismatch] extends [never] ? true : never = true;
 
 /** Every `parent` names a rule unit of the index. */
-export const SRD_RULE_PARENTS_ARE_IDS: [Parents] extends [SrdRuleId] ? true : never = true;
+export const SRD_RULE_PARENTS_ARE_IDS: [Extract<SrdRuleEntry, { readonly parent: string }>['parent']] extends [SrdRuleId]
+  ? true
+  : never = true;
 
 /** The vocabulary's fifteen conditions are exactly the glossary's [Condition] entries. */
-export const SRD_CONDITION_NAMES_MATCH_INDEX: Equal<ConditionName, SrdRuleNameOfKind<'condition'>> = true;
+export const SRD_CONDITION_NAMES_MATCH_INDEX: Equal<
+  ConditionName,
+  Extract<SrdRuleEntry, { readonly kind: 'condition' }>['name']
+> = true;
 
 /** The vocabulary's six area shapes are exactly the glossary's [Area of Effect] entries. */
-export const SRD_AREA_SHAPES_MATCH_INDEX: Equal<AreaShape, Lowercase<SrdRuleNameOfKind<'area_of_effect'>>> = true;
+export const SRD_AREA_SHAPES_MATCH_INDEX: Equal<
+  AreaShape,
+  Lowercase<Extract<SrdRuleEntry, { readonly kind: 'area_of_effect' }>['name']>
+> = true;
