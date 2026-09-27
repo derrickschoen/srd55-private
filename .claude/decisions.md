@@ -3033,3 +3033,41 @@ PLAN: 22 ranked units (synthesis §6.2).
 - Conflicts with standing rules that need rulings: D26/D35/D40 (Part A: some reference data stays text; four DB area shapes where Part A says six — a finding); D44/D102/D86/D55/D142/D61/D65 exclusions (proposed typed rows marked excluded_by_owner); whether CONDITION-D20 and PC-EXPORT-TRUTH land before REGEN (D911 one regeneration).
 
 Next free id: D918.
+
+## D918 — 2026-09-27 12:08 — owner: start the rules program. Fix wrong results before REGEN; rule index + status + vocabulary; the "represented" definition is binding; carve a 2-D movement-modes slice
+
+QUESTION 1 (multi-select; census plan .tmp/runs/srd-typed/synthesis/report.md §5–§6).
+OWNER, verbatim: "Fix wrong results before REGEN (Recommended), Rule index + status + vocabulary (Recommended), Adopt the 'represented' definition (Recommended), Decide movement modes now".
+- CONDITION-D20 (wrong results 1–4, 7 and 12: Prone lifecycle; Frightened; Poisoned/Exhaustion D20 sources; Dodge Dex saves; grapple escape; one slot spell per turn) and PC-EXPORT-TRUTH (wrong results 8 and 9, and masteries: PC skill bonuses, passive Perception, senses/Darkvision, Draconic Ancestors, no silent null masteries) enter the queue BEFORE COVER-EDGE+REGEN. The one regeneration (D911) happens under corrected rules. Each needs a failing test first for every wrong result it fixes.
+- RULE-INDEX / RULE-STATUS / SRD-VOCAB (unit 1): generated SrdRuleId + SrdSpan for every SRD rule, the exhaustive RULE_STATUS record with the transitional 'unrepresented' member, and one shared vocabulary module. It is off encounter.ts and runs in parallel.
+- The "REPRESENTED" definition (synthesis §5) is BINDING:
+  - typed data `as const satisfies`;
+  - an exhaustive status with no default arms;
+  - consumers refuse by type (never `?? 0`, a silent null or a skip);
+  - "sourced, not executed" plus the capability awaited, never "unknown";
+  - G (generated + byte drift test) for tables and headers; H (hand-typed from a cited span + span-text hash pin) where prose is interpreted.
+  - It SUPERSEDES Part A's "reference text stays text" rules (D26/D35/D40): printed text is kept for display only, and code never reads it.
+  - Owner exclusions (D44/D102/D86/D55/D142/D61/D65) become typed rows with excluded_by_owner, execution unchanged, unless the owner rules otherwise per item.
+
+QUESTION 2 (movement modes; flying monsters walk today, e.g. a Blood Hawk moves 10 ft, not 60). OWNER, verbatim choice: "Carve the 2-D slice now (Recommended)".
+- Unit MOVEMENT-MODES is carved from the frozen ELEVATION-02 plan (.tmp-plans/2026-09-16-elevation-02-plan.md, sha d0e6ad74…). It covers:
+  - typed required branded movementSpeeds (walk, fly, climb, swim, burrow), replacing CombatRulesProfile.speed;
+  - the mode-switch rule (spent movement is subtracted; srd:12096-12121);
+  - hover.
+- No heights, falling or water depth: full ELEVATION-02 stays parked behind VIS-FIELD (D847).
+- It lands after MOVE-COST and before REGEN, so regenerated brutal rooms have flyers flying.
+
+QUEUE on encounter.ts, in order:
+1. FOOTPRINT
+2. MOVE-COST
+3. CONDITION-D20
+4. SQUEEZE-COMBAT (its clauses go through CONDITION-D20's D20 composition)
+5. SQUEEZE-THROUGH
+6. MOVEMENT-MODES
+7. PC-EXPORT-TRUTH (can start now; it is exporter-side)
+8. COVER-EDGE + REGEN
+9. the D898 pre-run amendment, S-SCHEDULE and the study
+
+PARALLEL (off encounter.ts): SRD-BUILDTIME(-2), GUARD, RULE-INDEX, PATH-ONE, RECORDER-A + VERDICT-SOUND.
+
+Next free id: D919.
