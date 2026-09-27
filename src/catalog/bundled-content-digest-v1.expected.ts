@@ -39,9 +39,18 @@ export interface ExpectedBundledAggregateDigestV1 {
  * Sorcerer-level HP +1 and unarmoured 10 + DEX + CHA. The candidate delta was
  * reviewed row by row against `docs/srd/source/draconic-resilience.txt`; the
  * other 443 aggregate digests remain byte-identical.
+ *
+ * Re-pinned 2026-09-27 for PC-EXPORT-TRUTH (D918). EXACTLY ONE aggregate
+ * moved — 2024:species:dragonborn — because the Dragonborn now seeds a
+ * `species_definitions` row carrying its Draconic Ancestry configured choice:
+ * ten options, one per row of the GENERATED Draconic Ancestors table, each with
+ * one typed damage resistance. The candidate delta was reviewed row by row
+ * against `docs/srd/source/species-descriptions.txt:63-71`; its template and
+ * trait rows are unchanged, 0 aggregates were added or removed, and the other
+ * 443 aggregate digests remain byte-identical.
  */
 export const EXPECTED_BUNDLED_CONTENT_DIGEST_V1 =
-  'df17e8173291e3042464a8ffdc8aa8d84530067b60acba9f479b3233d37bb384' as const;
+  'eb43bfe5985bb61dcba412035b03171a1c2383e11affda513581a3fbf9e1e34d' as const;
 
 export const EXPECTED_BUNDLED_AGGREGATE_DIGESTS_V1 = Object.freeze([
   Object.freeze({"catalog_layer":"bundled","kind":"weapon","contentKey":"2024:weapon:battleaxe","name":"Battleaxe","digest":"749cd0ee7ef968dfd554a92e7b26637a15791a37c990652f70c0177422d925f9"}),
@@ -475,7 +484,7 @@ export const EXPECTED_BUNDLED_AGGREGATE_DIGESTS_V1 = Object.freeze([
   Object.freeze({"catalog_layer":"bundled","kind":"subclass","contentKey":"2024:subclass:path-of-the-berserker","name":"Path of the Berserker","digest":"05f5c7277d1d29780fd5b8467f4cf7c51c88dde54d728f598348af69edec0c6d"}),
   Object.freeze({"catalog_layer":"bundled","kind":"subclass","contentKey":"2024:subclass:thief","name":"Thief","digest":"f66e5ab73a8aa63da79f5d46579bd6f13f1704afd70dcec5d64ec4e07c4607ea"}),
   Object.freeze({"catalog_layer":"bundled","kind":"subclass","contentKey":"2024:subclass:warrior-of-the-open-hand","name":"Warrior of the Open Hand","digest":"d9847d539412cfa50efda448f1ad345c54c1e03cbf3f05ee2a818e957586fcbb"}),
-  Object.freeze({"catalog_layer":"bundled","kind":"species","contentKey":"2024:species:dragonborn","name":"Dragonborn","digest":"ba18c343ddce6dc2896a15fc51d551edafbd40e87b9997a5c52799465dc27c63"}),
+  Object.freeze({"catalog_layer":"bundled","kind":"species","contentKey":"2024:species:dragonborn","name":"Dragonborn","digest":"d0eb2c202556db0e641d469ff3c4326a4136ba5e2f2dbf00d473060db42c05ed"}),
   Object.freeze({"catalog_layer":"bundled","kind":"species","contentKey":"2024:species:dwarf","name":"Dwarf","digest":"ae6132b5e72de583b0cc95fc0cf147040eb3d56be498b13aa9014da6433dbc54"}),
   Object.freeze({"catalog_layer":"bundled","kind":"species","contentKey":"2024:species:elf","name":"Elf","digest":"2e5e1b1e65c9ad91f10d1af6ba121892435147e3df705ce7c33d83200ca28985"}),
   Object.freeze({"catalog_layer":"bundled","kind":"species","contentKey":"2024:species:gnome","name":"Gnome","digest":"8e5728a725f9145d552d7eecaec17aa91c3160e2e9e404091bebfd1c3270db0c"}),

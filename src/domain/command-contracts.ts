@@ -147,7 +147,13 @@ export type UpdateSourceConfigCommand =
 export interface ChooseSpeciesLineageCommand extends CommandBase {
   readonly type: 'choose_species_lineage';
   readonly chosen_option: string;
-  readonly spellcasting_ability: Ability;
+  /**
+   * Present exactly when the species' configured choice asks for one: a
+   * lineage whose spells need an ability (Elf, Gnome, Tiefling) carries it,
+   * and a choice that grants no spell (the Dragonborn's Draconic Ancestry)
+   * must not. The command refuses either mismatch.
+   */
+  readonly spellcasting_ability?: Ability;
   readonly replaceable_spell_version_key?: string;
 }
 

@@ -33,8 +33,10 @@ describe('stored bundled template-only species projection', () => {
 
   afterEach(() => connection.close());
 
-  it('projects all five boot-seeded template-only species without fabricating definitions', () => {
-    for (const name of ['Dragonborn', 'Dwarf', 'Goliath', 'Halfling', 'Orc']) {
+  // The Dragonborn left this list when its Draconic Ancestry became a
+  // configured choice with a definition row (PC-EXPORT-TRUTH).
+  it('projects all four boot-seeded template-only species without fabricating definitions', () => {
+    for (const name of ['Dwarf', 'Goliath', 'Halfling', 'Orc']) {
       const contentKey = `2024:species:${name.toLowerCase()}` as ContentKey;
       expect(db.scalar('SELECT COUNT(*) FROM species_definitions WHERE content_key = ?', [contentKey])).toBe(0);
       const projection = projectStoredAuthoredContentV1(db, {

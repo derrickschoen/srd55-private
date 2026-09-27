@@ -95,6 +95,7 @@ import {
 import {
   effectHitPoints,
   summariseEffects,
+  resolveChoiceDeterminedResistances,
   walkingSpeedFeet,
   type EffectRow,
 } from '../rules/species-effects';
@@ -983,7 +984,23 @@ export class CharacterSheetBuilder {
     // Reads `character_effects` rather than the trait table: D22 inverted the
     // model so an effect belongs to the CHARACTER and names its source, which
     // is what lets one trait carry both a resistance and a cantrip.
-    const effectRows = eligibleEffectRows.map(
+    //
+    // A MADE species choice that determines the species' unnamed resistance
+    // NAMES that resistance rather than adding a second one
+    // (`resolveChoiceDeterminedResistances`, PC-EXPORT-TRUTH).
+    const resistanceChoiceState = choiceStates.find((choice) =>
+      choice.unknown_sheet_fields.includes('damage_resistances'));
+    const effectRows = resolveChoiceDeterminedResistances(
+      eligibleEffectRows,
+      resistanceChoiceState === undefined ||
+        (speciesChoice.kind !== 'complete' && speciesChoice.kind !== 'incomplete')
+        ? null
+        : {
+            source_instance_id: speciesChoice.source_instance_id,
+            made: resistanceChoiceState.options.some((option) =>
+              option.value === resistanceChoiceState.selected_option),
+          },
+    ).map(
       (effect): EffectRow => ({
         effect_kind: effect.effect_kind,
         damage_type: effect.damage_type,

@@ -92,6 +92,7 @@ describe('catalog data-migration registry', () => {
       sources: [
         'src/catalog/reconcile-species-lineage-content-v2.ts',
         'src/rules/origin-definitions-srd.ts',
+        'src/rules/generated/species-srd-tables.ts',
         'src/grants/configured-choice-rule.ts',
         'src/grants/configured-choice-rule-errors.ts',
         'src/grants/grant-rule.ts',
@@ -140,7 +141,10 @@ describe('catalog data-migration registry', () => {
       // Re-pinned 2026-08-19 with the registry for the skill-grants
       // orphan-revival fix (f8287123) — see the registry comment for the
       // deliberate rows-changed justification.
-      checksum: 'e649951df8c8177c80ebc6363c6bbc4902e7c82d8e1e7c5a0749ede307b25125',
+      // Re-pinned 2026-09-27 with the registry for PC-EXPORT-TRUTH (D918): the
+      // Dragonborn definition and the generated species table it reads — see
+      // the registry comment.
+      checksum: 'd7b0912c4bda32dd9fa90243416c5b83fd5dada253f085328bf58d6166240ef0',
     }]);
     expect(() =>
       validateCatalogDataMigrationRegistry(CATALOG_DATA_MIGRATIONS)

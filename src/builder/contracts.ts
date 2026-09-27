@@ -239,7 +239,8 @@ export type GuidedSpeciesChoiceStateResult =
 export interface GuidedChooseSpeciesLineageParams {
   readonly character_id: number;
   readonly chosen_option: string;
-  readonly spellcasting_ability: Ability;
+  /** Present exactly when the configured choice asks for a spellcasting ability. */
+  readonly spellcasting_ability?: Ability;
   readonly replaceable_spell_version_key?: string;
   readonly operation_uuid: string;
   readonly expected_revision: number;

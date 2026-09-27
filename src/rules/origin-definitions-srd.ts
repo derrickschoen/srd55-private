@@ -28,8 +28,15 @@
  * Human's `grant_rules` is honestly empty — Skillful is not a spell rule; the
  * generator's SPECIES SKILL ARM (`syncSpeciesSkillGrants`) reads the seam's
  * `SPECIES_SKILL_GRANT_PLANS` by content key. Elf's Keen Senses rides the
- * same arm on the definition Elf already had. The remaining five SRD species
- * still anchor nothing and still get no row.
+ * same arm on the definition Elf already had.
+ *
+ * THE DRAGONBORN IS THE FIFTH (PC-EXPORT-TRUTH, D918). Its Draconic Ancestry
+ * is a choice whose option DETERMINES the damage type of its Damage Resistance
+ * trait ("You have Resistance to the damage type determined by your Draconic
+ * Ancestry trait", species-descriptions.txt:91-93), and until it could be made
+ * a Dragonborn could never be exported to combat. The options are the
+ * GENERATED Draconic Ancestors table, never a hand copy. The remaining four SRD
+ * species still anchor nothing and still get no row.
  *
  * THE SPELL NAMES ARE TRANSCRIBED FROM THE SRD EXTRACT, NOT FROM MEMORY:
  * `docs/srd/source/species-descriptions.txt` — the `Elven Lineages` table
@@ -68,6 +75,7 @@ import {
 import type { DatabaseContext } from '../db/database';
 import { GrantRule } from '../grants/grant-rule';
 import { parseSourceGrantRules } from '../grants/configured-choice-rule';
+import { DRACONIC_ANCESTORS } from './generated/species-srd-tables';
 import { BUNDLED_ORIGIN_RULES_EDITION } from './origins-srd';
 
 type GrantRuleSeed = Readonly<Record<string, unknown>>;
@@ -372,6 +380,44 @@ function otherworldlyPresenceRule(): GrantRuleSeed {
   };
 }
 
+/**
+ * "Draconic Ancestry. ... Choose the kind of dragon from the Draconic
+ * Ancestors table. Your choice affects your Breath Weapon and Damage
+ * Resistance traits" (species-descriptions.txt:57-61), and "Damage
+ * Resistance. You have Resistance to the damage type determined by your
+ * Draconic Ancestry trait" (:91-93).
+ *
+ * One option per GENERATED table row, each carrying exactly the one typed
+ * resistance its row names; `damage_resistances` is the sheet field the choice
+ * determines, so an unmade choice stays UNKNOWN and the export keeps refusing.
+ * No spellcasting ability: nothing in the trait is a spell. The Breath
+ * Weapon's damage type rides the same choice but is not executed here.
+ */
+function draconicAncestryRule(): GrantRuleSeed {
+  return {
+    kind: 'configured_choice',
+    rule_key: 'dragonborn-draconic-ancestry',
+    label: 'Draconic Ancestry',
+    config_key: LINEAGE_CHOICE_CONFIG_KEY,
+    required: true,
+    ability_choice: null,
+    unknown_sheet_fields: ['damage_resistances'],
+    projected_trait_names: [],
+    options: DRACONIC_ANCESTORS.map(({ dragon, damageType }) => ({
+      value: dragon,
+      label: dragon,
+      sheet: {},
+      effects: [{
+        kind: 'damage_resistance',
+        label: `${dragon} Draconic Ancestry`,
+        damage_type: damageType,
+      }],
+      grants: [],
+      replaceable_spell_choice: null,
+    })),
+  };
+}
+
 export interface BundledSpeciesDefinition {
   readonly content_key: string;
   readonly name: string;
@@ -415,6 +461,12 @@ export function bundledSpeciesDefinitions(): readonly BundledSpeciesDefinition[]
       content_key: `${BUNDLED_ORIGIN_RULES_EDITION}:species:human`,
       name: 'Human',
       grant_rules: [],
+    },
+    {
+      // Seeded LAST so every earlier definition keeps its row id.
+      content_key: `${BUNDLED_ORIGIN_RULES_EDITION}:species:dragonborn`,
+      name: 'Dragonborn',
+      grant_rules: [draconicAncestryRule()],
     },
   ];
   for (const definition of definitions) {

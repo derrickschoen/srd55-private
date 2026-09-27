@@ -502,13 +502,9 @@ describe('guided species step', () => {
   });
 
   it('census-pins only the still-unmodelled species choices', () => {
+    // The Dragonborn's Draconic Ancestry is a configured choice now
+    // (PC-EXPORT-TRUTH), so it is no longer an unmade-choice disclosure.
     expect([...SPECIES_UNMADE_CHOICES]).toEqual([
-      [
-        '2024:species:dragonborn',
-        [
-          'a Draconic Ancestry — the kind of dragon, which sets the Breath Weapon and Damage Resistance damage type',
-        ],
-      ],
       ['2024:species:goliath', ['a Giant Ancestry benefit (one of six)']],
       [
         '2024:species:human',
@@ -522,6 +518,68 @@ describe('guided species step', () => {
         ['a size (Small or Medium — the copy records Medium)'],
       ],
     ]);
+  });
+
+  it('saves a choice that asks for no spellcasting ability without sending one', async () => {
+    const sent: unknown[][] = [];
+    const draconicAncestry: GuidedConfiguredChoiceState = {
+      rule_key: 'dragonborn-draconic-ancestry',
+      label: 'Draconic Ancestry',
+      config_key: 'lineage.chosen_option',
+      selected_option: null,
+      ability_choice: null,
+      unknown_sheet_fields: ['damage_resistances'],
+      projected_trait_names: [],
+      options: [{
+        value: 'Red',
+        label: 'Red',
+        darkvision_feet: null,
+        effects: [{
+          kind: 'damage_resistance',
+          label: 'Red Draconic Ancestry',
+          speed_bonus_feet: null,
+          damage_type: 'Fire',
+        }],
+        grants: [],
+        replaceable_spell_choice: null,
+      }],
+    };
+    const step = createSpeciesStep({
+      ...speciesStepStubs,
+      characterId: 4,
+      options: [],
+      choiceState: {
+        kind: 'ready',
+        character_id: 4,
+        revision: 9,
+        resolution: {
+          kind: 'incomplete',
+          source_instance_id: 12,
+          source_name: 'Dragonborn',
+          source_catalog_layer: 'bundled',
+          missing: ['option'],
+          choices: [draconicAncestry],
+        },
+      },
+      chooseLineage: (...args) => {
+        sent.push(args);
+        return Promise.reject(new Error('recorded'));
+      },
+      applyOrigin: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+    const root = interactiveElement(step.element);
+    expect(root.querySelector('select')).toBeNull();
+    const radio = root.querySelector('input');
+    if (radio === null) throw new Error('The Red option is not rendered.');
+    radio.checked = true;
+    radio.dispatchEvent(new Event('change'));
+    root.querySelector('form')?.dispatchEvent(new Event('submit', { cancelable: true }));
+    await Promise.resolve();
+
+    expect(sent.map(([option, ability, replaceable, , revision]) =>
+      [option, ability, replaceable, revision])).toEqual([['Red', null, undefined, 9]]);
+    step.cleanup();
   });
 
   it('renders a hostile external species inert with its catalog layer disclosed', () => {

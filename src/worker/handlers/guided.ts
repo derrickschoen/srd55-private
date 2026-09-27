@@ -117,14 +117,17 @@ function isGuidedChooseSpeciesLineageParams(
   const required = [
     'character_id',
     'chosen_option',
-    'spellcasting_ability',
     'operation_uuid',
     'expected_revision',
   ] as const;
   const keys = value !== null && typeof value === 'object' && !Array.isArray(value)
     ? Object.keys(value)
     : [];
-  const allowed = new Set([...required, 'replaceable_spell_version_key']);
+  const allowed = new Set([
+    ...required,
+    'spellcasting_ability',
+    'replaceable_spell_version_key',
+  ]);
   if (
     keys.some((key) => !allowed.has(key as (typeof required)[number])) ||
     required.some((key) => !keys.includes(key))
@@ -136,7 +139,8 @@ function isGuidedChooseSpeciesLineageParams(
     isPositiveInteger(candidate['character_id']) &&
     typeof candidate['chosen_option'] === 'string' &&
     candidate['chosen_option'].trim() !== '' &&
-    abilities.includes(candidate['spellcasting_ability'] as never) &&
+    (candidate['spellcasting_ability'] === undefined ||
+      abilities.includes(candidate['spellcasting_ability'] as never)) &&
     (candidate['replaceable_spell_version_key'] === undefined ||
       (typeof candidate['replaceable_spell_version_key'] === 'string' &&
         candidate['replaceable_spell_version_key'].trim() !== '')) &&
@@ -377,7 +381,9 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
           command: {
             type: 'choose_species_lineage',
             chosen_option: params.chosen_option,
-            spellcasting_ability: params.spellcasting_ability,
+            ...(params.spellcasting_ability === undefined
+              ? {}
+              : { spellcasting_ability: params.spellcasting_ability }),
             ...(params.replaceable_spell_version_key === undefined
               ? {}
               : {

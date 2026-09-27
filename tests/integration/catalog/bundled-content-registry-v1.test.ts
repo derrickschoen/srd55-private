@@ -454,10 +454,13 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     )).toEqual(beforeFingerprints);
   });
 
+  // Goliath, not the Dragonborn, is the template-only example: the
+  // Dragonborn gained a definition row with its Draconic Ancestry choice
+  // (PC-EXPORT-TRUTH).
   it('reconciles a template-only species aggregate', () => {
     expect(db.scalar(
       `SELECT count(*) FROM species_definitions
-       WHERE content_key = '2024:species:dragonborn'`,
+       WHERE content_key = '2024:species:goliath'`,
     )).toBe(0);
 
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
@@ -474,7 +477,7 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     db.exec(
       `INSERT INTO species_definitions (
          content_key, name, rules_edition, repeatable
-       ) VALUES ('2024:species:dragonborn', 'Dragonborn', '2024', 0)`,
+       ) VALUES ('2024:species:goliath', 'Goliath', '2024', 0)`,
     );
 
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
@@ -491,11 +494,11 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     db.exec(
       `INSERT INTO species_definitions (
          content_key, name, rules_edition, repeatable
-       ) VALUES ('2024:species:dragonborn', 'Dragonborn', '2024', 0)`,
+       ) VALUES ('2024:species:goliath', 'Goliath', '2024', 0)`,
     );
     db.exec(
       `DELETE FROM species_templates
-       WHERE content_key = '2024:species:dragonborn'`,
+       WHERE content_key = '2024:species:goliath'`,
     );
 
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
@@ -544,14 +547,14 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     db.exec(
       `INSERT INTO species_definitions (
          content_key, name, rules_edition, repeatable
-       ) VALUES ('2024:species:dragonborn', 'Not Dragonborn', '2024', 0)`,
+       ) VALUES ('2024:species:goliath', 'Not Goliath', '2024', 0)`,
     );
 
     const error = refusal(() => reconcileBundledContentRegistryV1(db));
     expect(error).toBeInstanceOf(BundledRegistryRootNameError);
     expect(error).toMatchObject({
       kind: 'species',
-      content_key: '2024:species:dragonborn',
+      content_key: '2024:species:goliath',
     });
   });
 

@@ -164,7 +164,9 @@ async function render(context: ScreenContext): Promise<() => void> {
         ) => client.chooseSpeciesLineage({
           character_id: characterId,
           chosen_option: chosenOption,
-          spellcasting_ability: spellcastingAbility,
+          ...(spellcastingAbility === null
+            ? {}
+            : { spellcasting_ability: spellcastingAbility }),
           ...(replaceableSpellVersionKey === undefined
             ? {}
             : { replaceable_spell_version_key: replaceableSpellVersionKey }),

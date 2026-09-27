@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   effectHitPoints,
+  resolveChoiceDeterminedResistances,
   summariseEffects,
   walkingSpeedFeet,
+  type ChoiceResolvableEffect,
   type EffectRow,
 } from '../../../src/rules/species-effects';
 import { effectKinds } from '../../../src/domain/enums';
@@ -394,5 +396,59 @@ describe('the closed set itself', () => {
       // model returned the number 2 here and could say no more than that.
       unchosenDamageResistances: ['Seven', 'Eight'],
     });
+  });
+});
+
+describe('a made species choice names the resistance its source left unnamed (PC-EXPORT-TRUTH)', () => {
+  // The Dragonborn's Damage Resistance: "the damage type determined by your
+  // Draconic Ancestry trait" (species-descriptions.txt:91-93). The species
+  // copy holds ONE untyped effect; the made choice inserts ONE typed one.
+  const untyped = (source: number): ChoiceResolvableEffect & { readonly id: string } => ({
+    id: `untyped-${String(source)}`,
+    effect_kind: 'damage_resistance',
+    damage_type: null,
+    source_instance_id: source,
+    template_ref: 'species_template_trait_effects:3',
+  });
+  const typed = (source: number): ChoiceResolvableEffect & { readonly id: string } => ({
+    id: `typed-${String(source)}`,
+    effect_kind: 'damage_resistance',
+    damage_type: 'Fire',
+    source_instance_id: source,
+    template_ref: 'configured_choice:dragonborn-draconic-ancestry:Red:0',
+  });
+  const ids = (effects: readonly { readonly id: string }[]) => effects.map((effect) => effect.id);
+
+  it('resolves a made choice: the untyped effect of the same source is the one the typed effect names', () => {
+    expect(ids(resolveChoiceDeterminedResistances(
+      [untyped(4), typed(4)],
+      { source_instance_id: 4, made: true },
+    ))).toEqual(['typed-4']);
+  });
+
+  it('keeps the unnamed resistance while the choice is unmade, or when no choice owns it', () => {
+    expect(ids(resolveChoiceDeterminedResistances(
+      [untyped(4), typed(4)],
+      { source_instance_id: 4, made: false },
+    ))).toEqual(['untyped-4', 'typed-4']);
+    expect(ids(resolveChoiceDeterminedResistances([untyped(4)], null))).toEqual(['untyped-4']);
+  });
+
+  it('resolves only the exact one-to-one case, and only on the choice\'s own source', () => {
+    // Two untyped grants and one choice: which one it settles is not stated.
+    expect(ids(resolveChoiceDeterminedResistances(
+      [untyped(4), { ...untyped(4), id: 'second-untyped-4' }, typed(4)],
+      { source_instance_id: 4, made: true },
+    ))).toEqual(['untyped-4', 'second-untyped-4', 'typed-4']);
+    // A made choice that inserted no typed effect settles nothing.
+    expect(ids(resolveChoiceDeterminedResistances(
+      [untyped(4)],
+      { source_instance_id: 4, made: true },
+    ))).toEqual(['untyped-4']);
+    // Another source's unnamed resistance is not this choice's to name.
+    expect(ids(resolveChoiceDeterminedResistances(
+      [untyped(9), typed(4)],
+      { source_instance_id: 4, made: true },
+    ))).toEqual(['untyped-9', 'typed-4']);
   });
 });

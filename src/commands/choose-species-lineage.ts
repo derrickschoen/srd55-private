@@ -153,9 +153,14 @@ export class ChooseSpeciesLineageCommand {
       if (option === undefined) {
         return refused(speciesLineageRefused('invalid_option'));
       }
+      // The ability is part of the choice exactly when the rule asks for one:
+      // a lineage whose spells need it, never a choice that grants no spell
+      // (the Dragonborn's Draconic Ancestry). Either mismatch is refused.
+      const ability = this.payload.spellcasting_ability;
       if (
-        rule.abilityChoice === null ||
-        !rule.abilityChoice.options.includes(this.payload.spellcasting_ability)
+        rule.abilityChoice === null
+          ? ability !== undefined
+          : ability === undefined || !rule.abilityChoice.options.includes(ability)
       ) {
         return refused(speciesLineageRefused('invalid_spellcasting_ability'));
       }
@@ -164,11 +169,9 @@ export class ChooseSpeciesLineageCommand {
       const config = configRecord(source.config);
       delete config['class_level'];
       setAtPath(config, rule.configKey, option.value);
-      setAtPath(
-        config,
-        rule.abilityChoice.configKey,
-        this.payload.spellcasting_ability,
-      );
+      if (rule.abilityChoice !== null && ability !== undefined) {
+        setAtPath(config, rule.abilityChoice.configKey, ability);
+      }
       for (const candidate of rule.options) {
         const replaceable = candidate.replaceableSpellChoice;
         if (replaceable !== null && candidate !== option) {

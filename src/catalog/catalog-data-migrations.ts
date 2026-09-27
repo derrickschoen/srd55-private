@@ -13,6 +13,7 @@ import {
 } from './retire-non-srd-bundled-subclasses-v1';
 import lineageMigrationSource from './reconcile-species-lineage-content-v2.ts?raw';
 import lineageSeedSource from '../rules/origin-definitions-srd.ts?raw';
+import speciesSrdTablesSource from '../rules/generated/species-srd-tables.ts?raw';
 import configuredChoiceSource from '../grants/configured-choice-rule.ts?raw';
 import configuredChoiceErrorsSource from '../grants/configured-choice-rule-errors.ts?raw';
 import grantRuleSource from '../grants/grant-rule.ts?raw';
@@ -114,6 +115,13 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
         Object.freeze({
           path: 'src/rules/origin-definitions-srd.ts',
           bytes: lineageSeedSource,
+        }),
+        // PC-EXPORT-TRUTH (D918): `ensureBundledSpeciesDefinitions`, which this
+        // migration calls, now also seeds the Dragonborn's Draconic Ancestry
+        // choice, whose options ARE this generated table.
+        Object.freeze({
+          path: 'src/rules/generated/species-srd-tables.ts',
+          bytes: speciesSrdTablesSource,
         }),
         Object.freeze({
           path: 'src/grants/configured-choice-rule.ts',
@@ -247,8 +255,14 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
       // over different frozen sources (main: skill-grants revival fix; simcore:
       // configured-choice-rule work); recomputed over the merged bytes via
       // catalogDataMigrationChecksum(entry.sources) per the D226 procedure.
+      // Re-pinned 2026-09-27 for PC-EXPORT-TRUTH (D918): origin-definitions-
+      // srd.ts seeds a FIFTH definition, the Dragonborn's Draconic Ancestry
+      // choice, from the newly frozen generated species table. This is NOT
+      // rows-unchanged for an image that has not yet run this migration: its
+      // `ensureBundledSpeciesDefinitions` call now also writes that row. The
+      // rows it RECONCILES (the Elf, Gnome and Tiefling lineages) are unchanged.
       checksum:
-        'e649951df8c8177c80ebc6363c6bbc4902e7c82d8e1e7c5a0749ede307b25125',
+        'd7b0912c4bda32dd9fa90243416c5b83fd5dada253f085328bf58d6166240ef0',
       run: reconcileSpeciesLineageContentV2,
     }),
   ]);

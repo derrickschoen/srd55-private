@@ -33,12 +33,6 @@ function speciesKey(slug: string): string {
 /** Choices not represented by configured-choice data remain disclosed here. */
 export const SPECIES_UNMADE_CHOICES: ReadonlyMap<string, readonly string[]> =
   new Map([
-    [
-      speciesKey('dragonborn'),
-      [
-        'a Draconic Ancestry — the kind of dragon, which sets the Breath Weapon and Damage Resistance damage type',
-      ],
-    ],
     [speciesKey('goliath'), ['a Giant Ancestry benefit (one of six)']],
     [
       speciesKey('human'),
@@ -166,7 +160,8 @@ export interface SpeciesStepDeps {
   readonly applyOrigin: (contentKey: string) => Promise<GuidedApplyOriginResult>;
   readonly chooseLineage: (
     chosenOption: string,
-    spellcastingAbility: Ability,
+    /** `null` exactly when the configured choice asks for no spellcasting ability. */
+    spellcastingAbility: Ability | null,
     replaceableSpellVersionKey: string | undefined,
     operationUuid: string,
     expectedRevision: number,
@@ -395,10 +390,13 @@ function choiceEditor(
       event.preventDefault();
       if (inFlight) return;
       clear(errorMount);
-      if (selectedOption === null || selectedAbility === null) {
+      const needsAbility = choice.ability_choice !== null;
+      if (selectedOption === null || (needsAbility && selectedAbility === null)) {
         errorMount.append(element('p', {
           className: 'guided-error',
-          text: `Choose ${choice.label} and its spellcasting ability.`,
+          text: needsAbility
+            ? `Choose ${choice.label} and its spellcasting ability.`
+            : `Choose ${choice.label}.`,
           attributes: { role: 'alert' },
         }));
         return;
@@ -407,7 +405,7 @@ function choiceEditor(
       submit.disabled = true;
       void deps.chooseLineage(
         selectedOption.value,
-        selectedAbility,
+        needsAbility ? selectedAbility : null,
         replaceableKey,
         crypto.randomUUID(),
         revision,

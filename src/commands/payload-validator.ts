@@ -946,7 +946,10 @@ function validateChooseSpeciesLineage(record: UnknownRecord): void {
     'reason',
   ]);
   nonEmptyString(record, 'chosen_option', 255);
-  if (!isEnumValue(abilities, record.spellcasting_ability)) {
+  if (
+    hasOwn(record, 'spellcasting_ability') &&
+    !isEnumValue(abilities, record.spellcasting_ability)
+  ) {
     invalid('Unknown spellcasting ability.');
   }
   if (hasOwn(record, 'replaceable_spell_version_key')) {

@@ -238,3 +238,59 @@ export function walkingSpeedFeet(
   const bonus = summariseEffects(effects).speedBonusFeet;
   return Math.max(0, baseSpeedFeet + bonus - armorStrengthPenaltyFeet);
 }
+
+/** The effect-row columns the choice resolution below reads. */
+export interface ChoiceResolvableEffect {
+  readonly effect_kind: string;
+  readonly damage_type: DamageType | null;
+  readonly source_instance_id: number | null;
+  readonly template_ref: string | null;
+}
+
+/** The configured choice that DETERMINES a source's unnamed resistance, when made. */
+export interface ResistanceChoiceResolution {
+  readonly source_instance_id: number;
+  readonly made: boolean;
+}
+
+const CONFIGURED_CHOICE_TEMPLATE_PREFIX = 'configured_choice:';
+
+/**
+ * A MADE CHOICE NAMES THE RESISTANCE ITS SOURCE LEFT UNNAMED; IT DOES NOT ADD
+ * A SECOND ONE (PC-EXPORT-TRUTH, D918).
+ *
+ * The Dragonborn's "Damage Resistance" trait grants "Resistance to the damage
+ * type determined by your Draconic Ancestry trait" (species-descriptions.txt:
+ * 91-93), and the Tiefling's Fiendish Legacy grants "the level 1 benefit of
+ * the chosen legacy" — a Resistance whose type the legacy table names
+ * (:205-211, :233-238). Each species copies ONE untyped resistance effect, and
+ * the species' configured choice declaring `damage_resistances` later inserts
+ * ONE typed effect. Read side by side they said "Fire, plus one still
+ * unchosen", so a Tiefling who had chosen Infernal could never be exported.
+ *
+ * When that choice is made, the untyped effect of the SAME source instance is
+ * the one the typed effect names, and it is dropped from the list this
+ * returns. Only the exact one-to-one case resolves: two untyped effects, or a
+ * choice that inserted no typed effect, leave every row as it is, so the
+ * sheet keeps refusing rather than guessing which grant a choice settled.
+ * Nothing is deleted from the database; a reversed choice restores the
+ * unchosen reading on the next build.
+ */
+export function resolveChoiceDeterminedResistances<Effect extends ChoiceResolvableEffect>(
+  effects: readonly Effect[],
+  choice: ResistanceChoiceResolution | null,
+): readonly Effect[] {
+  if (choice === null || !choice.made) return effects;
+  const fromSource = (effect: Effect): boolean =>
+    effect.effect_kind === 'damage_resistance' &&
+    effect.source_instance_id === choice.source_instance_id;
+  const chosen = (effect: Effect): boolean =>
+    effect.template_ref?.startsWith(CONFIGURED_CHOICE_TEMPLATE_PREFIX) === true;
+  const untyped = effects.filter((effect) =>
+    fromSource(effect) && !chosen(effect) && effect.damage_type === null);
+  const typed = effects.filter((effect) =>
+    fromSource(effect) && chosen(effect) && effect.damage_type !== null);
+  const [placeholder] = untyped;
+  if (untyped.length !== 1 || typed.length !== 1 || placeholder === undefined) return effects;
+  return effects.filter((effect) => effect !== placeholder);
+}

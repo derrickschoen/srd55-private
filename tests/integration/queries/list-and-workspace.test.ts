@@ -366,15 +366,18 @@ describe('character list and workspace query builders', () => {
         feats: catalog.sources.feat.length,
         species: catalog.sources.species.length,
         backgrounds: catalog.sources.background.length,
-      }).toEqual({ classes: 12, feats: 18, species: 4, backgrounds: 4 });
+      }).toEqual({ classes: 12, feats: 18, species: 5, backgrounds: 4 });
       expect({
         classes: workspace.available_classes.length,
         feats: workspace.source_catalog.feat.length,
         species: workspace.source_catalog.species.length,
         backgrounds: workspace.source_catalog.background.length,
-      }).toEqual({ classes: 12, feats: 18, species: 4, backgrounds: 4 });
+      }).toEqual({ classes: 12, feats: 18, species: 5, backgrounds: 4 });
       expect(catalog.classes.map((entry) => entry.name)).toContain('Fighter');
+      // The Dragonborn is selectable since its Draconic Ancestry choice gave
+      // it a definition row (PC-EXPORT-TRUTH).
       expect(catalog.sources.species.map((entry) => entry.name)).toEqual([
+        'Dragonborn',
         'Elf',
         'Gnome',
         'Human',
@@ -448,13 +451,13 @@ describe('character list and workspace query builders', () => {
         feats: catalog.sources.feat.length,
         species: catalog.sources.species.length,
         backgrounds: catalog.sources.background.length,
-      }).toEqual({ classes: 12, feats: 17, species: 5, backgrounds: 5 });
+      }).toEqual({ classes: 12, feats: 17, species: 6, backgrounds: 5 });
       expect({
         classes: workspace.available_classes.length,
         feats: workspace.source_catalog.feat.length,
         species: workspace.source_catalog.species.length,
         backgrounds: workspace.source_catalog.background.length,
-      }).toEqual({ classes: 12, feats: 17, species: 5, backgrounds: 5 });
+      }).toEqual({ classes: 12, feats: 17, species: 6, backgrounds: 5 });
       const reshapedSpeciesKeys = new Set([
         '2024:species:elf',
         '2024:species:gnome',

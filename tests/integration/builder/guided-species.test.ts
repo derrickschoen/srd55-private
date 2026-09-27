@@ -1971,6 +1971,14 @@ describe('bundled species definition seed', () => {
     }));
     expect(census).toEqual([
       {
+        // Draconic Ancestry: one configured choice whose options grant
+        // resistances, not spells, so no material grant rule is counted.
+        content_key: '2024:species:dragonborn',
+        name: 'Dragonborn',
+        top_level_rules: 1,
+        semantic_rules: 0,
+      },
+      {
         content_key: '2024:species:elf',
         name: 'Elf',
         top_level_rules: 1,
@@ -2104,6 +2112,9 @@ describe('guided species RPC contracts', () => {
           ]),
       ),
     ).toEqual({
+      // PC-EXPORT-TRUTH: the Dragonborn's Draconic Ancestry
+      // (species-descriptions.txt:57-61) is a configured choice.
+      '2024:species:dragonborn': ['Draconic Ancestry'],
       '2024:species:elf': ['Elven Lineage'],
       '2024:species:gnome': ['Gnomish Lineage'],
       '2024:species:tiefling': ['Fiendish Legacy'],
