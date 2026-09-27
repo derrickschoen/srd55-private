@@ -22,12 +22,15 @@ import { projectStoredSpellContentV1 } from '../../../src/catalog/spell-content-
 import {
   ensureBundledSpellContent,
   installMissingBundledSpellContent,
+  seedSpellContent,
+} from '../../../src/rules/spells-srd';
+import {
   parseSrdSpellDescriptions,
   parseSrdSpellList,
   parseSrdSpellListMemberships,
-  seedSpellContent,
+  SRD_SPELL_LISTS,
   type SrdSpellList,
-} from '../../../src/rules/spells-srd';
+} from '../../../src/rules/spells-srd-reader';
 import { assertContentImportPlan } from '../../helpers/content-import-plan';
 import { openTestDatabase } from '../../helpers/open-db';
 
@@ -416,6 +419,15 @@ function extract(file: string): string {
   );
 }
 
+function listExtracts(): Record<SrdSpellList, string> {
+  return Object.fromEntries(
+    SRD_SPELL_LISTS.map((list) => [
+      list,
+      extract(`${list.toLowerCase()}-spell-list.txt`),
+    ]),
+  ) as Record<SrdSpellList, string>;
+}
+
 function descriptionNames(source: string): string[] {
   const lines = source.split('\n');
   const names: string[] = [];
@@ -516,7 +528,7 @@ describe('SRD spell extracts', () => {
   });
 
   it('parses every description against the independent enumerated oracle', () => {
-    const spells = parseSrdSpellDescriptions();
+    const spells = parseSrdSpellDescriptions(extract('spell-descriptions.txt'));
 
     expect(spells.map((spell) => spell.name).sort()).toEqual(
       EXPECTED_SPELL_NAMES,
@@ -532,7 +544,9 @@ describe('SRD spell extracts', () => {
 
   it('ships reflowed prose while preserving lexical compound hyphens', () => {
     const spells = new Map(
-      parseSrdSpellDescriptions().map((spell) => [spell.name, spell.description]),
+      parseSrdSpellDescriptions(extract('spell-descriptions.txt')).map(
+        (spell) => [spell.name, spell.description],
+      ),
     );
     expect(
       [...spells.values()].filter((description) =>
@@ -546,7 +560,9 @@ describe('SRD spell extracts', () => {
   });
 
   it('includes the repaired Telekinesis sentence tail', () => {
-    const telekinesis = parseSrdSpellDescriptions().find(
+    const telekinesis = parseSrdSpellDescriptions(
+      extract('spell-descriptions.txt'),
+    ).find(
       (spell) => spell.name === 'Telekinesis',
     );
     expect(telekinesis?.description).toMatch(
@@ -555,7 +571,7 @@ describe('SRD spell extracts', () => {
   });
 
   it('parses every list row with per-list extract counts and the one known omission', () => {
-    const memberships = parseSrdSpellListMemberships();
+    const memberships = parseSrdSpellListMemberships(listExtracts());
     const descriptions = new Set(EXPECTED_SPELL_NAMES);
     for (const [file, expectedCount] of Object.entries(SPELL_LIST_FILES)) {
       const spellListKey = file
@@ -563,7 +579,7 @@ describe('SRD spell extracts', () => {
         .replace(/^./, (character) =>
           character.toUpperCase(),
         ) as SrdSpellList;
-      const parsed = parseSrdSpellList(spellListKey);
+      const parsed = parseSrdSpellList(spellListKey, extract(file));
       expect(parsed, file).toHaveLength(expectedCount);
       expect(parsed.map((entry) => entry.spell_name)).toEqual(
         classListNames(extract(file)),
@@ -829,7 +845,7 @@ describe('SRD spell extracts', () => {
     const result = ensureBundledSpellContent(
       db,
       reconciliation.storedProjections,
-      { descriptionExtract: correctedExtract },
+      { descriptions: parseSrdSpellDescriptions(correctedExtract) },
     );
 
     expect(result).toMatchObject({ healthy: 338, updated: 1, refused: 0 });

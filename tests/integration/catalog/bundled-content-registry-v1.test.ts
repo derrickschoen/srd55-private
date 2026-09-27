@@ -16,6 +16,7 @@ import type { DatabaseContext } from '../../../src/db/database';
 import type { DatabaseLifecycle } from '../../../src/db/database-lifecycle';
 import type { ContentKey } from '../../../src/domain/ids';
 import { ensureBundledSpellContent } from '../../../src/rules/spells-srd';
+import { parseSrdSpellDescriptions } from '../../../src/rules/spells-srd-reader';
 import { getSqlite3, MemoryDatabaseStorage } from '../../helpers/open-db';
 
 function refusal(run: () => unknown): unknown {
@@ -661,10 +662,10 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
       db,
       reconciliation.storedProjections,
       {
-        descriptionExtract: descriptions.replace(
+        descriptions: parseSrdSpellDescriptions(descriptions.replace(
           shippedSentence,
           correctedSentence,
-        ),
+        )),
       },
     );
     expect(result).toMatchObject({ healthy: 337, updated: 1, refused: 1 });

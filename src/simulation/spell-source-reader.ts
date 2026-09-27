@@ -130,8 +130,8 @@ export type BroadDamageSaveSuspect = {
   readonly end: number;
 };
 
-export type DerivedSaveDamageCoverage = {
-  readonly bodies: ReadonlyMap<string, string>;
+/** The save-damage coverage of a set of spell bodies, without the bodies. */
+export type SaveDamageCoverage = {
   readonly clauses_by_heading: ReadonlyMap<string, readonly SourceDerivedSaveClause[]>;
   readonly candidates: readonly SourceDerivedSaveDamageCandidate[];
   readonly counts: {
@@ -140,6 +140,10 @@ export type DerivedSaveDamageCoverage = {
   };
   readonly broad_suspects: readonly BroadDamageSaveSuspect[];
 };
+
+export type DerivedSaveDamageCoverage = {
+  readonly bodies: ReadonlyMap<string, string>;
+} & SaveDamageCoverage;
 
 const COLUMN_MARKER = /^=== SRD 5\.2\.1 page \d+, (?:left|right) column ===$/u;
 const SPELL_METADATA = /^(?:Level [1-9] (?:Abjuration|Conjuration|Divination|Enchantment|Evocation|Illusion|Necromancy|Transmutation)|(?:Abjuration|Conjuration|Divination|Enchantment|Evocation|Illusion|Necromancy|Transmutation) Cantrip) \(/u;
@@ -331,7 +335,7 @@ function splitLayoutRow(
  * printed gutter because they contain only repaired left-column prose. A page
  * may carry at most two such rows, and each is assigned whole to the column in
  * which its first printed character occurs. The independent parsed-body
- * parity check in `coverage.ts` remains the final proof that an overflow row
+ * parity check in `save-damage-source.ts` remains the final proof that an overflow row
  * was assigned to the same spell as the readable extract.
  */
 function spellBodyFormsFromFullLayout(
@@ -1195,9 +1199,10 @@ function directDamageSaveClauses(body: string): SourceDerivedSaveClause[] {
  * same sentence, so the winning start is always 0 or just after a '.'. The
  * lookbehind only stops the engine retrying the starts that can never win —
  * without it every character of every spell body was a fresh start for up to
- * 1,500-character lazy windows, and this parse runs at module evaluation of
- * every process that imports the tactical evaluator (coverage.ts): about 1 s
- * of clause parsing per process without the lookbehind, about 50 ms with it.
+ * 1,500-character lazy windows: about 1 s of clause parsing per run without
+ * the lookbehind, about 50 ms with it. (The parse used to run at module
+ * evaluation of every process that imported coverage.ts; it now runs only in
+ * `npm run srd:artifacts` and the drift test, see save-damage-source.ts.)
  * tests/unit/simulation/gate-pattern-sentence-start-lookbehind.test.ts holds
  * the pre-lookbehind patterns frozen and proves identical clauses on both SRD
  * corpora.
@@ -1334,7 +1339,13 @@ export function deriveSaveDamageCoverage(
   return deriveSaveDamageCoverageFromBodies(bodies);
 }
 
-type SaveDamageClauseParse = {
+/**
+ * Everything the clause parse reads out of the spell bodies. It is what the
+ * build writes to `generated/save-damage-source.ts`, so the runtime rebuilds
+ * the coverage from it (`saveDamageCoverageFromClauseParse`) without reading
+ * any spell text.
+ */
+export type SaveDamageClauseParse = {
   readonly clauses_by_heading: ReadonlyMap<
     string,
     readonly SourceDerivedSaveClause[]
@@ -1343,7 +1354,7 @@ type SaveDamageClauseParse = {
   readonly broad_suspects: readonly BroadDamageSaveSuspect[];
 };
 
-function parseSaveDamageClauses(
+export function parseSaveDamageClauses(
   bodies: ReadonlyMap<string, string>,
 ): SaveDamageClauseParse {
   const clausesByHeading = new Map<string, readonly SourceDerivedSaveClause[]>();
@@ -1371,17 +1382,16 @@ function parseSaveDamageClauses(
   };
 }
 
-export function deriveSaveDamageCoverageFromBodies(
-  bodies: ReadonlyMap<string, string>,
-): DerivedSaveDamageCoverage {
-  const parse = parseSaveDamageClauses(bodies);
+/** The coverage a clause parse implies; one path for bodies and for the generated parse. */
+export function saveDamageCoverageFromClauseParse(
+  parse: SaveDamageClauseParse,
+): SaveDamageCoverage {
   const candidates = [...parse.clauses_by_heading.entries()].flatMap(
     ([heading, clauses]) => clauses.map((clause) =>
       Object.freeze({ heading, ...clause }),
     ),
   );
   return {
-    bodies,
     clauses_by_heading: parse.clauses_by_heading,
     candidates,
     counts: Object.freeze({
@@ -1389,5 +1399,14 @@ export function deriveSaveDamageCoverageFromBodies(
       after_deduplication: candidates.length,
     }),
     broad_suspects: parse.broad_suspects,
+  };
+}
+
+export function deriveSaveDamageCoverageFromBodies(
+  bodies: ReadonlyMap<string, string>,
+): DerivedSaveDamageCoverage {
+  return {
+    bodies,
+    ...saveDamageCoverageFromClauseParse(parseSaveDamageClauses(bodies)),
   };
 }

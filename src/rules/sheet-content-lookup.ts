@@ -55,8 +55,8 @@ import { classFeatureEffect } from './class-feature-effects';
 import type { ExtraAttackGrant } from './extra-attack';
 import type { ClassDefinitionId, ContentKey } from '../domain/ids';
 import {
-  parseSrdClassResourceFormulaManifest,
-  parseSrdClassResourceManifest,
+  bundledSrdClassResourceFormulaManifest,
+  bundledSrdClassResourceManifest,
 } from './class-resources-srd';
 import type {
   SheetClassLevels,
@@ -72,8 +72,8 @@ interface BundledResourceExpectation {
 }
 
 const BUNDLED_RESOURCE_EXPECTATIONS = (() => {
-  const ladders = parseSrdClassResourceManifest();
-  const formulas = parseSrdClassResourceFormulaManifest();
+  const ladders = bundledSrdClassResourceManifest();
+  const formulas = bundledSrdClassResourceFormulaManifest();
   return new Map(
     ladders.map((entry) => [
       String(entry.content_key),

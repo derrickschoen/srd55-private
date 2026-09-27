@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { assertReviewedResourceRecoverySourceDigests } from '../../../src/simulation/coverage';
+import { assertReviewedResourceRecoverySourceDigests } from '../../../src/simulation/coverage-source';
 
 /**
  * Near-miss probes for the resource-recovery *source span* anchor guards in
- * `src/simulation/coverage.ts` — the pair of guards around
+ * `src/simulation/coverage-source.ts` — the pair of guards around
  * `resourceRecoverySourceSpan`:
  *
  * 1. the line-anchor guard (`firstLine < 0 || lastLine < firstLine`), fed by a
@@ -12,7 +12,9 @@ import { assertReviewedResourceRecoverySourceDigests } from '../../../src/simula
  * 2. the column-anchor guard (`start < 0 || end < start`), fed by the joined
  *    column slice `lines.slice(firstLine, lastLine + 1).map(...).filter(...)`.
  *
- * Both run at module evaluation against the committed corpus, where every
+ * Both run against the committed corpus (coverage-source-self-checks.test.ts;
+ * they ran at coverage.ts's module evaluation before the SRD text left the
+ * runtime), where every
  * anchor is present, ordered, and inside its reviewed column. That arm alone
  * cannot distinguish `>=` from `>`, `||` from `&&`, or a present slice/filter
  * from an absent one. Every test below therefore drives the exported entry

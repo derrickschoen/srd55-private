@@ -10,7 +10,8 @@ import {
   type SourceRef,
 } from '../../../src/simulation/contracts';
 import type {
-  DerivedSaveDamageCoverage,
+  SaveDamageClauseParse,
+  SaveDamageCoverage,
   SourceDamageOccurrence,
   SourceDerivedSaveClause,
 } from '../../../src/simulation/spell-source-reader';
@@ -40,7 +41,7 @@ import {
  * each rejection arm is unreachable with the committed data — which is exactly
  * why the mutants inside them survived. The seam is the one demonstrated in
  * `coverage-clause-binding-and-unavailable-near-misses.test.ts`: mocking
- * `deriveSaveDamageCoverageFromBodies` lets a test hand ONE heading a rewritten
+ * `saveDamageCoverageFromClauseParse` lets a test hand ONE heading a rewritten
  * source clause while every other heading keeps its real one.
  *
  * WHY VITRIOLIC SPHERE. It is the only reviewed clause with a successful-save
@@ -91,10 +92,10 @@ async function moduleEvaluationMessage(
     const actual = await vi.importActual<Reader>(READER_PATH);
     return {
       ...actual,
-      deriveSaveDamageCoverageFromBodies: (
-        bodies: ReadonlyMap<string, string>,
-      ): DerivedSaveDamageCoverage => {
-        const derived = actual.deriveSaveDamageCoverageFromBodies(bodies);
+      saveDamageCoverageFromClauseParse: (
+        parse: SaveDamageClauseParse,
+      ): SaveDamageCoverage => {
+        const derived = actual.saveDamageCoverageFromClauseParse(parse);
         return {
           ...derived,
           clauses_by_heading: rewrite(derived.clauses_by_heading),

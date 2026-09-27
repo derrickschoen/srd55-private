@@ -4,10 +4,10 @@ import {
   expectedEventDamage,
 } from '../../../src/simulation/contracts';
 import {
-  assertReviewedResourceRecoverySourceDigests,
   reviewedResourceRecoveryClauses,
   reviewedResourceRecoverySourceSha256Oracle,
 } from '../../../src/simulation/coverage';
+import { assertReviewedResourceRecoverySourceDigests } from '../../../src/simulation/coverage-source';
 import {
   composeRoundDamageFolds,
   type DamageEventFold,

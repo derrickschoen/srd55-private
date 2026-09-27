@@ -11,7 +11,7 @@ import {
   type SrdUnconditionalSpellTableName,
 } from '../../../src/rules/srd-subclasses';
 import { SRD_ATTRIBUTION_NOTICE } from '../../../src/rules/srd-attribution';
-import { parseSrdSpellDescriptions } from '../../../src/rules/spells-srd';
+import { bundledSrdSpellDescriptions } from '../../../src/rules/spells-srd';
 import {
   parseSrdDraconicResilience,
   SrdDraconicResilienceError,
@@ -684,7 +684,7 @@ describe('SRD subclass manifest', () => {
 
   it('resolves every explicit subclass spell key in the bundled spell catalog', () => {
     const catalogContentKeys = new Set(
-      parseSrdSpellDescriptions().map((spell) => spell.content_key),
+      bundledSrdSpellDescriptions().map((spell) => spell.content_key),
     );
     const unresolved = srdSubclassSpellVersionKeyEntries.filter(
       ([, contentKey]) => !catalogContentKeys.has(contentKey),

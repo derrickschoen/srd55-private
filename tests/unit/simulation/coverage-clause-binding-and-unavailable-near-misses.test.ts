@@ -11,7 +11,8 @@ import {
   type SourceRef,
 } from '../../../src/simulation/contracts';
 import type {
-  DerivedSaveDamageCoverage,
+  SaveDamageClauseParse,
+  SaveDamageCoverage,
   SourceDamageOccurrence,
   SourceDerivedSaveClause,
 } from '../../../src/simulation/spell-source-reader';
@@ -53,10 +54,11 @@ import {
  * unreachable, which is exactly why the mutants inside them survived. Two
  * seams open them:
  *
- *   - `sourceDerivedSaveClauses` is `deriveSaveDamageCoverageFromBodies(...)
- *     .clauses_by_heading`, so mocking the reader lets a test hand ONE heading
- *     a different set of source clauses while every other heading keeps its
- *     real ones.
+ *   - `sourceDerivedSaveClauses` is `saveDamageCoverageFromClauseParse(...)
+ *     .clauses_by_heading` over the recorded clause parse
+ *     (`generated/coverage-source.ts`), so mocking the reader lets a test hand
+ *     ONE heading a different set of source clauses while every other heading
+ *     keeps its real ones.
  *   - `reviewedDamageRequirementsByClause[`${slug}:${key}`]` is a computed
  *     lookup, and eight reviewed clauses deliberately have no entry —
  *     `geas:recurring-damage` among them. Defining that key on
@@ -198,10 +200,10 @@ function mockModules(options: ImportOptions): void {
       const actual = await vi.importActual<Reader>(READER_PATH);
       return {
         ...actual,
-        deriveSaveDamageCoverageFromBodies: (
-          bodies: ReadonlyMap<string, string>,
-        ): DerivedSaveDamageCoverage => {
-          const derived = actual.deriveSaveDamageCoverageFromBodies(bodies);
+        saveDamageCoverageFromClauseParse: (
+          parse: SaveDamageClauseParse,
+        ): SaveDamageCoverage => {
+          const derived = actual.saveDamageCoverageFromClauseParse(parse);
           return {
             ...derived,
             clauses_by_heading: rewrite(derived.clauses_by_heading),

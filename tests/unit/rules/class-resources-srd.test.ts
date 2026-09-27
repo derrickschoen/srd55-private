@@ -11,7 +11,7 @@ import {
   parseSrdClassResourceManifest,
   srdArcaneRecoveryDescription,
   SrdClassResourcesError,
-} from '../../../src/rules/class-resources-srd';
+} from '../../../src/rules/class-resources-srd-reader';
 
 describe('SRD class resource source parsers', () => {
   const expectedLadders = {
@@ -26,7 +26,7 @@ describe('SRD class resource source parsers', () => {
   } as const;
 
   it('pins all eight sourced ladders and all 160 exact level rows', () => {
-    const parsed = parseSrdClassResourceManifest();
+    const parsed = parseSrdClassResourceManifest(classLevelTables);
     expect(parsed.map((entry) => entry.class_name)).toEqual([
       'Barbarian', 'Bard', 'Cleric', 'Druid', 'Fighter', 'Monk',
       'Paladin', 'Ranger', 'Rogue', 'Sorcerer', 'Warlock', 'Wizard',
@@ -54,7 +54,7 @@ describe('SRD class resource source parsers', () => {
   });
 
   it('treats the Monk level 1 dash as sourced zero and rejects invalid coverage', () => {
-    const monk = parseSrdClassResourceManifest()
+    const monk = parseSrdClassResourceManifest(classLevelTables)
       .flatMap((entry) => entry.ladders)
       .find((entry) => entry.class_name === 'Monk');
     expect(monk?.maxima[0]).toBe(0);
@@ -135,7 +135,10 @@ describe('SRD class resource source parsers', () => {
   });
 
   it('pins all eighteen decoded formulas and the two remaining deliberate absences', () => {
-    const parsed = parseSrdClassResourceFormulaManifest();
+    const parsed = parseSrdClassResourceFormulaManifest(
+      srdFullText,
+      classLevelTables,
+    );
     expect(parsed.formulas).toHaveLength(18);
     expect(
       parsed.formulas.map(({ content_key, resource_kind, formula }) => ({
@@ -169,7 +172,7 @@ describe('SRD class resource source parsers', () => {
   });
 
   it('projects the complete Arcane Recovery prose from the cited SRD block', () => {
-    const description = srdArcaneRecoveryDescription();
+    const description = srdArcaneRecoveryDescription(srdFullText);
     expect(description).toContain(
       'You can regain some of your magical energy by studying your spellbook.',
     );
@@ -184,7 +187,7 @@ describe('SRD class resource source parsers', () => {
 
   it('negative control: removing Bardic Inspiration minimum-of-once evidence is rejected', () => {
     const mutated = srdFullText.replace('(minimum of once)', '(at least once)');
-    expect(() => parseSrdClassResourceFormulaManifest(mutated)).toThrow(
+    expect(() => parseSrdClassResourceFormulaManifest(mutated, classLevelTables)).toThrow(
       'Level 1: Bardic Inspiration no longer matches its cited source phrase',
     );
   });
@@ -201,7 +204,7 @@ describe('SRD class resource source parsers', () => {
         'Level 1: Spellcasting',
         'Level 1: Bardic Inspiration',
       );
-    expect(() => parseSrdClassResourceFormulaManifest(mutated)).toThrow(
+    expect(() => parseSrdClassResourceFormulaManifest(mutated, classLevelTables)).toThrow(
       'Level 1: Bardic Inspiration occurs outside the Bard class section',
     );
   });

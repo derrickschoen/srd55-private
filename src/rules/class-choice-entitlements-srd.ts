@@ -24,8 +24,8 @@ import {
   type SlotBucket,
 } from '../domain/enums';
 import {
+  bundledSrdClassLevelFeatures,
   classLevelFeaturesForClassName,
-  parseSrdClassLevelFeatures,
 } from './class-level-features-srd';
 import { SRD_CLASS_NAMES } from './class-traits-srd';
 
@@ -372,7 +372,7 @@ export function parseSrdClassSpellReplacementPolicies(
 
   // The public reader answers for every bundled class. Four non-casters have
   // an explicit empty policy rather than looking like unknown content.
-  return parseSrdClassLevelFeatures().map(({ class_name }) => {
+  return bundledSrdClassLevelFeatures().map(({ class_name }) => {
     return (
       byClass.get(class_name) ?? {
         class_name,

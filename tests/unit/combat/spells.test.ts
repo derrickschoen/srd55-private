@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { EffectPayload } from '../../../src/combat/effects';
 import {
-  parseSrdSpellDescriptions,
-  parseSrdSpellList,
+  bundledSrdSpellDescriptions,
+  bundledSrdSpellListMemberships,
 } from '../../../src/rules/spells-srd';
 import {
   createEncounter,
@@ -1009,10 +1009,12 @@ function fixture(definition: SpellDefinition): {
 
 describe('reference-party spell manifest', () => {
   it('is the exact reference-party union plus all source-pinned D318.1 spell additions', () => {
-    const levels = new Map(parseSrdSpellDescriptions().map((spell) => [spell.name, spell.level]));
+    const levels = new Map(bundledSrdSpellDescriptions().map((spell) => [spell.name, spell.level]));
     const expected = new Map<string, Set<string>>();
     for (const list of ['Cleric', 'Wizard'] as const) {
-      for (const membership of parseSrdSpellList(list)) {
+      for (const membership of bundledSrdSpellListMemberships().filter(
+        (entry) => entry.spell_list_key === list,
+      )) {
         const level = levels.get(membership.spell_name);
         if (level !== undefined && level <= 4) {
           const lists = expected.get(membership.spell_name) ?? new Set<string>();

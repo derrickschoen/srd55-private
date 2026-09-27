@@ -2,13 +2,10 @@ import type { SheetGap } from '../queries/character-sheet-builder';
 import type { SheetWarning } from '../rules/sheet';
 import { sha256 } from '../crypto/sha256';
 import { normalizeCatalogKeyComponent } from '../catalog/catalog-key';
-import bundledSrd521 from '../../docs/srd/full/srd-5.2.1.txt?raw';
-import bundledSpellDescriptions from '../../docs/srd/source/spell-descriptions.txt?raw';
 import type { Ability, DamageType } from '../domain/enums';
 import type { ContentKey } from '../domain/ids';
 import {
   BUNDLED_SRD_5_2_1_PATH,
-  reviewedResourceRecoverySourceSha256Oracle,
   sameSourceRef,
   saveSuccessClauseId,
   snapshotPublicSourceRef,
@@ -27,7 +24,6 @@ import {
   type DamageNeutralityEvidence,
   type EventFrequency,
   type PublicSourceRef,
-  type ReviewedResourceRecoveryRow,
   type SaveSuccessClauseId,
   type SaveSuccessOutcome,
   type SavingThrowDamageDuration,
@@ -42,11 +38,8 @@ export {
   reviewedResourceRecoverySourceSha256Oracle,
 } from './contracts';
 import {
-  deriveSaveDamageCoverageFromBodies,
-  spellBodyDigestInputsFromFullLayout,
-  spellDescriptionsByHeading,
-  spellDescriptionsFromFullLayout,
   damageSignatureOf,
+  saveDamageCoverageFromClauseParse,
   type DamageSignature,
   type SourceDerivedDamageFrequency,
   type SourceDerivedSaveClause,
@@ -57,6 +50,8 @@ import {
   runtimeReadonlyMap,
   runtimeReadonlyMapView,
 } from './runtime-readonly-map';
+import type { ReviewedBundledSrdHeading } from './reviewed-srd-headings';
+import { BUNDLED_COVERAGE_SOURCE } from './generated/coverage-source';
 
 export type { SourceDerivedSaveDamageCandidate } from './spell-source-reader';
 
@@ -231,106 +226,14 @@ export const publicProbabilityMechanicKinds = [
 export type PublicProbabilityMechanicKind =
   (typeof publicProbabilityMechanicKinds)[number];
 
-const reviewedBundledSrdHeadings = [
-  'Acid Splash',
-  'Advantage/Disadvantage',
-  'Attack Rolls',
-  'Arcane Hand',
-  'Befuddlement',
-  'Bestow Curse',
-  'Black Tentacles',
-  'Blade Barrier',
-  'Blight',
-  'Burning Hands',
-  'Call Lightning',
-  'Chain Lightning',
-  'Circle of Death',
-  'Cloudkill',
-  'Cone of Cold',
-  'Conjure Animals',
-  'Conjure Celestial',
-  'Conjure Elemental',
-  'Conjure Woodland Beings',
-  'Contagion',
-  'Contact Other Plane',
-  'Control Water',
-  'Critical Hits',
-  'Damage Rolls',
-  'Delayed Blast Fireball',
-  'Disintegrate',
-  'Dissonant Whispers',
-  'Dragon’s Breath',
-  'Dream',
-  'Earthquake',
-  'Enlarge/Reduce',
-  'Ensnaring Strike',
-  'Faithful Hound',
-  'Finger of Death',
-  'Fireball',
-  'Fire Storm',
-  'Flame Strike',
-  'Flaming Sphere',
-  'Freezing Sphere',
-  'Glyph of Warding',
-  'Geas',
-  'Guardian of Faith',
-  'Half Damage',
-  'Harm',
-  'Hellish Rebuke',
-  'Ice Knife',
-  'Ice Storm',
-  'Incendiary Cloud',
-  'Inflict Wounds',
-  'Immunity',
-  'Insect Plague',
-  'Level 1: Rage',
-  'Level 2: Channel Divinity',
-  'Level 2: Font of Magic',
-  'Level 3: Improved Critical',
-  'Level 15: Superior Critical',
-  'Lightning Bolt',
-  'Meteor Swarm',
-  'Mind Spike',
-  'Moonbeam',
-  'Order of Application',
-  'Phantasmal Killer',
-  'Phantasmal Force',
-  'Prismatic Spray',
-  'Prismatic Wall',
-  'Ray of Enfeeblement',
-  'Resistance and Vulnerability',
-  'Rolling 20 or 1',
-  'Sacred Flame',
-  'Searing Smite',
-  'Saving Throws',
-  'Shatter',
-  'Spirit Guardians',
-  'Level 5: Sorcerous Restoration',
-  'Storm of Vengeance',
-  'Summon Dragon',
-  'Sunbeam',
-  'Sunburst',
-  'Symbol',
-  'Thunderwave',
-  'Tsunami',
-  'Vicious Mockery',
-  'Vitriolic Sphere',
-  'Wall of Fire',
-  'Wall of Ice',
-  'Wall of Thorns',
-  'Weird',
-  'Wind Wall',
-] as const;
-
-type ReviewedBundledSrdHeading =
-  (typeof reviewedBundledSrdHeadings)[number];
-
-const bundledSrdLineSegments = new Set(
-  bundledSrd521
-    .split(/\r?\n/u)
-    .flatMap((line) => line.split(/\s{2,}/u))
-    .map((segment) => segment.trim())
-    .filter((segment) => segment.length > 0),
+/**
+ * The reviewed headings (`reviewed-srd-headings.ts`) that the build found as a
+ * complete column segment of the bundled two-column SRD text
+ * (`coverage-source.ts`). The artifact's type admits only reviewed headings,
+ * so membership here is both conditions at once.
+ */
+const reviewedHeadingsInBundledSrd: ReadonlySet<string> = new Set(
+  BUNDLED_COVERAGE_SOURCE.reviewed_headings_in_bundled_srd,
 );
 
 /**
@@ -342,8 +245,7 @@ const bundledSrdLineSegments = new Set(
 export function bundledSrdSourceRef(heading: unknown): BundledSrdSourceRef {
   if (
     typeof heading !== 'string' ||
-    !reviewedBundledSrdHeadings.some((candidate) => candidate === heading) ||
-    !bundledSrdLineSegments.has(heading)
+    !reviewedHeadingsInBundledSrd.has(heading)
   ) {
     throw new TypeError(
       `Bundled SRD heading is not a reviewed literal heading: ${String(heading)}.`,
@@ -605,28 +507,17 @@ type SaveClauseDiscriminator =
   | { readonly kind: 'source_text'; readonly includes: string };
 
 /**
- * The source-of-truth oracle, derived at module evaluation from the two corpus
- * strings imported above: both readings of the spell bodies must agree before
- * the clause parse runs over them. The whole derivation costs about 0.17 s per
- * process since the gate patterns gained their sentence-start lookbehind
- * (spell-source-reader.ts GATE_DAMAGE_SAVE_PATTERNS), so every process that
- * imports this module derives it itself; there is no cache.
+ * The source-of-truth oracle: the save-damage clauses the build parsed from
+ * the bundled SRD text after both readings of every spell body agreed
+ * (`coverage-source.ts`, recorded in `generated/coverage-source.ts`). This
+ * module reads no SRD text; it rebuilds the coverage from the recorded parse
+ * through the same reader function the text path uses.
  */
-const bundledSpellBodies = spellDescriptionsFromFullLayout(bundledSrd521);
-const extractedSpellBodies = spellDescriptionsByHeading(bundledSpellDescriptions);
-const bundledSpellBodyDigestInputs =
-  spellBodyDigestInputsFromFullLayout(bundledSrd521);
-if (
-  bundledSpellBodies.size !== extractedSpellBodies.size ||
-  [...bundledSpellBodies].some(([heading, body]) =>
-    extractedSpellBodies.get(heading) !== body,
-  )
-) {
-  throw new TypeError(
-    'Column-safe full SRD spell reading does not match the committed readable spell extract.',
-  );
-}
-const sourceCoverage = deriveSaveDamageCoverageFromBodies(bundledSpellBodies);
+const sourceCoverage = saveDamageCoverageFromClauseParse({
+  clauses_by_heading: new Map(BUNDLED_COVERAGE_SOURCE.clauses_by_heading),
+  raw_clause_count: BUNDLED_COVERAGE_SOURCE.raw_clause_count,
+  broad_suspects: BUNDLED_COVERAGE_SOURCE.broad_suspects,
+});
 const sourceDerivedSaveClauses = sourceCoverage.clauses_by_heading;
 
 export const sourceDerivedSaveDamageCandidateCounts = sourceCoverage.counts;
@@ -868,6 +759,11 @@ function damageSignaturesAreBijective(
  * bodies already reviewed in rounds 1-16. Multi-clause spells deliberately
  * repeat one body digest. These constants are independent of the live extract
  * after this one sanctioned initialization.
+ *
+ * The comparison against the bundled SRD text (`assertReviewedSpellBodyDigest`
+ * over each clause's full-layout body) used to run inside `reviewedSaveClause`
+ * at module load. This module no longer reads the SRD text, so
+ * `coverage-source-self-checks.test.ts` runs it for every reviewed clause.
  */
 export const reviewedSpellBodySha256Oracle = Object.freeze({
   acid_splash: '6fcc9844cbd9c7d35fab1473c2c694b9bc8309e46878785457b0163f9d70abea',
@@ -999,11 +895,6 @@ function reviewedSaveClause(
   const id = saveSuccessClauseId(
     `srd-5.2.1:spell:${derivedSpellSlug}:save:${key}`,
   );
-  const spellBody = bundledSpellBodyDigestInputs.get(heading);
-  if (spellBody === undefined) {
-    throw new TypeError(`${id} has no raw spell body for ${heading}.`);
-  }
-  assertReviewedSpellBodyDigest(oracleKey, id, spellBody);
   const candidates = sourceDerivedSaveClauses.get(heading) ?? [];
   const matches = discriminator === undefined
     ? candidates
@@ -2220,91 +2111,6 @@ export function damageNeutralityEvidence(
   }
   return { mechanic, evidence } as DamageNeutralityEvidence;
 }
-
-type ResourceRecoverySourceSpanSpec = {
-  readonly start: string;
-  readonly end: string;
-  readonly column_start: number;
-  readonly column_end: number | undefined;
-};
-
-const reviewedResourceRecoverySourceSpanSpecs = {
-  rage: {
-    start: 'You regain one ex-',
-    end: 'Rest.',
-    column_start: 68,
-    column_end: undefined,
-  },
-  channel_divinity: {
-    start: 'You regain one of its expended uses when you finish',
-    end: 'Long Rest.',
-    column_start: 64,
-    column_end: undefined,
-  },
-  sorcerous_restoration: {
-    start: 'When you finish a Short Rest, you can regain ex-',
-    end: 'finish a Long Rest.',
-    column_start: 63,
-    column_end: undefined,
-  },
-  font_of_magic: {
-    start: 'You regain all ex-',
-    end: 'Long Rest.',
-    column_start: 0,
-    column_end: 59,
-  },
-} as const satisfies Record<
-  ReviewedResourceRecoveryRow,
-  ResourceRecoverySourceSpanSpec
->;
-
-function resourceRecoverySourceSpan(
-  source: string,
-  row: ReviewedResourceRecoveryRow,
-): string {
-  const spec = reviewedResourceRecoverySourceSpanSpecs[row];
-  const lines = source.split(/\r?\n/u);
-  const firstLine = lines.findIndex((line) => line.includes(spec.start));
-  const lastLine = lines.findIndex((line, index) =>
-    index >= firstLine && line.includes(spec.end),
-  );
-  if (firstLine < 0 || lastLine < firstLine) {
-    throw new TypeError(
-      `${row} resource-recovery source span drift: its reviewed anchors are missing.`,
-    );
-  }
-  const columnSpan = lines.slice(firstLine, lastLine + 1)
-    .map((line) => line.slice(spec.column_start, spec.column_end).trim())
-    .filter((line) => line.length > 0)
-    .join(' ');
-  const start = columnSpan.indexOf(spec.start);
-  const end = columnSpan.indexOf(spec.end, start);
-  if (start < 0 || end < start) {
-    throw new TypeError(
-      `${row} resource-recovery source span drift: its reviewed column slice is missing.`,
-    );
-  }
-  return columnSpan.slice(start, end + spec.end.length);
-}
-
-/** This is the load-time guard; tests pass altered source copies through it. */
-export function assertReviewedResourceRecoverySourceDigests(
-  source: string,
-): void {
-  for (const row of Object.keys(
-    reviewedResourceRecoverySourceSpanSpecs,
-  ) as ReviewedResourceRecoveryRow[]) {
-    const expected = reviewedResourceRecoverySourceSha256Oracle[row];
-    const actual = sha256(resourceRecoverySourceSpan(source, row));
-    if (actual !== expected) {
-      throw new TypeError(
-        `${row} resource-recovery source span drift: expected ${expected}, read ${actual}. Re-review the row semantics and digest together.`,
-      );
-    }
-  }
-}
-
-assertReviewedResourceRecoverySourceDigests(bundledSrd521);
 
 // A set-equality assertion at runtime complements the `satisfies` compile gate.
 export function probabilityManifestIsComplete(): boolean {

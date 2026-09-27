@@ -11,7 +11,7 @@ import {
   bundledSpeciesTemplates,
 } from '../rules/origins-srd';
 import { bundledArmorTemplates } from '../rules/armor-srd';
-import { parseSrdSpellDescriptions } from '../rules/spells-srd';
+import { bundledSrdSpellDescriptions } from '../rules/spells-srd';
 import { bundledWeaponTemplates } from '../rules/weapons-srd';
 import { bundledSubclassDefinitionContentKeys } from '../rules/bundled-subclass-content';
 import {
@@ -153,7 +153,7 @@ export function bundledContentManifestV1(): readonly BundledManifestEntryV1[] {
       kind: 'armor' as const,
       contentKey: row.content_key as ContentKey,
     })),
-    ...parseSrdSpellDescriptions().map((row) => ({
+    ...bundledSrdSpellDescriptions().map((row) => ({
       kind: 'spell' as const,
       contentKey: row.content_key as ContentKey,
     })),

@@ -1,27 +1,40 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import bundledSrd521 from '../../../docs/srd/full/srd-5.2.1.txt?raw';
+import bundledSpellDescriptions from '../../../docs/srd/source/spell-descriptions.txt?raw';
+// Side-effect imports of the two modules under test. Every case below reaches
+// them through `vi.resetModules()` + a dynamic import, and a file that ONLY
+// imports dynamically is invisible to Stryker's vitest-runner "related tests"
+// selection. These static imports put the file in both modules' graphs.
+import '../../../src/simulation/coverage';
+import '../../../src/simulation/coverage-source';
+import type { BundledCoverageSource } from '../../../src/simulation/coverage-source';
 import type {
   BroadDamageSaveSuspect,
-  DerivedSaveDamageCoverage,
+  SaveDamageClauseParse,
+  SaveDamageCoverage,
   SourceDerivedSaveDamageCandidate,
 } from '../../../src/simulation/spell-source-reader';
 
 /**
- * Near-miss probes for two module-level guards in `src/simulation/coverage.ts`:
+ * Near-miss probes for two guards over the bundled spell source:
  *
  * 1. the corpus parity guard (bundled column-safe reading vs the committed
- *    readable extract, for parsed bodies), and
+ *    readable extract, for parsed bodies), which runs when the build derives
+ *    `generated/coverage-source.ts` (`deriveBundledCoverageSource` in
+ *    `src/simulation/coverage-source.ts`), and
  * 2. the unreconciled-suspect filter (candidate overlap plus exact-span
- *    exclusion matching).
+ *    exclusion matching), which runs once at `src/simulation/coverage.ts`
+ *    module evaluation over the recorded suspects and candidates.
  *
- * Both run once, at module evaluation. An ordinary top-level import therefore
- * only ever exercises the arm where the corpus already agrees and the real
- * suspects are already reconciled, which is why every branch below has to be
- * driven by resetting the module registry and re-importing the module with a
- * near-miss corpus or a near-miss suspect injected through the reader.
+ * Over the committed corpus both only ever exercise the arm where the corpus
+ * already agrees and the real suspects are already reconciled, which is why
+ * every branch below is driven by resetting the module registry and injecting
+ * a near-miss reading or a near-miss suspect through the reader.
  */
 
 type Reader = typeof import('../../../src/simulation/spell-source-reader');
 type Coverage = typeof import('../../../src/simulation/coverage');
+type CoverageSource = typeof import('../../../src/simulation/coverage-source');
 
 const READER_PATH = '../../../src/simulation/spell-source-reader';
 
@@ -82,15 +95,33 @@ function alteringOneValue(
   );
 }
 
-async function importCoverageWithReader(
-  override: (actual: Reader) => Partial<Reader>,
-): Promise<Coverage> {
+function mockReader(override: (actual: Reader) => Partial<Reader>): void {
   vi.resetModules();
   vi.doMock(READER_PATH, async () => {
     const actual = await vi.importActual<Reader>(READER_PATH);
     return { ...actual, ...override(actual) };
   });
+}
+
+async function importCoverageWithReader(
+  override: (actual: Reader) => Partial<Reader>,
+): Promise<Coverage> {
+  mockReader(override);
   return await import('../../../src/simulation/coverage');
+}
+
+/** The build's derivation of the coverage source, over the bundled corpora. */
+async function deriveCoverageSourceWithReader(
+  override: (actual: Reader) => Partial<Reader>,
+): Promise<BundledCoverageSource> {
+  mockReader(override);
+  const source: CoverageSource = await import(
+    '../../../src/simulation/coverage-source'
+  );
+  return source.deriveBundledCoverageSource(
+    bundledSrd521,
+    bundledSpellDescriptions,
+  );
 }
 
 function syntheticCandidate(
@@ -129,8 +160,8 @@ function syntheticSuspect(
 
 /**
  * Re-imports coverage with one extra candidate and one extra suspect appended
- * to the real derived coverage. Everything else — clause map, counts, bodies —
- * stays exactly as derived, so the module's other module-level invariants keep
+ * to the recorded coverage. Everything else — clause map, counts — stays
+ * exactly as recorded, so the module's other module-level invariants keep
  * seeing the real corpus.
  */
 async function unreconciledWithInjected(
@@ -138,10 +169,10 @@ async function unreconciledWithInjected(
   suspects: readonly BroadDamageSaveSuspect[],
 ): Promise<readonly BroadDamageSaveSuspect[]> {
   const coverage = await importCoverageWithReader((actual) => ({
-    deriveSaveDamageCoverageFromBodies: (
-      bodies: ReadonlyMap<string, string>,
-    ): DerivedSaveDamageCoverage => {
-      const derived = actual.deriveSaveDamageCoverageFromBodies(bodies);
+    saveDamageCoverageFromClauseParse: (
+      parse: SaveDamageClauseParse,
+    ): SaveDamageCoverage => {
+      const derived = actual.saveDamageCoverageFromClauseParse(parse);
       for (const candidate of derived.candidates) {
         // The injected offsets are only meaningful if no real candidate can
         // reach them; prove that rather than assuming it.
@@ -171,13 +202,13 @@ function hasSuspect(
 
 describe('column-safe corpus parity guard', () => {
   it('accepts the committed corpus, so every rejection below is the guard and not the harness', async () => {
-    const coverage = await importCoverageWithReader(() => ({}));
-    expect(coverage.highRecallDamageSaveSuspects.length).toBeGreaterThan(0);
+    const source = await deriveCoverageSourceWithReader(() => ({}));
+    expect(source.broad_suspects.length).toBeGreaterThan(0);
   });
 
   it('rejects an extract that is missing one spell body', async () => {
     await expect(
-      importCoverageWithReader((actual) => ({
+      deriveCoverageSourceWithReader((actual) => ({
         spellDescriptionsByHeading: (extract: string) =>
           droppingOneEntry(actual.spellDescriptionsByHeading(extract)),
       })),
@@ -186,7 +217,7 @@ describe('column-safe corpus parity guard', () => {
 
   it('rejects an extract that carries one heading the full layout does not, with every shared body identical', async () => {
     await expect(
-      importCoverageWithReader((actual) => ({
+      deriveCoverageSourceWithReader((actual) => ({
         spellDescriptionsByHeading: (extract: string) =>
           addingOneEntry(actual.spellDescriptionsByHeading(extract)),
       })),
@@ -195,7 +226,7 @@ describe('column-safe corpus parity guard', () => {
 
   it('rejects an extract whose bodies are all present but one differs in text', async () => {
     await expect(
-      importCoverageWithReader((actual) => ({
+      deriveCoverageSourceWithReader((actual) => ({
         spellDescriptionsByHeading: (extract: string) =>
           alteringOneValue(actual.spellDescriptionsByHeading(extract)),
       })),
@@ -203,27 +234,27 @@ describe('column-safe corpus parity guard', () => {
   });
 
   it('allows the readable extract to omit a raw-layout digest entry', async () => {
-    const coverage = await importCoverageWithReader((actual) => ({
+    const source = await deriveCoverageSourceWithReader((actual) => ({
       spellBodyDigestInputsByHeading: (extract: string) =>
         droppingOneEntry(actual.spellBodyDigestInputsByHeading(extract)),
     }));
-    expect(coverage.highRecallDamageSaveSuspects.length).toBeGreaterThan(0);
+    expect(source.broad_suspects.length).toBeGreaterThan(0);
   });
 
   it('allows the readable extract to carry an extra raw-layout digest entry', async () => {
-    const coverage = await importCoverageWithReader((actual) => ({
+    const source = await deriveCoverageSourceWithReader((actual) => ({
       spellBodyDigestInputsByHeading: (extract: string) =>
         addingOneEntry(actual.spellBodyDigestInputsByHeading(extract)),
     }));
-    expect(coverage.highRecallDamageSaveSuspects.length).toBeGreaterThan(0);
+    expect(source.broad_suspects.length).toBeGreaterThan(0);
   });
 
   it('allows raw-layout digest text to differ when parsed bodies agree', async () => {
-    const coverage = await importCoverageWithReader((actual) => ({
+    const source = await deriveCoverageSourceWithReader((actual) => ({
       spellBodyDigestInputsByHeading: (extract: string) =>
         alteringOneValue(actual.spellBodyDigestInputsByHeading(extract)),
     }));
-    expect(coverage.highRecallDamageSaveSuspects.length).toBeGreaterThan(0);
+    expect(source.broad_suspects.length).toBeGreaterThan(0);
   });
 });
 

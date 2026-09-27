@@ -20,7 +20,8 @@ import {
   type SaveSuccessOutcome,
 } from '../../../src/simulation/contracts';
 import type {
-  DerivedSaveDamageCoverage,
+  SaveDamageClauseParse,
+  SaveDamageCoverage,
   SourceDamageOccurrence,
   SourceDerivedSaveClause,
 } from '../../../src/simulation/spell-source-reader';
@@ -83,10 +84,10 @@ async function importCoverageWithOccurrences(
     const actual = await vi.importActual<Reader>(READER_PATH);
     return {
       ...actual,
-      deriveSaveDamageCoverageFromBodies: (
-        bodies: ReadonlyMap<string, string>,
-      ): DerivedSaveDamageCoverage => {
-        const derived = actual.deriveSaveDamageCoverageFromBodies(bodies);
+      saveDamageCoverageFromClauseParse: (
+        parse: SaveDamageClauseParse,
+      ): SaveDamageCoverage => {
+        const derived = actual.saveDamageCoverageFromClauseParse(parse);
         const clauses = derived.clauses_by_heading.get(heading);
         // A silently absent heading would turn every probe below into a
         // vacuous re-import of the untouched corpus.

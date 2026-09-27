@@ -4,10 +4,12 @@ import {
   asiLevelsForClassName,
   epicBoonLevelsForClassName,
   featFeatureEvidenceForProjectedClasses,
-  parseSrdClassLevelFeatures,
-  SrdClassLevelFeaturesError,
   subclassChoiceLevelForClassName,
 } from '../../../src/rules/class-level-features-srd';
+import {
+  parseSrdClassLevelFeatures,
+  SrdClassLevelFeaturesError,
+} from '../../../src/rules/class-level-features-srd-reader';
 import type { ContentKey } from '../../../src/domain/ids';
 
 /**
@@ -52,7 +54,7 @@ const SUBCLASS_CHOICE_LEVELS: Readonly<Record<string, number>> = {
 };
 
 describe('SRD class level feature cells', () => {
-  const parsed = parseSrdClassLevelFeatures();
+  const parsed = parseSrdClassLevelFeatures(classLevelTables);
 
   it('parses all twelve tables and all twenty rows per table', () => {
     expect(parsed.map((entry) => entry.class_name)).toEqual(
