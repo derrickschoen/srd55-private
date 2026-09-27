@@ -2656,3 +2656,48 @@ Unit order after #3/#6 land, all before any LUNA6 study cell (except PATH-ONE an
 - TEST-PERF-01 re-baseline (D902).
 
 Next free id: D908.
+
+## D908 — 2026-09-26 20:27 — reviews: board3 r3, pcac r5, B2 r4 and B6 r3 APPROVE; cover6 r3 P1 routed to a new unit COVER-EDGE; FOOTPRINT plan r1 REVISE; quiet window running
+
+REVIEWS (codex, fresh, read-only):
+- board3 r3 (gpt-6-sol xhigh) APPROVE on 016e21ee.
+  - P3, recorded: the memory witness measures arrayBuffers only, not the per-area Map heap across many traversals.
+- pcac r5 (gpt-6-sol xhigh) APPROVE on e8709f7d.
+  - Owed before landing: tests/browser/vtt-handoff/runtime-parity.spec.ts and worker.spec.ts (to be run by me) and pcac's own D885 timed pair.
+- B4 r2 APPROVE (b56395b5).
+- B6 r3 APPROVE (fc79391b).
+- B2 r4 APPROVE (982c1d98).
+  - B2 fix history: fix2 refuses any stored manifest without --overwrite and preflights every range; fix3 makes --resume over corrupt, unknown or null manifests refuse with bytes kept.
+- cover6 r3 (gpt-6-sol xhigh) REVISE, 1 P1. Its round-2 findings and my merge commit 564bd504 were reviewed with no finding.
+
+cover6 P1, MY DISPOSITION (the owner can overturn):
+- The finding: a wall filling a whole column lets attacks through along the shared edge between two wall cells (walkCornerLine returns immediately for an axis ray, cover.ts:115). The result is Half Cover and sight true, against decisions.md:350.
+- The defect is NOT introduced by cover6:
+  - pcac r5 independently confirms cover.ts is byte-identical at 673c7ee3, main 71940c8f and e8709f7d;
+  - cover6 is a byte-identical refactor, proven by its differential (17.46 M comparisons) against the frozen reference.
+- Fixing the rule inside cover6 would throw away that identity evidence.
+- So cover6 lands as the exact refactor (owner: "Land #3 and #6 first"), and the rule fix is a new unit, COVER-EDGE, immediately after #3/#6. It covers:
+  - shared-edge axis rays and the diagonal shared-blocker vertex, updating walkCornerLine and visitCornerRayCells together;
+  - a same-row sealed-column witness and mutants;
+  - pins re-derived and attributed.
+- Recorded corrections: cover6's earlier G1/G4 "kills" were escaped RangeErrors, not assertion kills (fixed in fix2 414b957f).
+
+FOOTPRINT plan r1 (gpt-6-sol xhigh) REVISE. Dispositions:
+- P1 squeeze-through: resolved by the owner's narrower ruling D907 (a separate unit, SQUEEZE-THROUGH).
+- P1 v12→v13 migration: ACCEPTED. It covers journal-DAG and revision-bundle imports (session-persistence.ts:3317 accepts versions 7–11 only), and a known size is never lost (no legacy_size_required fallback).
+- P1 v5 reproducibility: ACCEPTED. The D898 pre-run amendment keeps the original v5 manifest and fixture bytes verifiable by sha, with the commit holding them. The in-place edit (owner Q7) and V6a gain a dated amendment naming both shas.
+- P2 (W3 challenge case, M11 without a killer, real-tree typecheck and the cast guard as gates, a checkpoint size witness, independent geometric expectations for the repaired anchors): all ACCEPTED.
+- The plan must also absorb D905–D907: the squeeze cost moves to MOVE-COST; overlaps are repaired too.
+- Plan revision r2 is dispatched after the quiet window, so its probes cannot void the timings.
+
+QUIET WINDOW (D899), running as .tmp/runs/perf-02/pairs/queue2.sh then queue3.sh. Arms are built by me on main 33880118 by clean cherry-picks; each tree equals its reviewed head apart from .claude/decisions.md.
+- Pair b3: A = main, B = main + board3 (283cc172 ≙ 016e21ee).
+- Pair b3c6: A = main + board3, B = main + board3 + cover6 (fcd72f1e ≙ 564bd504).
+- B1 whole gate on dnd-gate-exp-b1-71940c8f (a9a1de27).
+- Then queue3, the combined LUNA6 arm dnd-gate-exp-luna6-all-33880118 (84b862ed): main + B1 + B4 + B2 + B6, plus MY landing adaptation 84b862ed.
+  - 84b862ed deletes B4's transitional 'tools/rl/generate-data.ts': 4 allowance, as planned in §4.1.
+  - Before it, T4 failed with "found 0, allowed 4 (a stale allowance…)"; after it, 3/3 pass. The git grep census equals the allowlist (2, 23, 4, 1, 1).
+  - The arm runs tsc, check-command-outcomes and the whole gate, then B6 T8 V10 ×3 solo on the quiet box.
+- Every arm runs tsc -b --force and check-command-outcomes first (D897 rule).
+
+Next free id: D909.
