@@ -119,6 +119,7 @@ describe('specifier resolution and the graph', () => {
     'src/handlers/deep/two.ts': 'export const two = 1;\n',
     'src/handlers/readme.md': '# not code\n',
     'docs/x.txt': 'text',
+    'node_modules/pkg/index.js': 'export const pkg = 1;\n',
   };
   const names = Object.keys(files);
   const host: GraphHost = {
@@ -138,6 +139,8 @@ describe('specifier resolution and the graph', () => {
     expect(resolveModuleSpecifier('src/a.ts', 'node:fs', isFile)).toEqual({ kind: 'external', id: 'node:fs' });
     expect(resolveModuleSpecifier('src/a.ts', 'zod', isFile)).toEqual({ kind: 'external', id: 'zod' });
     expect(resolveModuleSpecifier('src/a.ts', '../../outside', isFile)).toEqual({ kind: 'unresolved', id: '../../outside' });
+    expect(resolveModuleSpecifier('src/a.ts', '../node_modules/pkg/index.js', isFile))
+      .toEqual({ kind: 'external', id: 'node_modules/pkg/index.js' });
     expect(expandGlob('src/a.ts', ['./handlers/**/*.ts'], host.filesBelow))
       .toEqual(['src/handlers/deep/two.ts', 'src/handlers/one.ts']);
     expect(expandGlob('src/a.ts', ['./handlers/*.ts'], host.filesBelow)).toEqual(['src/handlers/one.ts']);
@@ -163,6 +166,23 @@ describe('specifier resolution and the graph', () => {
     expect(cycles(graph, ['static'])).toEqual([['src/a.ts', 'src/b.ts']]);
     expect(graph.inlineTypeOnly).toEqual([{ file: 'src/a.ts', line: 2, syntax: 'import', specifier: './c' }]);
     expect(graph.unresolved).toEqual([]);
+  });
+
+  it('keeps a cycle apart from a module both cycles merely import', () => {
+    const cyclic: Readonly<Record<string, string>> = {
+      'src/leaf.ts': 'export const leaf = 1;\n',
+      'src/p.ts': "import { q } from './q';\nexport const p = 1;\n",
+      'src/q.ts': "import { p } from './p';\nimport { leaf } from './leaf';\nexport const q = 1;\n",
+      'src/r.ts': "import { leaf } from './leaf';\nimport { s } from './s';\nexport const r = 1;\n",
+      'src/s.ts': "import { r } from './r';\nexport const s = 1;\n",
+    };
+    const cyclicNames = Object.keys(cyclic);
+    const graph = buildModuleGraph(cyclicNames, {
+      isFile: (path) => Object.hasOwn(cyclic, path),
+      readFile: (path) => cyclic[path] ?? '',
+      filesBelow: (directory) => cyclicNames.filter((name) => name.startsWith(`${directory}/`)),
+    });
+    expect(cycles(graph, ['static'])).toEqual([['src/p.ts', 'src/q.ts'], ['src/r.ts', 'src/s.ts']]);
   });
 });
 
