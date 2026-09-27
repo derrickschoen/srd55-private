@@ -2612,3 +2612,21 @@ UNITS:
 - Order: FOOTPRINT and MOVE-COST both build on #3/#6 and land after them, before any LUNA6 study cell. Arena and blind pins are expected to move under MOVE-COST, and the study rooms' behaviour changes, so both precede the study.
 
 Next free id: D906.
+
+## D906 — 2026-09-26 20:09 — owner: squeezing also carries SRD 5.1's combat effects (FOOTPRINT Q4); Q3 settled by D905
+
+FOOTPRINT Q3 (does an effect that ignores Difficult Terrain waive the squeeze cost?): settled by D905, not asked. Squeezing is its own kind, separate from difficult terrain, so ignoring Difficult Terrain does not waive it.
+
+FOOTPRINT Q4. The question quoted SRD 5.1 (docs/homebrew/ogl/srd-5.1/srd-5.1-ogl.txt:5321-5324): while squeezing, a creature "has disadvantage on attack rolls and Dexterity saving throws. Attack rolls against the creature have advantage". SRD 5.2.1 has none of these.
+OWNER, verbatim choice: "Add them (Recommended)".
+- HOUSE RULE, beside D905. A squeezed creature (placementMode squeezed, today placed-squeezed only; see FOOTPRINT Q5) has:
+  - Disadvantage on its attack rolls and its Dexterity saving throws;
+  - attack rolls against it have Advantage.
+- They go through the engine's existing roll-mode sources (the Prone/Restrained path), including the planners' tactical evaluator and the pcac close-combat/sight evaluation, so plan and reducer agree.
+- New unit SQUEEZE-COMBAT, after MOVE-COST: witnesses, mutants, pins re-derived and attributed.
+
+B2 fix round 3 (982c1d98, --resume over corrupt, unknown or null manifests refuses and keeps bytes; agent-reported 31/31 mutants): codex review r4 running.
+B2 review r3 P3 (single writer), my record: generate-data is SINGLE-WRITER by rule. One operator process per batch directory; the paid DATA-01 runs are launched by one supervisor-run command, never in parallel over the same directory. No lock is built. If parallel writers are ever wanted, a lock comes first.
+B6: codex review r3 APPROVE (fc79391b). Still owed before landing: the quiet-box V10 (T8 median 4.35 s at load 2.4 against the 5 s cap) and my landing D-entry records (per-stratum supplementary output, seed convention, 86 mutants, digest-pin deviation).
+
+Next free id: D907.
