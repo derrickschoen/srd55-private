@@ -62,12 +62,85 @@ import { basename, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
+// THE RAW SRD CORPORA ARE READ AT BUILD TIME (npm run srd:artifacts) AND NEVER
+// SHIPPED. Before that they were imported as ?raw strings and parsed at runtime,
+// and the 2.1 MB full SRD rode in three app chunks. One marker per corpus — every
+// .txt file under docs/srd, including the extracts no reader parses today — so a
+// shipped copy of ANY of them fails here, not only of the ones a runtime module
+// once imported. Each marker is a line of exactly that corpus: found once in it,
+// in no other corpus and in no generated artifact, and single-line ASCII with no
+// quote or backslash, so it survives being embedded in a JS string literal and
+// matches the latin1 read below. tests/unit/ai-bridge/assert-dist-clean.test.ts
+// asserts all of that against the committed corpora and injects each real corpus.
 const SRD_CORPUS_MARKERS = {
-  fullSrd: 'die and add your Constitution modifier to it. You',
-  spellDescriptions:
-    '--- Verbatim extract: SRD 5.2.1 printed pages 107-175, Spell Descriptions. ---',
-  classLevelTables:
+  'docs/srd/full/srd-5.2.1.txt':
+    'die and add your Constitution modifier to it. You',
+  'docs/srd/source/ability-score-generation.txt':
+    '--- Verbatim extract: the three ability-score generation methods, the complete',
+  'docs/srd/source/armor-table.txt':
+    '--- Verbatim extract: SRD 5.2.1 page 91, Armor table. ---',
+  'docs/srd/source/attack-class-features.txt':
+    '--- Verbatim extracts: the two class features that rewrite a weapon attack',
+  'docs/srd/source/backgrounds.txt':
+    '--- Verbatim extract: SRD 5.2.1 printed page 83, Character Backgrounds. ---',
+  'docs/srd/source/bard-spell-list.txt':
+    '--- Verbatim extract: SRD 5.2.1 printed pages 33-35, Bard Spell List. ---',
+  'docs/srd/source/class-core-traits.txt':
+    '--- Verbatim extracts: the Core Traits table of each of the twelve classes.',
+  'docs/srd/source/class-expertise.txt':
+    '--- Verbatim extracts: every class feature in SRD 5.2.1 that grants',
+  'docs/srd/source/class-level-tables.txt':
     'of the twelve classes, including spell-slot columns where printed. ---',
+  'docs/srd/source/class-spell-replacement.txt':
+    '--- Verbatim extracts: the class spell-replacement permissions and their',
+  'docs/srd/source/class-starting-equipment.txt':
+    '--- Verbatim extracts: the Starting Equipment row of each of the twelve classes.',
+  'docs/srd/source/cleric-spell-list.txt':
+    '--- Verbatim extract: SRD 5.2.1 printed pages 38-40, Cleric Spell List. ---',
+  'docs/srd/source/domain-vocabularies.txt':
+    '--- Verbatim extracts: the five domain vocabularies used by spell, origin and',
+  'docs/srd/source/draconic-resilience.txt':
+    'SRD 5.2.1 page 69, sliced by character at the column boundary, with PDF',
+  'docs/srd/source/druid-spell-list.txt':
+    '--- Verbatim extract: SRD 5.2.1 printed pages 44-45, Druid Spell List. ---',
+  'docs/srd/source/extra-attack-other-sources.txt':
+    '--- Verbatim extract: Extra Attack granted by something OTHER than a class',
+  'docs/srd/source/feats.txt':
+    '--- Verbatim extract: the complete Feat Descriptions section.',
+  'docs/srd/source/multiclass-entry-grants.txt':
+    'WHY THIS MATTERS. multiclassing.txt records that a character entering a SECOND',
+  'docs/srd/source/multiclassing.txt':
+    '--- Verbatim extract: the Multiclassing rules (page ~24-25). This is the',
+  'docs/srd/source/paladin-spell-list.txt':
+    '--- Verbatim extract: SRD 5.2.1 printed pages 55-56, Paladin Spell List. ---',
+  'docs/srd/source/ranger-spell-list.txt':
+    '--- Verbatim extract: SRD 5.2.1 printed pages 60, Ranger Spell List. ---',
+  'docs/srd/source/sheet-math.txt':
+    'Passive Perception, level 1 Hit Points, the per-level FIXED Hit Points that',
+  'docs/srd/source/skills-table.txt':
+    '--- Verbatim extracts: the Skills table (skill -> governing ability) and the',
+  'docs/srd/source/sorcerer-spell-list.txt':
+    '--- Verbatim extract: SRD 5.2.1 printed pages 67-69, Sorcerer Spell List. ---',
+  'docs/srd/source/species-descriptions.txt':
+    '--- Verbatim extract: SRD 5.2.1 printed pages 84-86, Species Descriptions. ---',
+  'docs/srd/source/spell-descriptions.txt':
+    '--- Verbatim extract: SRD 5.2.1 printed pages 107-175, Spell Descriptions. ---',
+  'docs/srd/source/subclasses.txt':
+    '--- Selective subclass catalog extract: printed pages 30, 35, 40, 46, 49, 52,',
+  'docs/srd/source/unarmored-defense.txt':
+    '--- Verbatim extract: Unarmored Defense, the Barbarian and Monk level-1',
+  'docs/srd/source/warlock-spell-list.txt':
+    '--- Verbatim extract: SRD 5.2.1 printed pages 74-76, Warlock Spell List. ---',
+  'docs/srd/source/weapon-attack-cantrips.txt':
+    '--- Verbatim extracts: the two cantrips that change how a WEAPON attack is',
+  'docs/srd/source/weapon-mastery-flat-classes.txt':
+    '--- Verbatim extracts: the Weapon Mastery feature text of the three classes',
+  'docs/srd/source/weapon-mastery-progression.txt':
+    '--- Verbatim extract: Barbarian Features table (Weapon Mastery column) ---',
+  'docs/srd/source/weapons-table.txt':
+    '--- Verbatim extract: SRD 5.2.1 page 90, Weapons table ---',
+  'docs/srd/source/wizard-spell-list.txt':
+    '--- Verbatim extract: SRD 5.2.1 printed pages 79-82, Wizard Spell List. ---',
 };
 const FORBIDDEN = [
   'AI_BRIDGE_SENTINEL',
@@ -87,15 +160,6 @@ const FORBIDDEN = [
   // tests/unit/ai-bridge/build-boundary.test.ts import the constant and assert
   // it appears in this array, so the two copies cannot drift apart silently.
   'NOT-FREE-LICENSED-DO-NOT-COMMIT',
-  // The raw SRD corpora are read at BUILD time (npm run srd:artifacts) and
-  // never shipped: before that they were imported as ?raw strings and parsed at
-  // runtime, and the 2.1 MB full SRD rode in three app chunks. Each literal
-  // below occurs in exactly one raw corpus file and in no parsed or generated
-  // data (asserted by tests/unit/ai-bridge/assert-dist-clean.test.ts). All
-  // three are ASCII, because this scan reads the bytes as latin1.
-  SRD_CORPUS_MARKERS.fullSrd,
-  SRD_CORPUS_MARKERS.spellDescriptions,
-  SRD_CORPUS_MARKERS.classLevelTables,
 ];
 const CONTROL = 'staticApp';
 const MIGRATION_CONTROL = 'migration-bundle-control:0000';
@@ -279,9 +343,17 @@ if (files.length === 0) {
 
 let controlSeen = false;
 let migrationControlSeen = false;
+// Every leaked corpus is reported, not only the first: a build that ships the
+// full SRD and two extracts names all three, so one fix round clears them.
+const srdLeaks = [];
 for (const path of files) {
   const text = readFileSync(path, 'latin1');
   const name = basename(path);
+  for (const [corpus, marker] of Object.entries(SRD_CORPUS_MARKERS)) {
+    if (text.includes(marker) || name.includes(marker)) {
+      srdLeaks.push(`  - ${corpus} in ${relative(root, path)}`);
+    }
+  }
   for (const pattern of FORBIDDEN) {
     const inName = name.includes(pattern);
     if (text.includes(pattern) || inName) {
@@ -293,10 +365,6 @@ for (const path of files) {
         pattern === 'NOT-FREE-LICENSED-DO-NOT-COMMIT'
           ? 'Scraped, non-free-licensed content leaked into the build output. ' +
             'Nothing under scraped/ may be committed or copied into public/.'
-          : Object.values(SRD_CORPUS_MARKERS).includes(pattern)
-            ? 'Raw SRD corpus text leaked into the build output. The runtime reads ' +
-              'the generated artifacts (npm run srd:artifacts); no shipped module ' +
-              'may import a docs/srd corpus.'
           : pattern === '__SRD55_BROWSER_CAPABILITY_PROBE_FAILURE__'
             ? 'The dev-only browser capability probe seam leaked into the build output.'
           : pattern === 'PENDING_D153_WEBKIT_IOS_NOTICE_VARIANT' ||
@@ -316,6 +384,14 @@ for (const path of files) {
   if (text.includes(MIGRATION_CONTROL)) {
     migrationControlSeen = true;
   }
+}
+
+if (srdLeaks.length > 0) {
+  fail(
+    'Raw SRD corpus text leaked into the build output. The runtime reads the ' +
+      'generated artifacts (npm run srd:artifacts); no shipped module may import ' +
+      `a docs/srd corpus. Found:\n${srdLeaks.join('\n')}`,
+  );
 }
 
 if (!controlSeen) {
