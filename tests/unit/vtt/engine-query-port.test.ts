@@ -1,5 +1,6 @@
-import { describe, expect, expectTypeOf, it } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { canCombatantSee, createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
+import * as movement from '../../../src/combat/movement';
 import { traceCombatantLine } from '../../../src/combat/cover';
 import { monsterCombatantProfile } from '../../../src/combat/combatant';
 import { monsterAttackCommand } from '../../../src/combat/monster-commands';
@@ -151,14 +152,18 @@ describe('canonical engine query port', () => {
       .toEqual({ legal: false, code: 'actor_not_placed' });
   });
 
+  /** One 18-column row, actor at column 0, a wall at column 5: every route east of it crosses the wall. */
+  function walledRow(): EncounterState {
+    const generated = placedState(SEED, new Map<CombatantId, GridCell>([[ACTOR_ID, { column: 0, row: 0 }]]), [], 1);
+    expect(generated.bounds).toEqual({ columns: 18, rows: 1 });
+    return { ...generated, blockedCells: [{ column: 5, row: 0 }] };
+  }
+
   it('D901 PATH-ONE refuses a destination beyond the budget and one walled off entirely with the same single code', () => {
     // The failure union is exactly two codes; a third (an "insufficient movement" split) would not compile.
     expectTypeOf<Extract<EnginePathResult, { readonly legal: false }>['code']>()
       .toEqualTypeOf<'actor_not_placed' | 'unreachable_within_budget'>();
-    // One 18-column row, actor at column 0, a wall at column 5: every route east of it crosses the wall.
-    const generated = placedState(SEED, new Map<CombatantId, GridCell>([[ACTOR_ID, { column: 0, row: 0 }]]), [], 1);
-    expect(generated.bounds).toEqual({ columns: 18, rows: 1 });
-    const state: EncounterState = { ...generated, blockedCells: [{ column: 5, row: 0 }] };
+    const state = walledRow();
     const pathTo = (column: number, maximumFeet: number) => OFFER_ENVIRONMENT.queries.path(state, {
       actorId: ACTOR_ID, destination: { column, row: 0 }, movement: 'normal', maximumFeet,
     });
@@ -185,6 +190,46 @@ describe('canonical engine query port', () => {
     const reachable = OFFER_ENVIRONMENT.queries.reachable(state, { actorId: ACTOR_ID, maximumFeet: 10 });
     expect(reachable.legal ? reachable.destinations.map(({ destination, costFeet }) => [destination.column, costFeet]) : reachable)
       .toEqual([[0, 0], [1, 5], [2, 10]]);
+  });
+
+  it('D901 PATH-ONE a miss costs exactly one movement search, bounded by the budget, beyond the budget or walled off', () => {
+    const state = walledRow();
+    // Every exported movement search the port can start. Each spy calls through, so the answers stay real.
+    const searches = {
+      findPath: vi.spyOn(movement, 'findPath'),
+      findPathToAny: vi.spyOn(movement, 'findPathToAny'),
+      findPathToBest: vi.spyOn(movement, 'findPathToBest'),
+      findReachableCells: vi.spyOn(movement, 'findReachableCells'),
+    };
+    const searchesFor = (column: number) => {
+      for (const spy of Object.values(searches)) spy.mockClear();
+      const result = OFFER_ENVIRONMENT.queries.path(state, {
+        actorId: ACTOR_ID, destination: { column, row: 0 }, movement: 'normal', maximumFeet: 10,
+      });
+      return {
+        result,
+        started: Object.entries(searches).flatMap(([name, spy]) => spy.mock.calls.map(() => name)),
+        findPath: searches.findPath.mock.calls.map(([, request]) => request),
+      };
+    };
+    try {
+      // Column 3 costs 15 feet (three 5-foot entries), beyond 10; column 7 lies past the wall at any cost.
+      // Each miss is one findPath whose maximumCost IS the 10-foot budget: no second search at the
+      // whole-grid cost (18 * 1 * 10 = 180 feet) and no single search widened to it.
+      for (const column of [3, 7]) {
+        const { result, started, findPath } = searchesFor(column);
+        expect(result, `column ${String(column)}`).toEqual({ legal: false, code: 'unreachable_within_budget' });
+        expect(started, `column ${String(column)}`).toEqual(['findPath']);
+        expect(findPath, `column ${String(column)}`).toEqual([{
+          actorId: ACTOR_ID,
+          start: { column: 0, row: 0 },
+          goal: { column, row: 0 },
+          maximumCost: 10,
+        }]);
+      }
+    } finally {
+      for (const spy of Object.values(searches)) spy.mockRestore();
+    }
   });
 
   it('withholds Dash when an enclosed actor has no endpoint closer to its target', () => {
