@@ -2630,3 +2630,29 @@ B2 review r3 P3 (single writer), my record: generate-data is SINGLE-WRITER by ru
 B6: codex review r3 APPROVE (fc79391b). Still owed before landing: the quiet-box V10 (T8 median 4.35 s at load 2.4 against the 5 s cap) and my landing D-entry records (per-stratum supplementary output, seed convention, 86 mutants, digest-pin deviation).
 
 Next free id: D907.
+
+## D907 — 2026-09-26 20:24 — owner: FOOTPRINT Q5–Q7 (squeeze-through moves; migrate old saves; v5 fixtures edited in place)
+
+All three were asked by AskUserQuestion with a recommendation. The owner chose the recommendation each time. Verbatim choices:
+- **Q5, "Yes, as SQUEEZE-THROUGH (Recommended)".**
+  - A moving creature may step from open ground into a narrow opening sized one size smaller, becoming squeezed, and step out again. Squeezing pays the D905 stacking cost and carries the D906 combat effects.
+  - This changes which moves are legal, so pins and planners move.
+  - New unit SQUEEZE-THROUGH, after MOVE-COST and SQUEEZE-COMBAT.
+- **Q6, "Migrate it (Recommended)".**
+  - A saved v12 session holding a body past the map edge is migrated v12→v13 on load. The creature moves to the nearest free anchor that fits its whole body (the D514 rule used for the fixture repair), and the move is recorded in the save.
+  - No refusal, no data loss. Part of FOOTPRINT.
+- **Q7, "Accept (Recommended)".**
+  - The D569 v5 manifest and the repaired fixtures are edited in place.
+  - The pending v5 brutal relaunch (d569-v5-brutal-crash.md), if it is ever run, runs on the repaired rooms and is labelled so.
+  - The recorded v5 results stay identified by sha 8c0bcb3c, and the originals stay in git history.
+
+FOOTPRINT's owner questions are all answered (Q1 D904, Q2 D905, Q3 D906, Q4 D906, Q5–Q7 here).
+Unit order after #3/#6 land, all before any LUNA6 study cell (except PATH-ONE and TEST-PERF-01, which are independent of the study):
+- FOOTPRINT (placement, fixture repair, v13 migration, D898 pre-run amendment);
+- MOVE-COST (stacking by kind);
+- SQUEEZE-COMBAT;
+- SQUEEZE-THROUGH;
+- PATH-ONE (D901);
+- TEST-PERF-01 re-baseline (D902).
+
+Next free id: D908.
