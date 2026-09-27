@@ -3217,3 +3217,28 @@ Q13. Tremorsense (Stonecunning) and Devil's Sight have no engine sense kind. OWN
 - Until PERCEPTION lands they are typed 'sourced, not executed, awaiting perception_filters'; never dropped.
 
 Next free id: D924.
+
+## D924 — 2026-09-27 17:43 — owner question series, Q14–Q19
+
+Q14. tacticalRange on attack commands. OWNER, verbatim choice: "Required, after REGEN (Recommended)".
+- Unit ATTACK-RANGE-REQUIRED: every attack command, monsters included, carries a typed range; the compiler finds every site (about 34 test files).
+- It runs after REGEN, outside the combat-rules queue.
+
+Q15. Thrown weapons, today melee-only. OWNER, verbatim choice: "In WEAPON-EXEC (Recommended)".
+- A typed thrown range band on the weapon, executed in WEAPON-EXEC. Until then: typed 'sourced, not executed'.
+
+Q16. The PC planner does not value damaging spells. My recommendation was PC-TUNE. OWNER, verbatim choice: "Separate unit before PC-TUNE".
+- Unit PC-SPELL-VALUE: expected damage for damaging spells on the same basis as attacks, using the damage-probability engine.
+- It lands before PC-TUNE, which comes after REGEN (D913).
+
+Q17. Unseen attacker/target rules at destination squares. OWNER, verbatim choice: "Infer sight at destination (Recommended)".
+- PERCEPTION computes who could see whom from the destination with the engine's own visibility rules, using only the PC's knowledge (actor-plausible; no hidden information).
+
+Q18. Spell attack rolls lack the sight and condition sources. OWNER, verbatim choice: "Yes, one d20 composition (Recommended)".
+- Every d20 test (weapon and spell attacks, saves, checks) goes through CONDITION-D20's single typed composition. It is a wrong result fixed before REGEN. This also absorbs pcac Q3.
+
+Q19. Content-pack baseCount ≥ 1 blocks True Strike's 0 base dice. OWNER, verbatim choice: "Allow 0 when scaling (Recommended)".
+- A typed union: 0 base dice is representable only together with cantrip scaling.
+- A small content-pack unit. The stand-in test pack is replaced by the exact spell.
+
+Next free id: D925.
