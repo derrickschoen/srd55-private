@@ -1,3 +1,23 @@
+/**
+ * The verdict recorder, a Vitest setup file that test:affected enables. While
+ * a test file runs, it records the repository paths the file reads and the
+ * environment variables its JavaScript reads, and scripts/test-affected.mjs
+ * keys that file's green verdict on them.
+ *
+ * Two kinds of read it cannot attribute to the file that depends on them:
+ *   - Module scope, under isolate: false. A worker runs several files and
+ *     evaluates each module once, so a read a module makes while it loads is
+ *     recorded against the first file in that worker to load it, and against
+ *     no later file that uses the module. What covers this today: a
+ *     literal-path file read is in the static closure; the one module-scope
+ *     environment read in src/ (SQL_QUERY_LOG) disables verdict reuse when it
+ *     is set; HASHED_ENVIRONMENT keys every verdict on a fixed list. A new
+ *     module-scope read of a computed path or of another variable is
+ *     attributed to one file only.
+ *   - A child process. The environment a child inherits, and the files it
+ *     reads, are read in the child, where nothing is recorded. The closure
+ *     walker fails closed any file whose closure imports node:child_process.
+ */
 import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
