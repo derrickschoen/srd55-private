@@ -1,8 +1,14 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
+import type { ENGINE_CHILD_BUNDLE_ENV } from '../../tools/engine-child-bundle';
 
 const testInputBrand: unique symbol = Symbol('test-input');
 const recorderStateSymbol = Symbol.for('dnd.verdict-fs-recorder');
+/**
+ * Spelled out rather than imported, so every declaring test does not load the
+ * bundling code; the type holds it to the real name.
+ */
+const engineChildOfferVariable: typeof ENGINE_CHILD_BUNDLE_ENV = 'DND_ENGINE_CHILD_BUNDLE';
 
 type FixturePath = `tests/fixtures/${string}`;
 type SchemaSqlPath =
@@ -23,9 +29,17 @@ export interface TestInputSpec {
   readonly publicData?: readonly PublicDataPath[];
   readonly content?: readonly ContentPath[];
   readonly contentDirectories?: readonly ContentDirectoryPath[];
+  /**
+   * The file starts engine children (`startMcpClient`). Every spawn checks the
+   * bundle offered in DND_ENGINE_CHILD_BUNDLE, and the check reads the files
+   * that bundle was built from. Under the verdict recorder this declares
+   * exactly what the check reads for the bundle offered when the file
+   * declares (`engineChildCheckReads`), derived from the bundle's sidecar.
+   */
+  readonly engineChildren?: true;
 }
 
-type TestInputCategory = Exclude<keyof TestInputSpec, 'contentDirectories'>;
+type TestInputCategory = Exclude<keyof TestInputSpec, 'contentDirectories' | 'engineChildren'>;
 type DeclaredPath<
   Spec extends TestInputSpec,
   Category extends TestInputCategory,
@@ -86,6 +100,8 @@ export type DeclaredTestInputs<Spec extends TestInputSpec> = {
 
 interface RecorderFileState {
   declaredInputs?: Set<string>;
+  /** The bundle offered to the file's engine children when it declared them; null when none was offered. */
+  engineChildOffer?: string | null;
   readonly testFile: string;
 }
 
@@ -221,6 +237,9 @@ export function declareTestInputs<const Spec extends TestInputSpec>(
       throw new Error(`Test inputs were already declared for ${recorder.current.testFile}.`);
     }
     recorder.current.declaredInputs = declared;
+    if (spec.engineChildren === true) {
+      recorder.current.engineChildOffer = process.env[engineChildOfferVariable] ?? null;
+    }
   }
 
   return {

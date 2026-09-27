@@ -74,6 +74,7 @@ const inputs = declareTestInputs({
     LEGACY_ADVICE_ARENA_FIXTURE,
     ...legacyKbPaths,
   ],
+  engineChildren: true,
 });
 
 const APPROVED_COMMIT = '493121dd902e5033197d72f0050a1b8b8e32ae7c';

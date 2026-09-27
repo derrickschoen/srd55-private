@@ -33,11 +33,14 @@ import {
   oversizedTurnContextState,
 } from './ai-dm-conversation-fixtures';
 
-const kbInputs = declareTestInputs({ fixtures: [
-  'tests/fixtures/ai-dm-kb/ai-dm-core.md',
-  'tests/fixtures/ai-dm-kb/tactics.md',
-  'tests/fixtures/ai-dm-skills/engine-submission/SKILL.md',
-] });
+const kbInputs = declareTestInputs({
+  fixtures: [
+    'tests/fixtures/ai-dm-kb/ai-dm-core.md',
+    'tests/fixtures/ai-dm-kb/tactics.md',
+    'tests/fixtures/ai-dm-skills/engine-submission/SKILL.md',
+  ],
+  engineChildren: true,
+});
 const LEGACY_BLOCK_ARGS = [
   '--combat-model', 'monster_block_v1', '--initiative-profile', 'legacy',
 ] as const;

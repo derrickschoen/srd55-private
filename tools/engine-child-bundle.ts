@@ -264,6 +264,9 @@ const sidecarSchema = z.strictObject({
   outputSha256: SHA256,
 });
 
+/** A sidecar as the check reads it: well formed, not yet shown to recompute to its key. */
+export type EngineChildSidecar = z.infer<typeof sidecarSchema>;
+
 export function engineChildBundleDirectory(root: string): string {
   return join(resolve(root), '.tmp', 'engine-child-bundle');
 }
@@ -747,15 +750,18 @@ function viteNodeDifference(checkout: string, vite: ViteNodeProfile, environment
   return null;
 }
 
+/** The offered bundle and its sidecar shown to be one sealed pair, or why they are not. */
+type SealedBundle =
+  | { readonly status: 'sealed'; readonly bundlePath: string; readonly sidecar: EngineChildSidecar }
+  | { readonly status: 'missing' | 'invalid'; readonly reason: string };
+
 /**
- * Checks `offeredPath` against the checkout at `root` and the environment a
- * child spawned from here inherits, reading every recorded file on every call
- * (see the header).
+ * The check's first steps, which need nothing from the checkout: the offer
+ * names an .mjs bundle, the bundle and its sidecar exist, the sidecar is well
+ * formed and recomputes to its own key, and the bundle's bytes hash to the
+ * output digest it records. Reads the bundle and the sidecar, nothing else.
  */
-export function checkEngineChildBundle(
-  root: string, offeredPath: string, environment: EngineChildEnvironment = process.env,
-): EngineChildBundleCheck {
-  const checkout = resolve(root);
+function readSealedBundle(offeredPath: string): SealedBundle {
   const bundlePath = resolve(offeredPath);
   if (!bundlePath.endsWith('.mjs')) {
     return { status: 'invalid', reason: `${bundlePath} is not an engine child bundle (.mjs)` };
@@ -780,6 +786,85 @@ export function checkEngineChildBundle(
   if (sha256Hex(bytes) !== outputSha256) {
     return { status: 'invalid', reason: `${bundlePath} does not hash to the output digest recorded beside it` };
   }
+  return { status: 'sealed', bundlePath, sidecar: sidecar.data };
+}
+
+/** Absolute paths, as `engineChildCheckReads` names them. */
+export interface EngineChildCheckReads {
+  /** Files the check reads by content. */
+  readonly contents: readonly string[];
+  /** Paths the check only probes for existence. */
+  readonly existence: readonly string[];
+}
+
+const sortedPaths = (paths: readonly string[]): readonly string[] => [...new Set(paths)].sort();
+
+/**
+ * Every file `checkEngineChildBundle(root, bundlePath)` reads when it finds
+ * the bundle that `sidecar` seals valid. Pure: it reads nothing itself.
+ *
+ * By content: the bundle, its sidecar, the recipe source (this file), every
+ * sealed engine input and every Vite config input. Probed for existence
+ * only: Vite's config-file lookup up to and including the recorded config
+ * file (the whole lookup when none is recorded, or when the recorded one is
+ * not a lookup candidate), and every `.env` file vite-node would load from
+ * the recorded envDir.
+ *
+ * Every other outcome of the check stops early and reads a subset of these,
+ * with one exception: a lookup that finds a config file other than the
+ * recorded one probes on to the file it finds, and the check reports stale.
+ *
+ * Under the verdict recorder this is the declaration of a test file that
+ * starts engine children (`TestInputSpec.engineChildren`).
+ * `engine-child-check-reads.test.ts` runs the check under a file-read spy and
+ * holds the two equal.
+ */
+export function engineChildCheckReads(
+  root: string, bundlePath: string, sidecar: EngineChildSidecar,
+): EngineChildCheckReads {
+  const checkout = resolve(root);
+  const bundle = resolve(bundlePath);
+  const { inputs, vite } = sidecar;
+  const lookup = VITE_CONFIG_FILES.map((name) => join(checkout, name));
+  const found = vite.configFile === null ? -1 : lookup.indexOf(vite.configFile);
+  return {
+    contents: sortedPaths([
+      bundle,
+      sidecarPath(bundle),
+      resolve(checkout, ENGINE_CHILD_RECIPE_SOURCE),
+      ...[...inputs, ...vite.configInputs].map((input) => resolve(input.path)),
+    ]),
+    existence: sortedPaths([...(found < 0 ? lookup : lookup.slice(0, found + 1)), ...viteNodeEnvFiles(vite)]),
+  };
+}
+
+/**
+ * `engineChildCheckReads` for the bundle offered at `offeredPath`, from its
+ * own sidecar, once the check's first steps accept the pair. A missing or
+ * invalid offer throws: nothing its sidecar says may be believed.
+ */
+export function engineChildSealedReads(root: string, offeredPath: string): EngineChildCheckReads {
+  const sealed = readSealedBundle(offeredPath);
+  if (sealed.status !== 'sealed') {
+    throw new EngineChildBundleError(
+      `No engine child reads can be declared from ${resolve(offeredPath)}, which is ${sealed.status}: ${sealed.reason}.`,
+    );
+  }
+  return engineChildCheckReads(root, sealed.bundlePath, sealed.sidecar);
+}
+
+/**
+ * Checks `offeredPath` against the checkout at `root` and the environment a
+ * child spawned from here inherits, reading every recorded file on every call
+ * (see the header).
+ */
+export function checkEngineChildBundle(
+  root: string, offeredPath: string, environment: EngineChildEnvironment = process.env,
+): EngineChildBundleCheck {
+  const checkout = resolve(root);
+  const sealed = readSealedBundle(offeredPath);
+  if (sealed.status !== 'sealed') return sealed;
+  const { bundlePath, sidecar: { key, recipe, inputs, vite } } = sealed;
   if (canonicalJson(recipe) !== canonicalJson(engineChildRecipe(checkout))) {
     return {
       status: 'stale',

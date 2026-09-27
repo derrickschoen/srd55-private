@@ -66,6 +66,12 @@ function isWithin(parent, candidate) {
   return candidate === parent || candidate.startsWith(`${parent}${sep}`);
 }
 
+/** `kind:name` for an absolute path in the repository, as the audit and test:affected name it; else undefined. */
+function repositoryObservation(kind, path) {
+  if (!isWithin(repositoryRoot, path)) return undefined;
+  return `${kind}:${relative(repositoryRoot, path).split(sep).join('/')}`;
+}
+
 function currentState() {
   return globalThis[stateSymbol]?.current;
 }
@@ -123,13 +129,34 @@ function noteRead(operation, input, options) {
   // semantic inputs into the cache key and validate cached bytes before use.
   if (path.startsWith('/tmp/dnd-')) return;
 
-  if (isWithin(repositoryRoot, path)) {
-    const name = relative(repositoryRoot, path).split(sep).join('/');
-    state.observed.add(`${observationKind(operation, options)}:${name}`);
+  const observation = repositoryObservation(observationKind(operation, options), path);
+  if (observation !== undefined) {
+    state.observed.add(observation);
     return;
   }
 
   state.external.add(`${operation}:${path}`);
+}
+
+/**
+ * What a file that declares engine children declares through them: every
+ * file the bundle check reads for the offered bundle (`engineChildCheckReads`),
+ * named as this recorder names what it observes. Reads with the recorder
+ * suspended, so deriving the declaration is not itself observed. A missing or
+ * invalid offer throws.
+ */
+async function engineChildDeclarations(state, offer) {
+  globalThis[stateSymbol].current = undefined;
+  try {
+    const { engineChildSealedReads } = await import('../../tools/engine-child-bundle.ts');
+    const reads = engineChildSealedReads(repositoryRoot, offer);
+    return [
+      ...reads.contents.map((path) => repositoryObservation('file', absolutePath(path))),
+      ...reads.existence.map((path) => repositoryObservation('path', absolutePath(path))),
+    ].filter((observation) => observation !== undefined);
+  } finally {
+    globalThis[stateSymbol].current = state;
+  }
 }
 
 function callbackIndex(args) {
@@ -318,8 +345,18 @@ beforeAll(() => {
   globalThis[stateSymbol].current = fileState;
 });
 
-afterAll(() => {
+afterAll(async () => {
   const declaredInputs = fileState.declaredInputs;
+  if (declaredInputs !== undefined && typeof fileState.engineChildOffer === 'string') {
+    let derived;
+    try {
+      derived = await engineChildDeclarations(fileState, fileState.engineChildOffer);
+    } catch (error) {
+      if (globalThis[stateSymbol].current === fileState) globalThis[stateSymbol].current = undefined;
+      throw error;
+    }
+    for (const observation of derived) declaredInputs.add(observation);
+  }
   if (declaredInputs !== undefined) {
     const undeclared = [...fileState.observed]
       .filter((input) =>
