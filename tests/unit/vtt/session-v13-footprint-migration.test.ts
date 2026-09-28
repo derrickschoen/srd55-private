@@ -159,6 +159,22 @@ describe('FOOTPRINT session v13: a save v13 cannot express is repaired and archi
     expect(RUNNING_ENGINE_BUILD).toEqual({ kind: 'unrecorded', reason: 'build_without_commit' });
   });
 
+  it('fix1: a v13 revision must name its engine build, and a migrated root archives a v12-or-older history only', () => {
+    const root = rootOf(imported(text('overhangRevisions')).revisions);
+    const withoutBuild = rehashed(root, (body) => { delete body.recordedBy; });
+    const missing = thrown(() => importSavedSession(new MemoryBrowserSessionStore(), v13Save([withoutBuild])));
+    expect(missing).toBeInstanceOf(TypeError);
+    expect(String(missing)).toContain('VTT session revision recordedBy is not an engine build.');
+    const shortCommit = rehashed(root, (body) => { body.recordedBy = { kind: 'engine_commit', commit: 'abc1234' }; });
+    expect(String(thrown(() => importSavedSession(new MemoryBrowserSessionStore(), v13Save([shortCommit])))))
+      .toContain('Not a full git commit name');
+    // The archive claims a v13 history: a migrated root is the migration of a v12-or-older save, so it is refused.
+    const v13History = rehashed(root, (body) => { body.transition.archive.recordedSchemaVersions = [13]; });
+    const refused = thrown(() => importSavedSession(new MemoryBrowserSessionStore(), v13Save([v13History])));
+    expect(refused).toBeInstanceOf(SessionHistoryArchiveError);
+    expect(String(refused)).toContain('A migrated root archives a history of session schema 12 or older.');
+  });
+
   it('W21b: the same save as a v12 journal DAG gives the same repaired root, archiving the DAG', () => {
     const fromDag = rootOf(imported(text('overhangDag')).revisions);
     const fromRevisions = rootOf(imported(text('overhangRevisions')).revisions);
