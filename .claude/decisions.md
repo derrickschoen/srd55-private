@@ -3471,3 +3471,24 @@ Then my timed pair against main, and Playwright where affected.
 In flight: FOOTPRINT r3 (last review round); PC-EXPORT and RULE-INDEX fix3 (their last rounds; I verify after).
 
 Next free id: D933.
+
+## D933 — 2026-09-28 02:32 — PC-EXPORT-TRUTH and RULE-INDEX: cap reached, fix3 verified by me, accepted
+
+PC-EXPORT-TRUTH, claude/pcexport d58092ea (on 9f94dc80). Its fix3 added the codex r3 P2 target-side mutants (D1/D2 at the backup commit seam, killed at the destination sense assertions).
+VERIFIED BY ME (codex r3 P1 was the supervisor's evidence gate):
+- tests/browser/database-recovery.spec.ts, via the agent's .tmp/runs/pc-export-truth/fix3/mutate-browser.py (read in full by me before running), PLAYWRIGHT_PORT 4640:
+  - baseline passes (exit 0);
+  - W1 (src/main.ts:548 recovered → no-op): tsc 0, KILLED at spec :144 by expect(locator).toHaveAttribute, no timeout; restored sha 3cab1542; rerun passes;
+  - W2 (src/main.ts:538, needs-reset branch removed): tsc 0, KILLED at spec :103 by toBeVisible; restored; rerun passes.
+- Affected browser specs, 10 files (the 7 changed homebrew/library/purge/replacement/superseded specs plus homebrew-draft-save-truth, homebrew-accessibility, sharing), PLAYWRIGHT_PORT 4650: 25/25 passed. Log .tmp/runs/pc-export-truth/fix3/browser-affected.log.
+- The clone is clean after.
+
+RULE-INDEX, claude/ruleindex 3e3c782b (on 9f94dc80). Its fix3 narrowed the XP exemption (with a mutant) and added the dice parser's safe-integer bounds.
+VERIFIED BY ME:
+- check-command-outcomes exit 0.
+- Hand mutant src/domain/srd-vocabulary.ts: Number.isSafeInteger(count) → Number.isFinite(count). KILLED by tests/unit/domain/srd-vocabulary.test.ts "refuses a count or a modifier it cannot hold exactly"; restored 89c0090a; 13/13.
+- Finding against my own verification step: my first run named tests/unit/rules/srd-vocabulary.test.ts, a path I misread from a merged listing. vitest found no file (0 passed, 0 failed, exit 1). I caught it and re-ran against the right path. An exit 1 with zero executed tests is never a kill (skipped-is-not-passed memory).
+
+Both are ACCEPTED. They join landing batch 2 with FOOTPRINT, whose codex r3 is still pending. Landing batch 1 (RECORDER-A, IMPORT-GUARD, SRD-BUILDTIME, PATH-ONE) is being integrated.
+
+Next free id: D934.
