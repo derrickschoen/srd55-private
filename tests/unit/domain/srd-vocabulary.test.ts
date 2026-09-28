@@ -155,6 +155,26 @@ describe('SRD-VOCAB values', () => {
     expect(parseDiceExpression('1d6 - 1d4')).toBeNull();
   });
 
+  it('refuses a count or a modifier it cannot hold exactly', () => {
+    // The largest safe integer, 2^53 − 1, is held exactly: as a count and as a
+    // modifier either way.
+    expect(parseDiceExpression('9007199254740991d6')).toEqual({ dice: [{ count: 9007199254740991, sides: 6 }], modifier: 0 });
+    expect(parseDiceExpression('1d6 + 9007199254740991')).toEqual({ dice: [{ count: 1, sides: 6 }], modifier: 9007199254740991 });
+    expect(parseDiceExpression('1d6 − 9007199254740991')).toEqual({ dice: [{ count: 1, sides: 6 }], modifier: -9007199254740991 });
+    // A count past it: 400 digits read as Infinity; 2^53 + 1 reads as 2^53, so
+    // 2^53 is refused too.
+    expect(parseDiceExpression(`${'9'.repeat(400)}d6`)).toBeNull();
+    expect(parseDiceExpression('9007199254740993d6')).toBeNull();
+    expect(parseDiceExpression('9007199254740992d6')).toBeNull();
+    // A modifier term past it, even where the total comes back into range:
+    // with 2^53 + 1 read as 2^53 this total would be 1, not 2.
+    expect(parseDiceExpression(`1d6 + ${'9'.repeat(400)}`)).toBeNull();
+    expect(parseDiceExpression('1d6 − 9007199254740991 + 9007199254740993')).toBeNull();
+    // A total past it, from terms that are each safe: 2^53 − 1 + 2 is 2^53 + 1,
+    // which would be read as 2^53.
+    expect(parseDiceExpression('1d6 + 9007199254740991 + 2')).toBeNull();
+  });
+
   it('refuses a negative or non-finite distance', () => {
     expect(feet(30)).toBe(30);
     expect(miles(24)).toBe(24);

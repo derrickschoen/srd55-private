@@ -338,7 +338,11 @@ export function isDieSize(value: number): value is DieSize {
 /**
  * Reads a printed dice expression (`1d3`, `2d6 + 3`, `1d8 + 1d6 − 1`, the SRD's
  * minus sign included), or returns `null`. A die size the SRD never prints is
- * `null`, not a guess.
+ * `null`, not a guess. So is a number it cannot hold exactly: a count, a
+ * modifier term or the modifier's running total that is not a safe integer.
+ * `Number` reads 400 digits as Infinity and 9007199254740993 as …992, and a
+ * total past 2^53 rounds the same way; a rounded number would be a plausible
+ * wrong one.
  */
 export function parseDiceExpression(text: string): DiceExpression | null {
   const terms = text.trim().replaceAll('−', '-').split(/\s*([+-])\s*/);
@@ -354,7 +358,7 @@ export function parseDiceExpression(text: string): DiceExpression | null {
     if (die !== null) {
       const count = Number(die[1]);
       const sides = Number(die[2]);
-      if (sign < 0 || count < 1 || !isDieSize(sides)) {
+      if (sign < 0 || !Number.isSafeInteger(count) || count < 1 || !isDieSize(sides)) {
         return null;
       }
       dice.push({ count, sides });
@@ -363,7 +367,14 @@ export function parseDiceExpression(text: string): DiceExpression | null {
     if (!/^\d+$/.test(term) || index === 0) {
       return null;
     }
-    modifier += sign * Number(term);
+    const value = Number(term);
+    if (!Number.isSafeInteger(value)) {
+      return null;
+    }
+    modifier += sign * value;
+    if (!Number.isSafeInteger(modifier)) {
+      return null;
+    }
   }
   const [first, ...rest] = dice;
   return first === undefined ? null : { dice: [first, ...rest], modifier };
