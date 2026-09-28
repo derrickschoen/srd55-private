@@ -14,15 +14,17 @@ import {
   pathTo,
   resolveModuleSpecifier,
   type Evaluation,
+  type GlobUnsupported,
   type GraphHost,
   type ModuleReference,
 } from '../../../scripts/runtime-import-edges.mjs';
 
 /**
  * `scripts/runtime-import-edges.mjs` is the one definition of a runtime import
- * edge (D915), used by the import-boundary guard and the import censuses; the
- * verdict cache switches to it once RECORDER-A and IMPORT-GUARD have both
- * landed (D919). Its claims are checked here against the transformer that
+ * edge (D915), used by the import-boundary guard, the verdict cache's closure
+ * walker (scripts/test-affected.mjs, since RECORDER-A and IMPORT-GUARD landed
+ * together, D919/D932; tests/unit/verdict-closure-walker.test.ts) and the
+ * import censuses. Its claims are checked here against the transformer that
  * actually runs this repository: Vite's own `transformWithEsbuild`, which
  * reads the tsconfig that owns each file (both projects set
  * `verbatimModuleSyntax`).
@@ -92,6 +94,28 @@ describe('the runtime-edge classifier', () => {
     expect([passed.syntax, passed.evaluation, passed.glob?.supported, passed.specifiers.length])
       .toEqual(['glob', 'static', false, 0]);
     expect(only("export const url = new URL('./m.wasm', import.meta.url);").evaluation).toBe('asset');
+  });
+
+  it('says why it cannot read a glob, from a closed set, for every consumer to fail closed on', () => {
+    const cases: readonly (readonly [statement: string, unsupported: GlobUnsupported])[] = [
+      ['register(import.meta.glob);', { kind: 'not-called' }],
+      ["export const all = import.meta.glob('./x/*.ts', options);", { kind: 'computed-options' }],
+      ["export const all = import.meta.glob('./x/*.ts', { ...options });", { kind: 'computed-options' }],
+      ["export const all = import.meta.glob('./x/*.ts', { eager });", { kind: 'computed-options' }],
+      ["export const all = import.meta.glob('./x/*.ts', { [key]: true });", { kind: 'computed-options' }],
+      ["export const all = import.meta.glob('./x/*.ts', { base: './y' });", { kind: 'option', name: 'base' }],
+      ["export const all = import.meta.glob('./x/*.ts', { eager: true, exhaustive: true });", { kind: 'option', name: 'exhaustive' }],
+      ["export const all = import.meta.glob('./x/*.ts', { eager: flag });", { kind: 'computed-option', name: 'eager' }],
+      ["export const all = import.meta.glob('./x/*.ts', { query: { raw: true } });", { kind: 'computed-option', name: 'query' }],
+    ];
+    for (const [statement, unsupported] of cases) {
+      const reference = only(statement);
+      expect([statement, reference.syntax, reference.evaluation, reference.glob])
+        .toEqual([statement, 'glob', 'static', { supported: false, eager: true, query: undefined, unsupported }]);
+    }
+    // Every option it reads, read: no `unsupported`.
+    expect(only("export const all = import.meta.glob('./x/*.ts', { eager: false, 'query': '?url', import: 'default' });").glob)
+      .toEqual({ supported: true, eager: false, query: 'url' });
   });
 
   it('ignores look-alikes that load nothing', () => {

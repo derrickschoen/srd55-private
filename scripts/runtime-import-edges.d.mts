@@ -21,11 +21,16 @@ export type ReferenceSyntax =
   | 'glob'
   | 'asset-url';
 
-export interface GlobOptions {
-  readonly supported: boolean;
-  readonly eager: boolean;
-  readonly query: string | undefined;
-}
+/** Why a glob call cannot be read, so a consumer fails closed on it (the closed set in runtime-import-edges.mjs). */
+export type GlobUnsupported =
+  | { readonly kind: 'not-called' }
+  | { readonly kind: 'computed-options' }
+  | { readonly kind: 'option'; readonly name: string }
+  | { readonly kind: 'computed-option'; readonly name: 'eager' | 'query' };
+
+export type GlobOptions =
+  | { readonly supported: true; readonly eager: boolean; readonly query: string | undefined }
+  | { readonly supported: false; readonly eager: true; readonly query: undefined; readonly unsupported: GlobUnsupported };
 
 export interface ModuleReference {
   readonly syntax: ReferenceSyntax;

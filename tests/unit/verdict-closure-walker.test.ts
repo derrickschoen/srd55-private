@@ -160,6 +160,18 @@ const FIXTURES: Readonly<Record<string, readonly string[]>> = {
     'const discover = import.meta.glob;',
     "export const modules = discover('./targets/*.ts');",
   ],
+  // Read through the shared classifier (D919): what it does not read fails closed.
+  'glob-exhaustive.ts': ["export const modules = import.meta.glob('./targets/*.ts', { eager: true, exhaustive: true });"],
+  'glob-computed-eager.ts': [
+    'const eager = Date.now() > 0;',
+    "export const modules = import.meta.glob('./targets/*.ts', { eager: eager });",
+  ],
+  'dynamic-constant.ts': ["const TARGET = './data.json';", 'export const load = () => import(TARGET);'],
+  'dynamic-shadowed-constant.ts': [
+    "const TARGET = './data.json';",
+    'export const load = (TARGET: string) => import(TARGET);',
+    'export const target = TARGET;',
+  ],
   // The digest witnesses change these bytes, so they share nothing with the forms above.
   'witness-glob/entry.ts': ["export const modules = import.meta.glob('./handlers/*.ts', { eager: true });"],
   'witness-glob/handlers/move.ts': ["import { TABLE } from '../table';", 'export const move = TABLE;'],
@@ -366,6 +378,43 @@ describe('the closure walker: import.meta.glob', () => {
     expect(buildClosure(entry)).toEqual({
       closure: [],
       unresolved: [`${repositoryPath(entry)} -> <unsupported import.meta.glob ./base/*.ts>`],
+    });
+  });
+});
+
+/*
+ * The walker reads module references through the import-boundary guard's
+ * classifier (scripts/runtime-import-edges.mjs, D919), so the two agree on
+ * every file (the landing-batch1 census: 1,829 files, direct references and
+ * closures byte-equal before and after the switch). A specifier may sit in a
+ * module-scope string constant, as the shared `specifierText` reads it. The
+ * failing-closed cases are where the shared definition is stricter than the
+ * walker's own copy was: the copy followed each of them to a closure the
+ * classifier cannot vouch for.
+ */
+describe('the closure walker: the shared runtime-edge classifier', () => {
+  it('fails closed a glob option the classifier does not read (exhaustive changes which files match)', () => {
+    expect(closureOf('glob-exhaustive.ts')).toEqual({
+      closure: [],
+      unresolved: unresolvedAs('glob-exhaustive.ts', '<unsupported import.meta.glob option exhaustive>'),
+    });
+  });
+
+  it('fails closed an eager option that is not a literal', () => {
+    expect(closureOf('glob-computed-eager.ts')).toEqual({
+      closure: [],
+      unresolved: unresolvedAs('glob-computed-eager.ts', '<computed import.meta.glob option eager>'),
+    });
+  });
+
+  it('follows a specifier held in a module-scope string constant', () => {
+    expect(closureOf('dynamic-constant.ts')).toEqual({ closure: names('data.json'), unresolved: [] });
+  });
+
+  it('fails closed a specifier constant whose name a parameter shadows, since the import names the parameter', () => {
+    expect(closureOf('dynamic-shadowed-constant.ts')).toEqual({
+      closure: [],
+      unresolved: unresolvedAs('dynamic-shadowed-constant.ts', '<computed dynamic import>'),
     });
   });
 });

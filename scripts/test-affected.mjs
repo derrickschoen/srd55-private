@@ -27,6 +27,12 @@ import {
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import ts from 'typescript';
+import {
+  classifyModuleReference,
+  EVALUATION,
+  moduleStringConstants,
+  specifierText,
+} from './runtime-import-edges.mjs';
 
 const CACHE_VERSION = 6;
 export const CACHE_ROOT = '/tmp/dnd-verdict-cache';
@@ -162,73 +168,63 @@ function sourceFile(path, content) {
   );
 }
 
-function constantStrings(source) {
-  const values = new Map();
-  for (const statement of source.statements) {
-    if (!ts.isVariableStatement(statement)) continue;
-    if ((statement.declarationList.flags & ts.NodeFlags.Const) === 0) continue;
-    for (const declaration of statement.declarationList.declarations) {
-      if (
-        ts.isIdentifier(declaration.name) &&
-        declaration.initializer !== undefined &&
-        ts.isStringLiteralLike(declaration.initializer)
-      ) {
-        values.set(declaration.name.text, declaration.initializer.text);
-      }
-    }
-  }
-  return values;
-}
-
-function literalText(expression, constants) {
-  if (ts.isStringLiteralLike(expression)) return expression.text;
-  if (ts.isIdentifier(expression)) return constants.get(expression.text);
-  return undefined;
-}
-
-function importMetaProperty(node, name) {
+function importMetaUrl(node) {
   return ts.isPropertyAccessExpression(node) &&
-    node.name.text === name &&
+    node.name.text === 'url' &&
     ts.isMetaProperty(node.expression) &&
     node.expression.keywordToken === ts.SyntaxKind.ImportKeyword &&
     node.expression.name.text === 'meta';
 }
 
-function importMetaUrl(node) {
-  return importMetaProperty(node, 'url');
-}
-
-/**
- * Whether an import or re-export declaration loads its module at runtime.
- * Both tsconfigs set verbatimModuleSyntax, under which only the type-marked
- * forms are erased: `import type ...` and `export type ... from`. An import
- * whose bindings are all inline `type` is emitted as `import {} from` and
- * loads its module; so does `export { type A } from`.
- *
- * The one definition of a runtime edge for the verdict cache. The import
- * boundary guard (GUARD, D915) has its own classifier and has not landed;
- * whichever of the two lands second makes them share one.
+/*
+ * WHICH MODULE REFERENCES LOAD A MODULE is not decided here. It is the one
+ * runtime-edge definition in scripts/runtime-import-edges.mjs
+ * (`classifyModuleReference`), which the import-boundary guard uses too
+ * (D919: the verdict cache switched to it when RECORDER-A and IMPORT-GUARD
+ * landed together, D932). Both tsconfigs set verbatimModuleSyntax, so only
+ * `import type` and `export type ... from` are erased; `import { type A }`
+ * loads its module; a glob is `import.meta.glob` (a MetaProperty) called
+ * directly; an `import()` names its module in its first argument. What the
+ * walker adds is its own: resolution against the file system, and failing
+ * closed on what a stored verdict could not see change.
  */
-function loadsModuleAtRuntime(declaration) {
-  if (ts.isImportDeclaration(declaration)) return declaration.importClause?.isTypeOnly !== true;
-  return declaration.moduleSpecifier !== undefined && !declaration.isTypeOnly;
+
+/** The reason a module reference whose target the walker cannot read fails closed, by its syntax. */
+const COMPUTED_REFERENCE = Object.freeze({
+  import: '<non-literal import>',
+  export: '<non-literal export>',
+  'import-equals': '<computed import = require>',
+  'dynamic-import': '<computed dynamic import>',
+  require: '<computed require>',
+  'asset-url': '<computed import.meta.url URL>',
+});
+
+/** The reason a glob call the classifier cannot read (`glob.unsupported`) fails closed. */
+function unsupportedGlobReason(unsupported) {
+  switch (unsupported.kind) {
+    case 'not-called':
+      return '<import.meta.glob not called directly>';
+    case 'computed-options':
+      return '<computed import.meta.glob options>';
+    case 'option':
+      return `<unsupported import.meta.glob option ${unsupported.name}>`;
+    case 'computed-option':
+      return `<computed import.meta.glob option ${unsupported.name}>`;
+    default:
+      return `<unsupported import.meta.glob: ${String(unsupported.kind)}>`;
+  }
 }
 
-function newUrlSpecifier(expression, constants) {
-  if (
-    !ts.isNewExpression(expression) ||
-    !ts.isIdentifier(expression.expression) ||
-    expression.expression.text !== 'URL' ||
-    expression.arguments?.length !== 2 ||
-    !importMetaUrl(expression.arguments[1])
-  ) return undefined;
-  return literalText(expression.arguments[0], constants);
+/** A `new URL(<specifier>, import.meta.url)` expression's specifier text, as the classifier reads it. */
+function assetUrlSpecifier(expression, textOf) {
+  const reference = classifyModuleReference(expression);
+  return reference?.syntax === 'asset-url' ? textOf(reference.specifiers[0]) : undefined;
 }
 
-function fileReadSpecifier(expression, constants) {
-  const direct = literalText(expression, constants);
+function fileReadSpecifier(expression, textOf) {
+  const direct = textOf(expression);
   if (direct !== undefined) return { specifier: direct, relativeToImporter: false };
-  const url = newUrlSpecifier(expression, constants);
+  const url = assetUrlSpecifier(expression, textOf);
   if (url !== undefined) return { specifier: url, relativeToImporter: true };
   if (
     ts.isCallExpression(expression) &&
@@ -236,7 +232,7 @@ function fileReadSpecifier(expression, constants) {
     expression.expression.text === 'fileURLToPath' &&
     expression.arguments.length === 1
   ) {
-    const nested = newUrlSpecifier(expression.arguments[0], constants);
+    const nested = assetUrlSpecifier(expression.arguments[0], textOf);
     if (nested !== undefined) {
       return { specifier: nested, relativeToImporter: true };
     }
@@ -326,43 +322,27 @@ function globTargets(importer, pattern) {
 }
 
 /**
- * The files an `import.meta.glob(patterns, options)` call can load, pushing a
- * reason to `unresolved` for what the walker cannot follow. A negative
- * pattern is ignored: it can only remove a file. The `base` option moves
- * every pattern and fails closed; the others (eager, import, query) change
- * how a match loads, not which files match.
+ * The files a glob `reference` (classifyModuleReference) can load, pushing a
+ * reason to `unresolved` for what the walker cannot follow: a glob not called
+ * directly, a computed pattern, and options the classifier cannot read
+ * (`glob.unsupported`: `base` moves every pattern, `exhaustive` changes which
+ * files match, a computed option could be either). A negative pattern is
+ * ignored: it can only remove a file. The options the classifier reads
+ * (eager, import, query) change how a match loads, not which files match.
  */
-function globCallTargets(importer, call, constants, unresolved) {
-  const [patternArgument, options] = call.arguments;
-  const patternExpressions = patternArgument === undefined
-    ? []
-    : ts.isArrayLiteralExpression(patternArgument)
-      ? patternArgument.elements
-      : [patternArgument];
-  const patterns = patternExpressions.map((expression) => literalText(expression, constants));
+function globCallTargets(importer, reference, textOf, unresolved) {
+  if (reference.glob.unsupported?.kind === 'not-called') {
+    unresolved.push(unsupportedGlobReason(reference.glob.unsupported));
+    return [];
+  }
+  const patterns = reference.specifiers.map(textOf);
   if (patterns.length === 0 || patterns.some((pattern) => pattern === undefined)) {
     unresolved.push('<computed import.meta.glob>');
     return [];
   }
-  if (options !== undefined) {
-    if (!ts.isObjectLiteralExpression(options)) {
-      unresolved.push('<computed import.meta.glob options>');
-      return [];
-    }
-    for (const property of options.properties) {
-      const name = ts.isPropertyAssignment(property) &&
-        (ts.isIdentifier(property.name) || ts.isStringLiteralLike(property.name))
-        ? property.name.text
-        : undefined;
-      if (name === undefined) {
-        unresolved.push('<computed import.meta.glob options>');
-        return [];
-      }
-      if (name === 'base') {
-        unresolved.push('<unsupported import.meta.glob option base>');
-        return [];
-      }
-    }
+  if (!reference.glob.supported) {
+    unresolved.push(unsupportedGlobReason(reference.glob.unsupported));
+    return [];
   }
   const targets = [];
   for (const pattern of patterns) {
@@ -438,16 +418,26 @@ function followedCreateRequire(identifier) {
     call.parent.name.text === 'require';
 }
 
+const NO_CONSTANTS = new Map();
+
 function runtimeReferences(path, content) {
   const source = sourceFile(path, content);
-  const constants = constantStrings(source);
+  // Module-scope string constants are read only for a file that names a
+  // specifier by identifier, as the guard reads them (buildModuleGraph).
+  let constants;
+  const textOf = (expression) => specifierText(
+    expression,
+    expression !== undefined && ts.isIdentifier(expression)
+      ? (constants ??= moduleStringConstants(source))
+      : NO_CONSTANTS,
+  );
   const fsReaders = fsBindings(source);
   const specifiers = [];
   const rootRelativeResources = [];
   const globbedPaths = [];
   const unresolved = [];
   const add = (expression, label) => {
-    const specifier = literalText(expression, constants);
+    const specifier = textOf(expression);
     if (specifier === undefined) unresolved.push(label);
     else {
       specifiers.push(specifier);
@@ -459,30 +449,16 @@ function runtimeReferences(path, content) {
   };
 
   const visit = (node) => {
-    if (ts.isImportDeclaration(node)) {
-      if (loadsModuleAtRuntime(node)) add(node.moduleSpecifier, '<non-literal import>');
-    } else if (ts.isExportDeclaration(node)) {
-      if (loadsModuleAtRuntime(node)) add(node.moduleSpecifier, '<non-literal export>');
-    } else if (
-      ts.isImportEqualsDeclaration(node) &&
-      ts.isExternalModuleReference(node.moduleReference)
-    ) {
-      // `import x = require('...')`, a require in a CommonJS TypeScript module.
-      if (!node.isTypeOnly) add(node.moduleReference.expression, '<computed import = require>');
-    } else if (
-      ts.isCallExpression(node) &&
-      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
-      node.arguments.length > 0
-    ) {
-      // A second argument holds import attributes; the first names the file.
-      add(node.arguments[0], '<computed dynamic import>');
-    } else if (
-      ts.isCallExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      node.expression.text === 'require' &&
-      node.arguments.length === 1
-    ) {
-      add(node.arguments[0], '<computed require>');
+    const reference = classifyModuleReference(node);
+    if (reference !== undefined) {
+      if (reference.syntax === 'glob') {
+        globbedPaths.push(...globCallTargets(path, reference, textOf, unresolved));
+      } else if (reference.evaluation !== EVALUATION.ERASED) {
+        // Every other reference names its target in its first specifier (an
+        // import()'s options, a second argument, are not a file). A type-only
+        // one (`import type`, `export type ... from`) loads nothing.
+        add(reference.specifiers[0], COMPUTED_REFERENCE[reference.syntax]);
+      }
     } else if (
       ts.isCallExpression(node) &&
       ts.isPropertyAccessExpression(node.expression) &&
@@ -500,28 +476,13 @@ function runtimeReferences(path, content) {
       node.arguments.length > 0
     ) {
       add(node.arguments[0], `<computed vi.${node.expression.name.text}>`);
-    } else if (importMetaProperty(node, 'glob')) {
-      // Vite expands only a direct call; any other use hides what it loads.
-      if (ts.isCallExpression(node.parent) && node.parent.expression === node) {
-        globbedPaths.push(...globCallTargets(path, node.parent, constants, unresolved));
-      } else {
-        unresolved.push('<import.meta.glob not called directly>');
-      }
-    } else if (
-      ts.isNewExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      node.expression.text === 'URL' &&
-      node.arguments?.length === 2 &&
-      importMetaUrl(node.arguments[1])
-    ) {
-      add(node.arguments[0], '<computed import.meta.url URL>');
     } else if (
       ts.isCallExpression(node) &&
       ts.isIdentifier(node.expression) &&
       fsReaders.has(node.expression.text) &&
       node.arguments.length > 0
     ) {
-      const input = fileReadSpecifier(node.arguments[0], constants);
+      const input = fileReadSpecifier(node.arguments[0], textOf);
       if (input === undefined) {
         unresolved.push(`<computed filesystem input via ${node.expression.text}>`);
       } else if (input.relativeToImporter) {

@@ -30,17 +30,21 @@
  * a runtime edge that disagree is exactly that bug.
  *
  * Who classifies through this module: the import-boundary guard
- * (scripts/check-import-boundaries.mjs) and the import censuses. The verdict
- * cache (scripts/test-affected.mjs) still has its own copy: RECORDER-A fixed
- * its two holes on its own branch with the semantics above, and whichever of
- * the two units lands second switches it to `classifyModuleReference` (D919).
- * The switch is mechanical: a declaration loads its module unless its
+ * (scripts/check-import-boundaries.mjs), the verdict cache's closure walker
+ * (scripts/test-affected.mjs, since landing batch 1, D919/D932) and the import
+ * censuses. For both consumers a reference loads its module unless its
  * `evaluation` is `erased`; `specifiers` are the expressions naming the
  * target (an `import()`'s first argument, a glob's patterns), which
  * `specifierText` reads: a string literal, or a module-scope string constant
- * (`moduleStringConstants`), as the verdict cache has always read them. What
- * the verdict cache tracks beyond module references (vi.mock paths, file
- * reads, environment variables) stays its own.
+ * (`moduleStringConstants`) whose name nothing else in the file declares; a
+ * glob this module cannot read carries `glob.unsupported`, and both fail
+ * closed on it. What each consumer does with a reference stays its own: the
+ * guard resolves it as Vite does (resolveModuleSpecifier, expandGlob) to walk
+ * its rules; the verdict cache resolves it against the file system and fails
+ * closed on what a stored verdict could not see change (a symbolic link, a
+ * glob base outside its module inventory, a built-in that runs code where
+ * its recorder records nothing), and also tracks inputs that are not module
+ * references (vi.mock paths, file reads, environment variables).
  *
  * One caveat: a file that no tsconfig project includes (drizzle.config.ts,
  * vitest.stryker.config.ts, docs/) is transformed without
@@ -108,30 +112,44 @@ function propertyName(name) {
 }
 
 /**
+ * A glob call this module cannot read, and why (`unsupported`); a consumer
+ * fails closed on it. Its evaluation is taken as static, the reading that
+ * loads the most. The reasons are a closed set:
+ * - `not-called`: `import.meta.glob` used other than as a direct callee;
+ * - `computed-options`: options that are not an object literal, or a
+ *   property that is not `name: value` with a literal name (a spread, a
+ *   shorthand, a method, a computed name);
+ * - `option`: an option this module does not read (`base` moves every
+ *   pattern; `exhaustive` changes which files match);
+ * - `computed-option`: `eager` that is not `true` or `false`, or `query` that
+ *   is not a string literal.
+ */
+function unsupportedGlob(unsupported) {
+  return { supported: false, eager: true, query: undefined, unsupported };
+}
+
+/**
  * Vite's `import.meta.glob` options, read only when every one is a literal
- * this file understands. Anything else (a spread, `base`, a computed `eager`)
- * makes the call unsupported, and a consumer must fail closed on it; its
- * evaluation is then taken as static, the reading that loads the most.
+ * this file understands (`eager`, `query`, `import`); anything else is
+ * unsupported (unsupportedGlob), reporting the first property it cannot read.
  */
 function globOptions(argument) {
   if (argument === undefined) return { supported: true, eager: false, query: undefined };
-  if (!ts.isObjectLiteralExpression(argument)) return { supported: false, eager: true, query: undefined };
+  if (!ts.isObjectLiteralExpression(argument)) return unsupportedGlob({ kind: 'computed-options' });
   let eager = false;
   let query;
   for (const property of argument.properties) {
-    if (!ts.isPropertyAssignment(property)) return { supported: false, eager: true, query: undefined };
-    const name = propertyName(property.name);
+    const name = ts.isPropertyAssignment(property) ? propertyName(property.name) : undefined;
+    if (name === undefined) return unsupportedGlob({ kind: 'computed-options' });
     if (name === 'eager') {
       if (property.initializer.kind === ts.SyntaxKind.TrueKeyword) eager = true;
       else if (property.initializer.kind === ts.SyntaxKind.FalseKeyword) eager = false;
-      else return { supported: false, eager: true, query: undefined };
+      else return unsupportedGlob({ kind: 'computed-option', name });
     } else if (name === 'query') {
-      if (!ts.isStringLiteralLike(property.initializer)) {
-        return { supported: false, eager: true, query: undefined };
-      }
+      if (!ts.isStringLiteralLike(property.initializer)) return unsupportedGlob({ kind: 'computed-option', name });
       query = property.initializer.text.replace(/^\?/u, '');
     } else if (name !== 'import') {
-      return { supported: false, eager: true, query: undefined };
+      return unsupportedGlob({ kind: 'option', name });
     }
   }
   return { supported: true, eager, query };
@@ -150,9 +168,10 @@ function namedBindingsAreAllInlineTypes(elements) {
  * - `specifiers`: the expressions naming the target (a glob's patterns);
  * - `inlineTypeOnly`: an import or re-export that is kept only for its side
  *   effect because every binding is an inline `type` (guard rule R1);
- * - `glob`: for a glob, `{ supported, eager, query }`; `import.meta.glob`
+ * - `glob`: for a glob, `{ supported, eager, query }`, plus `unsupported`
+ *   (why, unsupportedGlob) when `supported` is false; `import.meta.glob`
  *   used other than as a direct callee is a glob with no patterns and
- *   `supported: false`.
+ *   `unsupported: { kind: 'not-called' }`.
  */
 export function classifyModuleReference(node) {
   if (ts.isImportDeclaration(node)) {
@@ -194,7 +213,7 @@ export function classifyModuleReference(node) {
       evaluation: EVALUATION.STATIC,
       specifiers: [],
       inlineTypeOnly: false,
-      glob: { supported: false, eager: true, query: undefined },
+      glob: unsupportedGlob({ kind: 'not-called' }),
     };
   }
   if (!ts.isCallExpression(node) && !ts.isNewExpression(node)) return undefined;
