@@ -17,6 +17,7 @@ import subclassesText from '../../../src/rules/generated/srd-subclasses.ts?raw';
 import unarmoredDefenseText from '../../../src/rules/generated/unarmored-defense-srd.ts?raw';
 import weaponsText from '../../../src/rules/generated/weapons-srd.ts?raw';
 import coverageSourceText from '../../../src/simulation/generated/coverage-source.ts?raw';
+import ruleIndexText from '../../../src/rules/srd/generated/rule-index.ts?raw';
 import speciesSrdTablesText from '../../../src/rules/generated/species-srd-tables.ts?raw';
 import { BUNDLED_SRD_ABILITY_SCORE_GENERATION } from '../../../src/rules/generated/ability-score-generation-srd';
 import { BUNDLED_SRD_ARMOR_TEMPLATES } from '../../../src/rules/generated/armor-srd';
@@ -74,7 +75,8 @@ const COMMITTED: Readonly<Record<string, string>> = {
   'src/rules/generated/srd-subclasses.ts': subclassesText,
   'src/rules/generated/unarmored-defense-srd.ts': unarmoredDefenseText,
   'src/rules/generated/weapons-srd.ts': weaponsText,
-  // Landing batch 2: checked by its own drift test; here for the source pin.
+  // Landing batch 2: checked by their own drift tests; here for the source pins.
+  'src/rules/srd/generated/rule-index.ts': ruleIndexText,
   'src/rules/generated/species-srd-tables.ts': speciesSrdTablesText,
 };
 
@@ -142,10 +144,11 @@ describe('every source of every SRD artifact is pinned by its whole-text sha256'
     artifact.sources.map((source) => ({ artifact, path: artifact.path, source })),
   );
 
-  it('covers every source of every artifact, 37 pairs', () => {
-    // 36 for the eighteen runtime catalogs, + 1 for the species tables (the
-    // species extract).
-    expect(pairs).toHaveLength(37);
+  it('covers every source of every artifact, 42 pairs', () => {
+    // 36 for the eighteen runtime catalogs, + 5 for the rule index (the full
+    // SRD, the spell descriptions, the weapons and armour tables, the
+    // subclasses extract), + 1 for the species tables (the species extract).
+    expect(pairs).toHaveLength(42);
     for (const { source } of pairs) {
       expect(SRD_CORPUS_TEXTS[source], source).toBeDefined();
     }

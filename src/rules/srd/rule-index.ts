@@ -5,7 +5,7 @@ import type { SrdRuleKind } from './rule-index-types';
 /**
  * THE IDENTITY OF EVERY SRD 5.2.1 RULE (owner D918, synthesis §5 condition 1).
  *
- * `SRD_RULE_INDEX` is generated from the SRD text (`npm run srd:rule-index`,
+ * `SRD_RULE_INDEX` is generated from the SRD text (`npm run srd:artifacts`,
  * scripts/srd/rule-index.ts) and carried `as const`, so `SrdRuleId` is the
  * closed union of its keys: a misspelt id, or an id the SRD does not print,
  * fails to compile. `RULE_STATUS` (./rule-status.ts) is keyed by it and

@@ -12,16 +12,16 @@ import { srdReadingOrder, type StreamRow } from './srd-columns.ts';
  * Owner D918 made the synthesis §5 "represented" definition binding. Its first
  * condition is identity: every rule has an id in a generated closed union
  * (`SrdRuleId`) together with where it is printed (`SrdSpan`). This module
- * DERIVES that list from the committed SRD text; `npm run srd:rule-index`
- * (scripts/generate-srd-rule-index.ts) writes it to
- * `src/rules/srd/generated/rule-index.ts`, and the drift test
+ * DERIVES that list from the committed SRD text. It is one entry of the SRD
+ * artifact table (`scripts/srd-artifacts.ts`), so the one SRD generator
+ * (`npm run srd:artifacts`) writes it to `src/rules/srd/generated/rule-index.ts`
+ * with a header pinning every source by sha256, and the drift test
  * (tests/unit/rules/srd-rule-index-generation.test.ts) re-derives it and fails
  * on any byte difference. It is never edited by hand.
  *
- * It follows the SRD-BUILDTIME pattern (one generator command, a committed
- * typed TS module, a byte drift test) with the format that pattern's review
- * asked for: the data is `as const satisfies`, so every id is a literal the
- * compiler carries and `SrdRuleId` is `keyof typeof SRD_RULE_INDEX`.
+ * The data is `as const satisfies`, so every id is a literal the compiler
+ * carries and `SrdRuleId` is `keyof typeof SRD_RULE_INDEX`; like every SRD
+ * artifact it is frozen where it is defined.
  *
  * WHAT A UNIT IS is stated once, on `SRD_RULE_KINDS` in
  * `src/rules/srd/rule-index-types.ts`. How each kind is found:
@@ -62,16 +62,17 @@ import { srdReadingOrder, type StreamRow } from './srd-columns.ts';
  * throws, because a short index would silently leave rules unidentified.
  */
 
-export const SRD_RULE_INDEX_SOURCES = {
+/**
+ * The corpora the derivation reads. The artifact table declares the same five
+ * as the entry's sources, and its composer refuses a read of any other.
+ */
+const SRD_RULE_INDEX_SOURCES = {
   fullSrd: 'docs/srd/full/srd-5.2.1.txt',
   spellDescriptions: 'docs/srd/source/spell-descriptions.txt',
   weaponsTable: 'docs/srd/source/weapons-table.txt',
   armorTable: 'docs/srd/source/armor-table.txt',
   subclasses: 'docs/srd/source/subclasses.txt',
 } as const;
-
-export const SRD_RULE_INDEX_PATH = 'src/rules/srd/generated/rule-index.ts';
-export const SRD_RULE_INDEX_DRIFT_TEST = 'tests/unit/rules/srd-rule-index-generation.test.ts';
 
 /** Returns a corpus's text by its repository-relative path. */
 export type SrdCorpusReader = (path: string) => string;
@@ -1168,67 +1169,12 @@ export function deriveSrdRuleIndex(read: SrdCorpusReader): readonly SrdRuleIndex
     .map(({ entry }) => entry);
 }
 
-const SRD_ATTRIBUTION = [
-  'This work includes material from the System Reference Document 5.2.1',
-  '("SRD 5.2.1") by Wizards of the Coast LLC, available at',
-  'https://www.dndbeyond.com/srd. The SRD 5.2.1 is licensed under the Creative',
-  'Commons Attribution 4.0 International License, available at',
-  'https://creativecommons.org/licenses/by/4.0/legalcode.',
-] as const;
-
-/** The generated module's complete text, derived from the corpora `read` returns. */
-export function composeSrdRuleIndexModule(read: SrdCorpusReader): string {
-  const declared = new Set<string>(Object.values(SRD_RULE_INDEX_SOURCES));
-  const rows = deriveSrdRuleIndex((path) => {
-    if (!declared.has(path)) {
-      throw new SrdRuleIndexError(`The rule index read ${path}, which is not one of its declared sources.`);
-    }
-    return read(path);
-  });
-  const body = rows.map((row) => {
-    const fields = [
-      `kind: ${JSON.stringify(row.kind)}`,
-      `name: ${JSON.stringify(row.name)}`,
-      `spans: [${row.spans.map((span) => JSON.stringify(span)).join(', ')}]`,
-      ...(row.parent === undefined ? [] : [`parent: ${JSON.stringify(row.parent)}`]),
-    ];
-    return `  ${JSON.stringify(row.id)}: { ${fields.join(', ')} },`;
-  });
-  return [
-    '// GENERATED FILE — DO NOT EDIT BY HAND.',
-    '// Source of truth, read by scripts/srd/rule-index.ts:',
-    ...Object.values(SRD_RULE_INDEX_SOURCES).map((source) => `//   ${source}`),
-    '// Regenerate with `npm run srd:rule-index`.',
-    `// ${SRD_RULE_INDEX_DRIFT_TEST} fails if it drifts.`,
-    '/**',
-    ...SRD_ATTRIBUTION.map((line) => ` * ${line}`),
-    ' */',
-    "import type { SrdRuleIndexEntry } from '../rule-index-types';",
-    '',
-    `/** ${String(rows.length)} SRD 5.2.1 rule units, keyed by \`SrdRuleId\`. */`,
-    'export const SRD_RULE_INDEX = {',
-    ...body,
-    '} as const satisfies Readonly<Record<string, SrdRuleIndexEntry>>;',
-    '',
-  ].join('\n');
-}
-
 /**
- * The drift check: the committed module must be byte-for-byte what the SRD
- * text derives now.
+ * The artifact's value: every rule unit keyed by its id, in index order, each
+ * entry exactly as derived (kind, name, spans, and a parent where it has one).
  */
-export function assertSrdRuleIndexFresh(read: SrdCorpusReader, committed: string): void {
-  const composed = composeSrdRuleIndexModule(read);
-  if (composed === committed) {
-    return;
-  }
-  const composedLines = composed.split('\n');
-  const committedLines = committed.split('\n');
-  const line = composedLines.findIndex((text, index) => text !== committedLines[index]);
-  const at = line < 0 ? committedLines.length : line;
-  throw new SrdRuleIndexError(
-    `${SRD_RULE_INDEX_PATH} is stale at line ${String(at + 1)}: the SRD text derives ` +
-      `${JSON.stringify(composedLines[at] ?? '<end of file>')}, the committed file has ` +
-      `${JSON.stringify(committedLines[at] ?? '<end of file>')}. Run \`npm run srd:rule-index\`; never edit it by hand.`,
-  );
+export function deriveSrdRuleIndexArtifact(
+  read: SrdCorpusReader,
+): Readonly<Record<string, SrdRuleIndexEntry>> {
+  return Object.fromEntries(deriveSrdRuleIndex(read).map(({ id, ...entry }) => [id, entry]));
 }

@@ -274,7 +274,7 @@ describe('the dist guard FAILS when a raw SRD corpus ships', () => {
   it('carries one ASCII marker per SRD corpus file, found once in it and in no other corpus or generated artifact', () => {
     expect(Object.keys(markers).sort()).toEqual(Object.keys(SRD_CORPUS_TEXTS).sort());
     expect(Object.keys(markers)).toHaveLength(34);
-    // Every generated module ships, the eighteen SRD artifacts among them.
+    // Every generated module is scanned for the markers, every SRD artifact among them.
     for (const artifact of SRD_ARTIFACTS) {
       expect(Object.keys(generated), artifact.path).toContain(`../../../${artifact.path}`);
     }

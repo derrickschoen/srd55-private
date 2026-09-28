@@ -41,6 +41,7 @@ import {
 import {
   deriveBundledCoverageSource,
 } from '../src/simulation/coverage-source';
+import { deriveSrdRuleIndexArtifact } from './srd/rule-index';
 
 /**
  * THE SRD TEXT IS READ AT BUILD TIME, AND ONLY HERE (plus tests).
@@ -497,6 +498,27 @@ export const SRD_ARTIFACTS: readonly SrdArtifact[] = [
       read(SRD_CORPUS_PATHS.weaponsTable),
       read(SRD_CORPUS_PATHS.weaponMasteryProgression),
     ),
+  },
+  // RULE-INDEX (D918): every SRD 5.2.1 rule unit's id and spans. It joined this
+  // table at landing batch 2; it had its own generator and header before.
+  {
+    path: 'src/rules/srd/generated/rule-index.ts',
+    sources: [
+      SRD_CORPUS_PATHS.fullSrd,
+      SRD_CORPUS_PATHS.spellDescriptions,
+      SRD_CORPUS_PATHS.weaponsTable,
+      SRD_CORPUS_PATHS.armorTable,
+      SRD_CORPUS_PATHS.subclasses,
+    ],
+    reader: 'scripts/srd/rule-index.ts',
+    driftTest: 'tests/unit/rules/srd-rule-index-generation.test.ts',
+    exportName: 'SRD_RULE_INDEX',
+    type: {
+      satisfies: 'Readonly<Record<string, SrdRuleIndexEntry>>',
+      names: ['SrdRuleIndexEntry'],
+      module: '../rule-index-types',
+    },
+    derive: (read) => deriveSrdRuleIndexArtifact(read),
   },
   // PC-EXPORT-TRUTH (D918): the Draconic Ancestors table and each species'
   // standing Darkvision. It joined this table at landing batch 2; it had its
