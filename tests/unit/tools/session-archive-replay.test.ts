@@ -217,8 +217,14 @@ describe('FOOTPRINT fix1: an archive replays offline at the commit it was record
     // recomputed: the app refuses to load it, so the tool does too.
     const store = new MemoryBrowserSessionStore();
     const [root] = store.revisions(importSavedSession(store, inputs.fixtures.readText(OVERHANG)));
-    const { checksum: _checksum, ...body } = structuredClone(root!) as unknown as Record<string, any>;
-    body.transition.archive.recordedEngine = claimed.recordedEngine;
+    const transition = root?.transition;
+    if (root === undefined || transition?.kind !== 'session_migrated') throw new Error('Expected a session_migrated root.');
+    // The deliberate edit, checked against the revision's own shape: only the archive's recordedEngine differs.
+    const { checksum: _checksum, ...unedited } = root;
+    const body = {
+      ...unedited,
+      transition: { ...transition, archive: { ...transition.archive, recordedEngine: claimed.recordedEngine } },
+    } satisfies Omit<SessionRevision, 'checksum'>;
     const edited = revisionBundle([{ ...body, checksum: sha256(canonicalJson(body)) }]);
     const refused = thrown(() => importSavedSession(new MemoryBrowserSessionStore(), edited));
     expect(refused).toBeInstanceOf(SessionHistoryArchiveMetadataError);
