@@ -68,10 +68,19 @@ interface BrowserSaveMetadata {
  *     is the sha256 of that last archived revision's stored text. The point's state is that archived prefix
  *     migrated as a save of its own: repaired and archived when v13 cannot express it, else the version bump
  *     (D919), never a re-reduction.
+ *   own_save: a legacy localStorage autosave whose migrated stream is not the first revisions of its session's
+ *     (FOOTPRINT fix2, codex r2 P1): the two migrated differently (one by archive and the other by the version
+ *     bump, or to two archive roots), so it cannot point into the session and must not write over it. `text` is the
+ *     autosave's save text, byte for byte; the point's state is that save migrated as a save of its own (D919).
  */
 export type AutosaveRestorePoint =
   | { readonly kind: 'live'; readonly headChecksum: string | null }
-  | { readonly kind: 'archived'; readonly archivedRevisionSha256: string };
+  | { readonly kind: 'archived'; readonly archivedRevisionSha256: string }
+  | { readonly kind: 'own_save'; readonly text: string };
+
+type LiveRestorePoint = Extract<AutosaveRestorePoint, { readonly kind: 'live' }>;
+type ArchivedRestorePoint = Extract<AutosaveRestorePoint, { readonly kind: 'archived' }>;
+type OwnSaveRestorePoint = Extract<AutosaveRestorePoint, { readonly kind: 'own_save' }>;
 
 /**
  * A restore point whose revision the session no longer holds: a restore replaced the live stream it pointed into,
@@ -95,9 +104,7 @@ interface StoredAutosaveSnapshot extends DecodedSavedSessionFingerprint {
   readonly restorePoint: AutosaveRestorePoint;
 }
 
-type ArchivedAutosaveSnapshot = StoredAutosaveSnapshot & {
-  readonly restorePoint: Extract<AutosaveRestorePoint, { readonly kind: 'archived' }>;
-};
+type ArchivedAutosaveSnapshot = StoredAutosaveSnapshot & { readonly restorePoint: ArchivedRestorePoint };
 
 function decodedRestorePoint(value: unknown): AutosaveRestorePoint {
   // A snapshot stored before FOOTPRINT fix1 has no restore point field: every snapshot then was a live prefix,
@@ -108,6 +115,9 @@ function decodedRestorePoint(value: unknown): AutosaveRestorePoint {
   }
   if (isRecord(value) && value.kind === 'archived' && typeof value.archivedRevisionSha256 === 'string') {
     return { kind: 'archived', archivedRevisionSha256: value.archivedRevisionSha256 };
+  }
+  if (isRecord(value) && value.kind === 'own_save' && typeof value.text === 'string') {
+    return { kind: 'own_save', text: value.text };
   }
   throw new TypeError('Stored browser autosave restore point is malformed.');
 }
@@ -126,6 +136,12 @@ function checksumAt(revisions: readonly SessionRevision[], count: number): strin
   const head = revisions[count - 1];
   if (head === undefined) throw new Error('A restore point has no revision to bind to.');
   return head.checksum;
+}
+
+/** Whether `prefix` is the first revisions of `stream`, revision for revision (every checksum equal). */
+function isPrefixOf(prefix: readonly SessionRevision[], stream: readonly SessionRevision[]): boolean {
+  return prefix.length > 0 && prefix.length <= stream.length &&
+    prefix.every((revision, index) => revision.checksum === stream[index]?.checksum);
 }
 
 /** A store holding exactly `revisions`, for an export. */
@@ -364,8 +380,9 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
       options.recordingEngine ?? RUNNING_ENGINE_BUILD,
     );
     try {
-      await store.#migrateLegacy();
+      // The stored sessions first: a legacy autosave is placed against the session it belongs to (#migrateLegacy).
       await store.#preload();
+      if (await store.#migrateLegacy()) await store.#preload();
       const removed = store.#pruneAutosaves();
       if (removed.length > 0) {
         const transaction = database.transaction(snapshotStoreName(), 'readwrite');
@@ -523,11 +540,25 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
     if (snapshot === undefined || snapshot.sessionId !== sessionId) {
       throw new Error('Browser autosave does not exist.');
     }
-    if (isArchivedSnapshot(snapshot)) {
-      await this.#restoreArchived(snapshot);
-      return;
+    const point = snapshot.restorePoint;
+    switch (point.kind) {
+      case 'archived':
+        await this.#restoreArchived(snapshot, point);
+        return;
+      case 'own_save':
+        // Its stream is its own: no other point of the session is re-pointed by it.
+        await this.#replaceStream(snapshot, this.#ownSavePoint(snapshot, point), []);
+        return;
+      case 'live':
+        await this.#restoreLive(snapshot, point);
+        return;
     }
-    this.#requireLivePoint(snapshot);
+  }
+
+  /** Restores a live point: the live revisions after it are deleted. */
+  async #restoreLive(snapshot: StoredAutosaveSnapshot, point: LiveRestorePoint): Promise<void> {
+    const sessionId = snapshot.sessionId;
+    this.#requireLivePoint(snapshot, point);
     const currentCount = this.#memory.revisions(sessionId).length;
     const metadata: BrowserSaveMetadata = {
       sessionId,
@@ -585,16 +616,21 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
     if (snapshot === undefined || snapshot.sessionId !== sessionId) {
       throw new Error('Browser autosave does not exist.');
     }
-    if (isArchivedSnapshot(snapshot)) return exportSavedSession(storeOf(this.#archivedPoint(snapshot)), sessionId);
-    this.#requireLivePoint(snapshot);
-    return this.#exportPrefix(sessionId, snapshot.revisionCount);
+    const point = snapshot.restorePoint;
+    switch (point.kind) {
+      case 'archived': return exportSavedSession(storeOf(this.#archivedPoint(snapshot, point)), sessionId);
+      case 'own_save': return exportSavedSession(storeOf(this.#ownSavePoint(snapshot, point)), sessionId);
+      case 'live':
+        this.#requireLivePoint(snapshot, point);
+        return this.#exportPrefix(sessionId, snapshot.revisionCount);
+    }
   }
 
   /** A live point resolves only while live revision `revisionCount` is the one it was bound to. */
-  #requireLivePoint(snapshot: StoredAutosaveSnapshot): void {
-    if (snapshot.restorePoint.kind !== 'live' || snapshot.restorePoint.headChecksum === null) return;
+  #requireLivePoint(snapshot: StoredAutosaveSnapshot, point: LiveRestorePoint): void {
+    if (point.headChecksum === null) return;
     const head = this.#memory.revisions(snapshot.sessionId)[snapshot.revisionCount - 1];
-    if (head?.checksum !== snapshot.restorePoint.headChecksum) throw new RestorePointUnavailableError(snapshot.storageId);
+    if (head?.checksum !== point.headChecksum) throw new RestorePointUnavailableError(snapshot.storageId);
   }
 
   /**
@@ -602,20 +638,32 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
    * as stored, migrated as a save of their own. Throws RestorePointUnavailableError when the live root
    * no longer archives that exact revision.
    */
-  #archivedPoint(snapshot: ArchivedAutosaveSnapshot): readonly SessionRevision[] {
-    const archived = this.#archivedRevisions(snapshot);
+  #archivedPoint(snapshot: StoredAutosaveSnapshot, point: ArchivedRestorePoint): readonly SessionRevision[] {
+    const archived = this.#archivedRevisions(snapshot, point);
     if (archived === null) throw new RestorePointUnavailableError(snapshot.storageId);
     return migrateStoredSessionRevisions(archived, this.recordingEngine);
   }
 
   /** The stored texts of an archived restore point's prefix, or null when the live root does not archive it. */
-  #archivedRevisions(snapshot: ArchivedAutosaveSnapshot): readonly string[] | null {
+  #archivedRevisions(snapshot: StoredAutosaveSnapshot, point: ArchivedRestorePoint): readonly string[] | null {
     const root = this.#memory.revisions(snapshot.sessionId)[0];
     if (root?.transition.kind !== 'session_migrated' || root.transition.archive.source.kind !== 'stored_stream') return null;
     const prefix = root.transition.archive.source.revisions.slice(0, snapshot.revisionCount);
-    return prefix.length === snapshot.revisionCount && prefix.at(-1)?.sha256 === snapshot.restorePoint.archivedRevisionSha256
+    return prefix.length === snapshot.revisionCount && prefix.at(-1)?.sha256 === point.archivedRevisionSha256
       ? prefix.map((revision) => revision.text)
       : null;
+  }
+
+  /**
+   * The v13 stream of an own-save point (FOOTPRINT fix2): its save text migrated as a save of its own (D919), by
+   * the loader that migrates any save: repaired and archived when v13 cannot express it, else the version bump.
+   */
+  #ownSavePoint(snapshot: StoredAutosaveSnapshot, point: OwnSaveRestorePoint): readonly SessionRevision[] {
+    const own = new MemoryBrowserSessionStore(this.recordingEngine);
+    if (importSavedSession(own, point.text) !== snapshot.sessionId) {
+      throw new Error('Browser autosave save belongs to another session.');
+    }
+    return own.revisions(snapshot.sessionId);
   }
 
   /**
@@ -625,20 +673,33 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
    * new root's archive, which keeps the same stored texts. Points into the replaced live stream, and archived
    * points past this one, refer to history the restore discarded: they no longer resolve.
    */
-  async #restoreArchived(snapshot: ArchivedAutosaveSnapshot): Promise<void> {
+  async #restoreArchived(snapshot: StoredAutosaveSnapshot, point: ArchivedRestorePoint): Promise<void> {
     const sessionId = snapshot.sessionId;
-    const restored = this.#archivedPoint(snapshot);
-    const currentCount = this.#memory.revisions(sessionId).length;
+    const restored = this.#archivedPoint(snapshot, point);
     const repointed: StoredAutosaveSnapshot[] = restored[0]?.transition.kind === 'session_migrated'
       ? []
       : [...this.#snapshots.values()]
           .filter((candidate): candidate is ArchivedAutosaveSnapshot => candidate.sessionId === sessionId &&
             isArchivedSnapshot(candidate) && candidate.revisionCount <= restored.length &&
-            this.#archivedRevisions(candidate) !== null)
+            this.#archivedRevisions(candidate, candidate.restorePoint) !== null)
           .map((candidate) => ({
             ...candidate,
             restorePoint: { kind: 'live', headChecksum: checksumAt(restored, candidate.revisionCount) },
           }));
+    await this.#replaceStream(snapshot, restored, repointed);
+  }
+
+  /**
+   * The session's whole live stream replaced by `restored` (a restore point's own stream), in one transaction with
+   * the session's metadata and the re-pointed autosaves.
+   */
+  async #replaceStream(
+    snapshot: StoredAutosaveSnapshot,
+    restored: readonly SessionRevision[],
+    repointed: readonly StoredAutosaveSnapshot[],
+  ): Promise<void> {
+    const sessionId = snapshot.sessionId;
+    const currentCount = this.#memory.revisions(sessionId).length;
     const metadata: BrowserSaveMetadata = {
       sessionId,
       name: sessionId,
@@ -831,7 +892,8 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
     const repointed: StoredAutosaveSnapshot[] = [];
     for (const stored of (snapshots as unknown[]).map(storedAutosaveSnapshot)) {
       const texts = archivedStreams.get(stored.sessionId);
-      const snapshot = texts === undefined || isArchivedSnapshot(stored) ? stored : this.#pointedIntoArchive(stored, texts);
+      // Only a live point pointed into the stream that just migrated; an archived or own-save point holds its own.
+      const snapshot = texts === undefined || stored.restorePoint.kind !== 'live' ? stored : this.#pointedIntoArchive(stored, texts);
       if (snapshot !== stored) repointed.push(snapshot);
       this.#snapshots.set(snapshot.storageId, snapshot);
     }
@@ -877,9 +939,19 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
     };
   }
 
-  async #migrateLegacy(): Promise<void> {
+  /**
+   * Moves legacy localStorage saves into IndexedDB, removing each from localStorage once its IndexedDB copy is
+   * committed. True when any was moved (the caller preloads again). Runs after a preload, so the stream of a session
+   * already stored is known.
+   */
+  async #migrateLegacy(): Promise<boolean> {
     const keys = Array.from({ length: this.legacyStorage.length }, (_unused, index) => this.legacyStorage.key(index))
       .filter((key): key is string => key !== null);
+    let migrated = false;
+    // Each session's stored stream as this migration leaves it: the preloaded one, or the one written here.
+    const streams = new Map<EncounterSessionId, readonly SessionRevision[]>();
+    const streamOf = (sessionId: EncounterSessionId): readonly SessionRevision[] =>
+      streams.get(sessionId) ?? this.#memory.revisions(sessionId);
     for (const key of keys.filter((candidate) => candidate.startsWith(LEGACY_SESSION_PREFIX))) {
       const bytes = this.legacyStorage.getItem(key);
       if (bytes === null) continue;
@@ -911,19 +983,38 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
       }
       transaction.objectStore(sessionStoreName()).put(metadata, sessionId);
       await transactionComplete(transaction);
+      streams.set(sessionId, imported.revisions(sessionId));
+      migrated = true;
       this.legacyStorage.removeItem(key);
       this.legacyStorage.removeItem(`${LEGACY_METADATA_PREFIX}${sessionId}`);
       this.legacyStorage.removeItem(`${LEGACY_TRUNCATED_PREFIX}${sessionId}`);
     }
 
-    for (const key of keys.filter((candidate) => candidate.startsWith(legacyAutosavePrefix()))) {
+    // Legacy autosaves (FOOTPRINT fix2, codex r2 P1). An autosave never writes over a session's revisions: since
+    // D919 an autosave's save can migrate differently from its session's (one by archive and the other by the
+    // version bump, or to two archive roots), and writing it to the session's revision keys replaced the session's
+    // head. An autosave whose migrated stream is a prefix of its session's is a live point into it; any other keeps
+    // its own save text as an own_save point. Only a session with no stream takes an autosave's revisions: the
+    // longest autosave first, so the session is the longest history the autosaves hold (ties keep key order).
+    const autosaves = keys.filter((candidate) => candidate.startsWith(legacyAutosavePrefix())).flatMap((key) => {
       const raw = this.legacyStorage.getItem(key);
-      if (raw === null) continue;
+      if (raw === null) return [];
       const legacy = legacySnapshot(raw);
       if (legacy === null) throw new Error('Stored browser autosave is malformed.');
       const imported = new MemoryBrowserSessionStore(this.recordingEngine);
-      importSavedSession(imported, legacy.bytes);
+      if (importSavedSession(imported, legacy.bytes) !== legacy.sessionId) {
+        throw new Error('Stored browser autosave identity does not match its session.');
+      }
+      return [{ key, legacy, revisions: imported.revisions(legacy.sessionId) }];
+    }).sort((left, right) => right.revisions.length - left.revisions.length);
+    for (const { key, legacy, revisions } of autosaves) {
       const decoded = decodeSavedSessionFingerprint(legacy.bytes, this.recordingEngine);
+      const session = streamOf(legacy.sessionId);
+      const written = session.length === 0 ? revisions : [];
+      let restorePoint: AutosaveRestorePoint;
+      if (written.length > 0) restorePoint = { kind: 'live', headChecksum: checksumAt(written, written.length) };
+      else if (isPrefixOf(revisions, session)) restorePoint = { kind: 'live', headChecksum: checksumAt(session, revisions.length) };
+      else restorePoint = { kind: 'own_save', text: legacy.bytes };
       const snapshot: StoredAutosaveSnapshot = {
         ...decoded,
         storageId: legacy.storageId,
@@ -932,10 +1023,10 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
         name: legacy.name,
         updatedAt: legacy.updatedAt,
         retention: legacy.retention,
-        restorePoint: { kind: 'live', headChecksum: checksumAt(imported.revisions(legacy.sessionId), decoded.revisionCount) },
+        restorePoint,
       };
       const existingMetadata = await this.#readMetadata(legacy.sessionId);
-      const storedRevisions = await Promise.all(imported.revisions(legacy.sessionId).map(async (revision) => ({
+      const storedRevisions = await Promise.all(written.map(async (revision) => ({
         bytes: await encodedStoredRevision(revision),
         key: revisionKey(legacy.sessionId, revision.revision),
       })));
@@ -957,8 +1048,11 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
       }
       transaction.objectStore(snapshotStoreName()).put(snapshot, snapshot.storageId);
       await transactionComplete(transaction);
+      if (written.length > 0) streams.set(legacy.sessionId, written);
+      migrated = true;
       this.legacyStorage.removeItem(key);
     }
+    return migrated;
   }
 
   async #readMetadata(sessionId: EncounterSessionId): Promise<BrowserSaveMetadata | null> {

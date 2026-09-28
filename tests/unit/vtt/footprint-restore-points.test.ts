@@ -8,6 +8,7 @@ import { IndexedDbBrowserSessionStore, RestorePointUnavailableError } from '../.
 import {
   importSavedSession,
   MemoryBrowserSessionStore,
+  VTT_SESSION_MIGRATIONS,
   type SessionRevision,
 } from '../../../src/vtt/session-persistence';
 import { declareTestInputs } from '../../helpers/test-inputs';
@@ -265,7 +266,172 @@ describe('FOOTPRINT fix1: autosave restore points survive a migration by archive
   });
 });
 
-/** A minimal Storage for the IndexedDB store's legacy scan (none here). */
+/** A v12 app's revision-bundle save of `revisions`: canonical JSON, fingerprinted over the rest of the bundle. */
+function v12Save(revisions: readonly StoredRevision[]): string {
+  const body = { format: 'vtt-session-revisions', schemaVersion: 12, sessionId: revisions[0]!.sessionId, revisions };
+  return canonicalJson({ ...body, fingerprint: sha256(canonicalJson(body)) });
+}
+
+/** A v11 revision as the v12 app held it: migrated by the registered v11 -> v12 migration. */
+function asV12(revision: StoredRevision): StoredRevision {
+  const migration = VTT_SESSION_MIGRATIONS.find((candidate) => candidate.from === 11 && candidate.to === 12);
+  if (migration === undefined || revision.schemaVersion !== 11) throw new Error('Expected a v11 revision and the v11 -> v12 migration.');
+  const body = { format: 'vtt-session-revisions', schemaVersion: 11, sessionId: revision.sessionId, revisions: [revision] };
+  const migrated = migration.migrate({ ...body, fingerprint: sha256(canonicalJson(body)) }) as { readonly revisions: readonly StoredRevision[] };
+  return migrated.revisions[0]!;
+}
+
+/** Legacy localStorage as the pre-IndexedDB app left it: a session's save, its metadata, and autosave saves. */
+function legacyStorage(
+  sessionBytes: string,
+  sessionId: string,
+  autosaves: readonly { readonly storageId: string; readonly trigger: 'encounter_start' | 'round_boundary'; readonly bytes: string }[],
+): MemoryStorageLike {
+  const storage = new MemoryStorageLike();
+  storage.setItem(`srd55:vtt-session:${sessionId}`, sessionBytes);
+  storage.setItem(`srd55:vtt-session-metadata:${sessionId}`, JSON.stringify({
+    name: 'Legacy campaign', updatedAt: '2026-08-20T10:00:00.000Z', retention: { kind: 'named' },
+  }));
+  for (const autosave of autosaves) {
+    const pool = autosave.trigger === 'encounter_start' ? 'encounter_boundary' : 'per_round';
+    storage.setItem(`srd55:vtt-autosave:${autosave.storageId}`, JSON.stringify({
+      storageId: autosave.storageId, sessionId, trigger: autosave.trigger, pool, name: autosave.storageId,
+      updatedAt: '2026-08-20T09:00:00.000Z', bytes: autosave.bytes, retention: { kind: 'autosave', pool },
+    }));
+  }
+  return storage;
+}
+
+/** The autosave record the store keeps for `storageId`, read from IndexedDB directly. */
+async function storedSnapshot(indexedDb: IDBFactory, name: string, storageId: string): Promise<unknown> {
+  const database = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDb.open(name);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  const request = database.transaction('snapshots', 'readonly').objectStore('snapshots').get(storageId);
+  const value = await new Promise<unknown>((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  database.close();
+  return value;
+}
+
+/** The save text a migrated root archives. */
+function archivedSaveOf(root: SessionRevision | undefined): string {
+  if (root?.transition.kind !== 'session_migrated' || root.transition.archive.source.kind !== 'saved_session') {
+    throw new Error(`Expected a session_migrated root archiving a save, got ${String(root?.transition.kind)}.`);
+  }
+  return root.transition.archive.source.save.text;
+}
+
+describe('FOOTPRINT fix2: a legacy localStorage autosave never writes over its session', () => {
+  // codex r2 P1. Legacy localStorage held a session's save and each autosave's save, whole. The session migrates
+  // first; each autosave then wrote its migrated revisions to the SAME revision keys, harmless while an autosave's
+  // stream was a prefix of its session's. Since D919 an autosave can migrate differently from its session (one by
+  // archive, the other by the version bump, or to two archives), and its write replaced the session's head. Now an
+  // autosave writes no revision of a session that has one: a prefix of the session is a live point into it; any
+  // other keeps its own save text, byte for byte, as its restore point (its state: that save migrated on its own).
+
+  it('a session and an earlier autosave that migrate to two archive roots: the session keeps its head, the autosave its own save', async () => {
+    // The mixed history as the v12 app saved it: r1 (recorded under v11, migrated to v12 by the registered
+    // migration), r2 initiative, r3 the PC to (1,0). The session's save holds all three; the autosave taken at the
+    // encounter start holds r1. Each holds the Huge at (17,3) past the 19-column grid, so each migrates by archive:
+    // the session to r3's state (PC (1,0)), the autosave to r1's (PC (0,0)); the Huge repaired to (16,2) in both.
+    const stored = storedRevisions(MIXED);
+    const history = [asV12(stored[0]!), stored[1]!, stored[2]!];
+    const sessionId = history[0]!.sessionId as SessionRevision['sessionId'];
+    const sessionBytes = v12Save(history);
+    const autosaveBytes = v12Save(history.slice(0, 1));
+    const S1 = `encounter_boundary:${sessionId}:000000000001:encounter_start`;
+    const name = 'footprint-legacy-two-roots';
+    const indexedDb = new IDBFactory();
+    const storage = legacyStorage(sessionBytes, sessionId, [{ storageId: S1, trigger: 'encounter_start', bytes: autosaveBytes }]);
+    const expectBoth = (store: IndexedDbBrowserSessionStore): void => {
+      const session = store.revisions(sessionId);
+      expect(session).toHaveLength(1);
+      expect(archivedSaveOf(session[0])).toBe(sessionBytes);
+      expect(positionOf(session[0]!.encounterState, PC)).toEqual({ column: 1, row: 0 });
+      expect(positionOf(session[0]!.encounterState, HUGE)).toEqual({ column: 16, row: 2 });
+      const own = revisionsOf(exportOf(store, S1, sessionId));
+      expect(own).toHaveLength(1);
+      expect(archivedSaveOf(own[0])).toBe(autosaveBytes);
+      expect(positionOf(own[0]!.encounterState, PC)).toEqual({ column: 0, row: 0 });
+      expect(positionOf(own[0]!.encounterState, HUGE)).toEqual({ column: 16, row: 2 });
+    };
+    const store = await IndexedDbBrowserSessionStore.open(indexedDb, storage, { databaseName: name });
+    expectBoth(store);
+    expect(storage.length).toBe(0);
+    store.close();
+    expect(await storedSnapshot(indexedDb, name, S1)).toMatchObject({ restorePoint: { kind: 'own_save', text: autosaveBytes } });
+
+    const reopened = await openStore(indexedDb, name);
+    expectBoth(reopened);
+    // Restoring the autosave: the live stream becomes its own migrated save, durably.
+    await expect(reopened.restoreStored(S1, sessionId)).resolves.toBeUndefined();
+    expect(archivedSaveOf(reopened.revisions(sessionId)[0])).toBe(autosaveBytes);
+    reopened.close();
+    const restored = await openStore(indexedDb, name);
+    expect(restored.revisions(sessionId)).toHaveLength(1);
+    expect(archivedSaveOf(restored.revisions(sessionId)[0])).toBe(autosaveBytes);
+    expect(positionOf(restored.revisions(sessionId)[0]!.encounterState, PC)).toEqual({ column: 0, row: 0 });
+    restored.close();
+  });
+
+  it('a session migrated by archive and an autosave whose prefix migrates by the version bump: neither replaces the other', async () => {
+    // lr-squeezed as the v12 app exported it: r1 and r2 place whole bodies, r3 holds a v12 legendary-resistance
+    // checkpoint v13 cannot express. The session's save (the fixture's own bytes) migrates by archive to one root;
+    // the round-boundary autosave holds r1-r2 and migrates by the bump to two live v13 revisions.
+    const revisions = storedRevisions(LR_SQUEEZED);
+    const sessionId = revisions[0]!.sessionId as SessionRevision['sessionId'];
+    const sessionBytes = inputs.fixtures.readText(LR_SQUEEZED);
+    expect(v12Save(revisions)).toBe(sessionBytes);
+    const autosaveBytes = v12Save(revisions.slice(0, 2));
+    const S2 = `per_round:${sessionId}:000000000002:round_boundary`;
+    const name = 'footprint-legacy-bump-prefix';
+    const indexedDb = new IDBFactory();
+    const expectBoth = (store: IndexedDbBrowserSessionStore): void => {
+      const session = store.revisions(sessionId);
+      expect(session.map((revision) => revision.transition.kind)).toEqual(['session_migrated']);
+      expect(archivedSaveOf(session[0])).toBe(sessionBytes);
+      const own = revisionsOf(exportOf(store, S2, sessionId));
+      expect(own.map((revision) => [revision.schemaVersion, revision.transition.kind])).toEqual([[13, 'session_started'], [13, 'reducer_applied']]);
+      expect(canonicalJson(own[1]!.encounterState)).toBe(canonicalJson(revisions[1]!.encounterState));
+    };
+    const store = await IndexedDbBrowserSessionStore.open(indexedDb, legacyStorage(sessionBytes, sessionId, [
+      { storageId: S2, trigger: 'round_boundary', bytes: autosaveBytes },
+    ]), { databaseName: name });
+    expectBoth(store);
+    store.close();
+    expect(await storedSnapshot(indexedDb, name, S2)).toMatchObject({ restorePoint: { kind: 'own_save', text: autosaveBytes } });
+    const reopened = await openStore(indexedDb, name);
+    expectBoth(reopened);
+    await expect(reopened.restoreStored(S2, sessionId)).resolves.toBeUndefined();
+    expect(reopened.revisions(sessionId).map((revision) => revision.transition.kind)).toEqual(['session_started', 'reducer_applied']);
+    reopened.close();
+  });
+
+  it('an autosave whose stream is a prefix of its session\'s is a live point into it and keeps no save of its own', async () => {
+    // lr-squeezed r1-r2 as the session, r1 as the encounter-start autosave: both migrate by the bump, and the
+    // autosave's one revision is the session's first, checksum for checksum.
+    const revisions = storedRevisions(LR_SQUEEZED);
+    const sessionId = revisions[0]!.sessionId as SessionRevision['sessionId'];
+    const S1 = `encounter_boundary:${sessionId}:000000000001:encounter_start`;
+    const name = 'footprint-legacy-live-prefix';
+    const indexedDb = new IDBFactory();
+    const store = await IndexedDbBrowserSessionStore.open(indexedDb, legacyStorage(v12Save(revisions.slice(0, 2)), sessionId, [
+      { storageId: S1, trigger: 'encounter_start', bytes: v12Save(revisions.slice(0, 1)) },
+    ]), { databaseName: name });
+    const session = store.revisions(sessionId);
+    expect(session.map((revision) => revision.transition.kind)).toEqual(['session_started', 'reducer_applied']);
+    expect(revisionsOf(exportOf(store, S1, sessionId)).map((revision) => revision.checksum)).toEqual([session[0]!.checksum]);
+    store.close();
+    expect(await storedSnapshot(indexedDb, name, S1)).toMatchObject({ restorePoint: { kind: 'live', headChecksum: session[0]!.checksum } });
+  });
+});
+
+/** A minimal Storage for the IndexedDB store's legacy localStorage scan. */
 class MemoryStorageLike implements Storage {
   readonly #values = new Map<string, string>();
   get length(): number { return this.#values.size; }
