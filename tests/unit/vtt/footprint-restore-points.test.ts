@@ -124,6 +124,18 @@ function archivedTextsOf(root: SessionRevision | undefined): readonly string[] {
   return root.transition.archive.source.revisions.map((revision) => revision.text);
 }
 
+/** The value `action` returns, asserting that it does not throw (a refusal here is an assertion failure). */
+function accepted<T>(action: () => T): T {
+  let value: T | undefined;
+  expect(() => { value = action(); }).not.toThrow();
+  return value as T;
+}
+
+/** An export of `storageId` that must succeed. */
+function exportOf(store: IndexedDbBrowserSessionStore, storageId: string, sessionId: SessionRevision['sessionId']): string {
+  return accepted(() => store.exportedStored(storageId, sessionId));
+}
+
 function thrown(action: () => unknown): unknown {
   try {
     action();
@@ -157,31 +169,31 @@ describe('FOOTPRINT fix1: autosave restore points survive a migration by archive
     expect(store.revisions(sessionId).map((revision) => revision.transition.kind)).toEqual(['session_migrated']);
 
     // S3, the head: the migrated root itself, a one-revision live point.
-    expect(store.exportedStored(S3, sessionId)).toBe(store.exported(sessionId));
+    expect(exportOf(store, S3, sessionId)).toBe(store.exported(sessionId));
     expect(store.savedSessions().find((save) => save.storageId === S3)?.revisionCount).toBe(1);
 
     // S2: its own save, the first two stored texts archived, the state of r2 repaired: the PC still at (0,0).
-    const s2 = revisionsOf(store.exportedStored(S2, sessionId));
+    const s2 = revisionsOf(exportOf(store, S2, sessionId));
     expect(s2).toHaveLength(1);
     expect(archivedTextsOf(s2[0])).toEqual(texts.slice(0, 2));
     expect(positionOf(s2[0]!.encounterState, HUGE)).toEqual({ column: 16, row: 2 });
     expect(positionOf(s2[0]!.encounterState, PC)).toEqual({ column: 0, row: 0 });
     expect(s2[0]!.encounterState.round).toBe(revisions[1]!.encounterState.round);
     // S1: the first stored text archived, recorded under v11 alone.
-    const s1 = revisionsOf(store.exportedStored(S1, sessionId));
+    const s1 = revisionsOf(exportOf(store, S1, sessionId));
     expect(archivedTextsOf(s1[0])).toEqual(texts.slice(0, 1));
     expect(s1[0]?.transition.kind === 'session_migrated' ? s1[0].transition.archive.recordedSchemaVersions : null).toEqual([11]);
     expect(s1[0]!.encounterState.round).toBe(revisions[0]!.encounterState.round);
 
     // Restoring S2: the live stream is S2's own migrated stream.
-    await store.restoreStored(S2, sessionId);
+    await expect(store.restoreStored(S2, sessionId)).resolves.toBeUndefined();
     const live = store.revisions(sessionId);
     expect(live.map((revision) => revision.transition.kind)).toEqual(['session_migrated']);
     expect(archivedTextsOf(live[0])).toEqual(texts.slice(0, 2));
     expect(positionOf(live[0]!.encounterState, PC)).toEqual({ column: 0, row: 0 });
-    expect(store.exportedStored(S2, sessionId)).toBe(store.exported(sessionId));
+    expect(exportOf(store, S2, sessionId)).toBe(store.exported(sessionId));
     // S1 still resolves against the new root's archive; S3 pointed into the replaced stream and is refused.
-    expect(archivedTextsOf(revisionsOf(store.exportedStored(S1, sessionId))[0])).toEqual(texts.slice(0, 1));
+    expect(archivedTextsOf(revisionsOf(exportOf(store, S1, sessionId))[0])).toEqual(texts.slice(0, 1));
     const s3 = thrown(() => store.exportedStored(S3, sessionId));
     expect(s3).toBeInstanceOf(RestorePointUnavailableError);
     await expect(store.restoreStored(S3, sessionId)).rejects.toBeInstanceOf(RestorePointUnavailableError);
@@ -189,8 +201,8 @@ describe('FOOTPRINT fix1: autosave restore points survive a migration by archive
 
     // The re-pointed records are durable.
     const reopened = await openStore(indexedDb, name);
-    expect(reopened.exportedStored(S2, sessionId)).toBe(reopened.exported(sessionId));
-    expect(archivedTextsOf(revisionsOf(reopened.exportedStored(S1, sessionId))[0])).toEqual(texts.slice(0, 1));
+    expect(exportOf(reopened, S2, sessionId)).toBe(reopened.exported(sessionId));
+    expect(archivedTextsOf(revisionsOf(exportOf(reopened, S1, sessionId))[0])).toEqual(texts.slice(0, 1));
     reopened.close();
   });
 
@@ -213,23 +225,23 @@ describe('FOOTPRINT fix1: autosave restore points survive a migration by archive
     const store = await openStore(indexedDb, name);
     expect(store.revisions(sessionId).map((revision) => revision.transition.kind)).toEqual(['session_migrated']);
 
-    const s2 = revisionsOf(store.exportedStored(S2, sessionId));
+    const s2 = revisionsOf(exportOf(store, S2, sessionId));
     expect(s2.map((revision) => [revision.schemaVersion, revision.transition.kind])).toEqual([[13, 'session_started'], [13, 'reducer_applied']]);
     expect(canonicalJson(s2[1]!.encounterState)).toBe(canonicalJson(revisions[1]!.encounterState));
 
-    await store.restoreStored(S2, sessionId);
+    await expect(store.restoreStored(S2, sessionId)).resolves.toBeUndefined();
     const live = store.revisions(sessionId);
     expect(live.map((revision) => revision.transition.kind)).toEqual(['session_started', 'reducer_applied']);
     expect(canonicalJson(live[1]!.encounterState)).toBe(canonicalJson(revisions[1]!.encounterState));
     // S1 and S2 are live prefixes of the restored stream now; S3's history was discarded.
-    expect(revisionsOf(store.exportedStored(S1, sessionId)).map((revision) => revision.checksum)).toEqual([live[0]!.checksum]);
-    expect(store.exportedStored(S2, sessionId)).toBe(store.exported(sessionId));
+    expect(revisionsOf(exportOf(store, S1, sessionId)).map((revision) => revision.checksum)).toEqual([live[0]!.checksum]);
+    expect(exportOf(store, S2, sessionId)).toBe(store.exported(sessionId));
     expect(thrown(() => store.exportedStored(S3, sessionId))).toBeInstanceOf(RestorePointUnavailableError);
     store.close();
 
     const reopened = await openStore(indexedDb, name);
-    expect(revisionsOf(reopened.exportedStored(S1, sessionId)).map((revision) => revision.checksum)).toEqual([live[0]!.checksum]);
-    await reopened.restoreStored(S1, sessionId);
+    expect(revisionsOf(exportOf(reopened, S1, sessionId)).map((revision) => revision.checksum)).toEqual([live[0]!.checksum]);
+    await expect(reopened.restoreStored(S1, sessionId)).resolves.toBeUndefined();
     expect(reopened.revisions(sessionId).map((revision) => revision.checksum)).toEqual([live[0]!.checksum]);
     reopened.close();
   });
