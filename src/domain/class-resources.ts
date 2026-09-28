@@ -72,7 +72,17 @@ export interface ClassResourceFormulaStepOf<
  *
  * Each arm carries exactly its own payload, so a contradictory state (a fixed
  * count with an ability, a stepped count with no steps, steps as text) is not
- * a value of the type. Two instantiations exist: the runtime's
+ * a value of the type.
+ *
+ * A STEPPED COUNT HAS AT LEAST TWO STEPS. With one step it would be a
+ * `fixed_count` under a second name (from that level, that many uses), and it
+ * could not be stored: its first step goes in the scalar columns and its later
+ * steps in `later_fixed_count_steps`, which the decoder and the table's CHECK
+ * both require to be a non-empty array. So the tuple type admits exactly the
+ * stepped counts storage round-trips; the one-step value is not a value of
+ * the type, rather than a value the writer quietly turns into `[]`.
+ *
+ * Two instantiations exist: the runtime's
  * {@link ClassResourceFormula}, whose levels and counts are brands minted by
  * a validating constructor, and the build's {@link ClassResourceFormulaRecord},
  * whose bare literals a generated artifact can carry `as const`.
@@ -90,6 +100,7 @@ export type ClassResourceFormulaOf<
   | {
       readonly kind: 'fixed_count_by_class_level';
       readonly steps: readonly [
+        ClassResourceFormulaStepOf<Level, Count>,
         ClassResourceFormulaStepOf<Level, Count>,
         ...ClassResourceFormulaStepOf<Level, Count>[],
       ];
@@ -266,6 +277,28 @@ type SteppedCount = Extract<
   { readonly kind: 'fixed_count_by_class_level' }
 >['steps'];
 
+/** A stepped count's later steps: at least one, because the count has two or more. */
+type LaterSteps = readonly [ClassResourceFormulaStep, ...ClassResourceFormulaStep[]];
+
+/**
+ * One step's numbers checked: the first step's under its scalar column names,
+ * a later step's under its ordinal among the later steps.
+ */
+function checkedStep(
+  minimumClassLevel: unknown,
+  count: unknown,
+  laterOrdinal: number | null,
+): ClassResourceFormulaStep {
+  const later = laterOrdinal === null ? null : `later step ${String(laterOrdinal)}`;
+  return {
+    minimum_class_level: classLevel(
+      minimumClassLevel,
+      later === null ? 'minimum_class_level' : `${later} minimum_class_level`,
+    ),
+    count: positive(count, later === null ? 'fixed_count' : `${later} count`),
+  };
+}
+
 /** A stepped count's joint rule: each step starts later and changes the count. */
 function steppedCount(steps: SteppedCount): SteppedCount {
   for (let index = 1; index < steps.length; index += 1) {
@@ -281,7 +314,7 @@ function steppedCount(steps: SteppedCount): SteppedCount {
   return steps;
 }
 
-function parseLaterSteps(value: unknown): readonly ClassResourceFormulaStep[] {
+function parseLaterSteps(value: unknown): LaterSteps {
   if (typeof value !== 'string') {
     throw new ClassResourceFormulaDecodeError('later_fixed_count_steps must be JSON text.');
   }
@@ -291,10 +324,10 @@ function parseLaterSteps(value: unknown): readonly ClassResourceFormulaStep[] {
   } catch {
     throw new ClassResourceFormulaDecodeError('later_fixed_count_steps must be valid JSON.');
   }
-  if (!Array.isArray(parsed) || parsed.length === 0) {
+  if (!Array.isArray(parsed)) {
     throw new ClassResourceFormulaDecodeError('later_fixed_count_steps must be a non-empty array.');
   }
-  return parsed.map((entry, index) => {
+  const [second, ...rest] = parsed.map((entry: unknown, index) => {
     if (
       typeof entry !== 'object' ||
       entry === null ||
@@ -304,14 +337,12 @@ function parseLaterSteps(value: unknown): readonly ClassResourceFormulaStep[] {
       throw new ClassResourceFormulaDecodeError(`later step ${String(index + 1)} has the wrong shape.`);
     }
     const record = entry as Record<string, unknown>;
-    return {
-      minimum_class_level: classLevel(
-        record.minimum_class_level,
-        `later step ${String(index + 1)} minimum_class_level`,
-      ),
-      count: positive(record.count, `later step ${String(index + 1)} count`),
-    };
+    return checkedStep(record.minimum_class_level, record.count, index + 1);
   });
+  if (second === undefined) {
+    throw new ClassResourceFormulaDecodeError('later_fixed_count_steps must be a non-empty array.');
+  }
+  return [second, ...rest];
 }
 
 /**
@@ -332,21 +363,15 @@ export function classResourceFormula(
         count: positive(record.count, 'fixed_count'),
       };
     case 'fixed_count_by_class_level': {
-      const [first, ...later] = record.steps;
+      const [first, second, ...later] = record.steps;
       return {
         kind: 'fixed_count_by_class_level',
         steps: steppedCount([
-          {
-            minimum_class_level: classLevel(first.minimum_class_level, 'minimum_class_level'),
-            count: positive(first.count, 'fixed_count'),
-          },
-          ...later.map((step, index) => ({
-            minimum_class_level: classLevel(
-              step.minimum_class_level,
-              `later step ${String(index + 1)} minimum_class_level`,
-            ),
-            count: positive(step.count, `later step ${String(index + 1)} count`),
-          })),
+          checkedStep(first.minimum_class_level, first.count, null),
+          checkedStep(second.minimum_class_level, second.count, 1),
+          ...later.map((step, index) =>
+            checkedStep(step.minimum_class_level, step.count, index + 2),
+          ),
         ]),
       };
     }
@@ -368,8 +393,10 @@ export function classResourceFormula(
 /**
  * THE DATABASE BOUNDARY, WRITING: a formula in its stored columns. The first
  * step of a stepped count goes in the scalar columns and the later steps in
- * `later_fixed_count_steps` as JSON text; every column another kind does not
- * use is null. {@link decodeClassResourceFormula} is its inverse.
+ * `later_fixed_count_steps` as JSON text, never `[]`, because the type holds
+ * at least two steps; every column another kind does not use is null.
+ * {@link decodeClassResourceFormula} is its inverse over every value of the
+ * type, and the table's CHECK constraints accept every row this writes.
  */
 export function classResourceFormulaColumns(
   formula: ClassResourceFormula,
@@ -405,10 +432,7 @@ export function decodeClassResourceFormula(
       return { kind: 'fixed_count', minimum_class_level: minimum, count };
     }
     case 'fixed_count_by_class_level': {
-      const first: ClassResourceFormulaStep = {
-        minimum_class_level: classLevel(row.minimum_class_level, 'minimum_class_level'),
-        count: positive(row.fixed_count, 'fixed_count'),
-      };
+      const first = checkedStep(row.minimum_class_level, row.fixed_count, null);
       nullPayload(row.ability, 'ability');
       nullPayload(row.multiplier, 'multiplier');
       return {

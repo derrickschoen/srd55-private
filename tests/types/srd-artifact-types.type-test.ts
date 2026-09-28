@@ -19,6 +19,7 @@
 import type {
   ClassResourceFormula,
   ClassResourceFormulaRecord,
+  ClassResourceFormulaStep,
 } from '../../src/domain/class-resources';
 import type { Ability, CharacterLevel, Skill } from '../../src/domain/enums';
 import type { ContentKey } from '../../src/domain/ids';
@@ -170,12 +171,68 @@ type _FormulaRefusesASteppedCountWithNoSteps = Assert<Refuses<
   { readonly kind: 'fixed_count_by_class_level'; readonly steps: readonly [] },
   ClassResourceFormulaRecord
 >>;
+/**
+ * Two steps, so the only thing wrong is the level: with one step this probe
+ * would also be refused for its length (fix round 3), and would no longer
+ * witness that a level-21 step is refused.
+ */
 type _FormulaRefusesAStepAtLevelTwentyOne = Assert<Refuses<
   {
     readonly kind: 'fixed_count_by_class_level';
-    readonly steps: readonly [{ readonly minimum_class_level: 21; readonly count: 1 }];
+    readonly steps: readonly [
+      { readonly minimum_class_level: 9; readonly count: 1 },
+      { readonly minimum_class_level: 21; readonly count: 2 },
+    ];
   },
   ClassResourceFormulaRecord
+>>;
+type _FormulaAcceptsTheSameStepsBelowTwentyOne = Assert<Accepts<
+  {
+    readonly kind: 'fixed_count_by_class_level';
+    readonly steps: readonly [
+      { readonly minimum_class_level: 9; readonly count: 1 },
+      { readonly minimum_class_level: 20; readonly count: 2 },
+    ];
+  },
+  ClassResourceFormulaRecord
+>>;
+
+/**
+ * A STEPPED COUNT HAS AT LEAST TWO STEPS (fix round 3, P2). A one-step stepped
+ * count cannot be stored (its later steps would be `[]`, which the decoder and
+ * the table's CHECK refuse), so it is not a value of either instantiation. The
+ * two-step acceptances show the refusal is the length, not the shape.
+ */
+type _RecordRefusesASteppedCountWithOneStep = Assert<Refuses<
+  {
+    readonly kind: 'fixed_count_by_class_level';
+    readonly steps: readonly [{ readonly minimum_class_level: 9; readonly count: 1 }];
+  },
+  ClassResourceFormulaRecord
+>>;
+type _RecordAcceptsASteppedCountWithTwoSteps = Assert<Accepts<
+  {
+    readonly kind: 'fixed_count_by_class_level';
+    readonly steps: readonly [
+      { readonly minimum_class_level: 9; readonly count: 1 },
+      { readonly minimum_class_level: 13; readonly count: 2 },
+    ];
+  },
+  ClassResourceFormulaRecord
+>>;
+type _RuntimeRefusesASteppedCountWithOneStep = Assert<Refuses<
+  {
+    readonly kind: 'fixed_count_by_class_level';
+    readonly steps: readonly [ClassResourceFormulaStep];
+  },
+  ClassResourceFormula
+>>;
+type _RuntimeAcceptsASteppedCountWithTwoSteps = Assert<Accepts<
+  {
+    readonly kind: 'fixed_count_by_class_level';
+    readonly steps: readonly [ClassResourceFormulaStep, ClassResourceFormulaStep];
+  },
+  ClassResourceFormula
 >>;
 type _FormulaRefusesAFixedCountWithAnAbilityForItsCount = Assert<Refuses<
   { readonly kind: 'fixed_count'; readonly minimum_class_level: 2; readonly ability: 'wisdom' },

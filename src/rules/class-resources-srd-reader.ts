@@ -559,15 +559,13 @@ function fighterSteps(
       : [{ minimum_class_level: entry.class_level as ClassLevel, count: countWord(match[1]) }];
   });
   const expectedLength = feature === 'Action Surge' ? 2 : 3;
-  if (steps.length !== expectedLength) {
+  const [first, second, ...later] = steps;
+  if (steps.length !== expectedLength || first === undefined || second === undefined) {
     throw new SrdClassResourcesError(`${feature} has ${String(steps.length)} table steps, expected ${String(expectedLength)}.`);
   }
   return {
     kind: 'fixed_count_by_class_level',
-    steps: steps as [
-      { readonly minimum_class_level: ClassLevel; readonly count: PositiveResourceMaximum },
-      ...Array<{ readonly minimum_class_level: ClassLevel; readonly count: PositiveResourceMaximum }>,
-    ],
+    steps: [first, second, ...later],
   };
 }
 
