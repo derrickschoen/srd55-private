@@ -243,6 +243,17 @@ describe('the import-boundary guard', () => {
     // Review r2 P2: an src/ module that reads the SRD is production by its path,
     // whatever its entry says; labelled tooling, it fails (1 finding).
     expect(result.stdout).toContain('R2 red   1 finding(s): an src/ importer labelled tooling (the r2 P2 case)');
+    // Review r3 P2: every production path is proven, not only src/. A computed
+    // import in db/srd.ts and in vite.config.ts (2 findings); in the tools and
+    // the test helper src/main.ts loads statically, through another tool,
+    // lazily and as a worker (5 findings, one each; tools/run.ts, which no
+    // production module reaches, gives none).
+    expect(result.stdout).toContain(
+      'R2 red   2 finding(s): computed imports in production outside src/: db/srd.ts and a root config file (the r3 P2 case)',
+    );
+    expect(result.stdout).toContain(
+      'R2 red   5 finding(s): computed imports in tools and a test helper that src/main.ts loads or ships (the r3 P2 case)',
+    );
     // D927: --update raises a budget as well as lowers one, and R5 then holds.
     // Worked by hand in the self-test's witness, at margins of 10% (files) and
     // 30% (bytes): 2 files and 45 bytes are ceil(2.2) = 3 and ceil(58.5) = 59;

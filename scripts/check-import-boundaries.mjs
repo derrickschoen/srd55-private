@@ -25,7 +25,12 @@
  *                         fails, so the list only shrinks; with the runtime
  *                         entries gone the SRD is read by tests and tooling
  *                         only (D915). No production module may reach the
- *                         SRD through a test or a tool either.
+ *                         SRD through a test or a tool either. And every
+ *                         production path must be provable (review r3 P2):
+ *                         on a production module, or on any test or tool
+ *                         one loads or ships, an unresolved reference that
+ *                         might name the SRD text (a computed one) fails
+ *                         unless its file is allowlisted with a reason.
  *   R3 forbidden          no path, however indirect, from an entry to a
  *      reachability       forbidden module (or any file under a directory). A
  *                         `pending` entry is one that does not hold yet; it
@@ -85,19 +90,11 @@ const SRD_TEST_PREFIX = 'tests/';
  */
 const SRD_TOOLING_PREFIXES = Object.freeze(['tools/', 'scripts/']);
 
-/**
- * R2: every reference in src/ (the app and the engine) must resolve, or R2
- * cannot prove it reads no SRD text; a computed `import()` is the case R0
- * leaves open.
- */
-const SRD_PROVEN_PREFIX = 'src/';
-
-/** R2's policy apart from the allowlist; the self-test runs it unchanged. */
+/** R2's policy apart from the allowlists; the self-test runs it unchanged. */
 const SRD_POLICY = Object.freeze({
   text: SRD_TEXT,
   testPrefix: SRD_TEST_PREFIX,
   toolingPrefixes: SRD_TOOLING_PREFIXES,
-  provenPrefix: SRD_PROVEN_PREFIX,
 });
 
 /** R2: 'test', 'tooling' or 'production', from the path alone (`srd`: R2's policy). */
@@ -105,6 +102,33 @@ function moduleKind(file, srd) {
   if (file.startsWith(srd.testPrefix)) return 'test';
   if (srd.toolingPrefixes.some((prefix) => file.startsWith(prefix))) return 'tooling';
   return 'production';
+}
+
+/**
+ * R2: every module on a PRODUCTION PATH, which R2 must be able to prove reads
+ * no SRD text: each production module (by its path: src/, db/ and the root
+ * config files), and every module one of them loads or ships (SHIPS: static,
+ * dynamic, or started by asset URL), a tool or a test included, since
+ * tools/bridge.ts imported by src/main.ts runs in production (review r3 P2).
+ * Returns a Map from each to the edge that first reached it (null for a
+ * production module), breadth first, as closure() returns, so pathTo prints
+ * the shortest way in.
+ */
+function productionPaths(graph, srd) {
+  const parents = new Map();
+  for (const file of graph.edges.keys()) {
+    if (moduleKind(file, srd) === 'production') parents.set(file, null);
+  }
+  const queue = [...parents.keys()];
+  for (let index = 0; index < queue.length; index += 1) {
+    const current = queue[index];
+    for (const edge of graph.edges.get(current) ?? []) {
+      if (!SHIPS.includes(edge.evaluation) || parents.has(edge.to)) continue;
+      parents.set(edge.to, { from: current, line: edge.line, syntax: edge.syntax });
+      queue.push(edge.to);
+    }
+  }
+  return parents;
 }
 
 /** R2: the unit that removes every runtime entry below (D915, D917). */
@@ -222,6 +246,17 @@ const SRD_TEXT_IMPORTERS = [
 ];
 
 /**
+ * R2: the files on a production path whose unresolved references R2 accepts
+ * unproven, each `{ file, references, why }`: how many there are (all of
+ * them; one more, or one fewer, fails, so a new computed import beside an
+ * accepted one is seen) and why none can name the SRD text. A stale entry
+ * fails. Empty: no production path has an unresolved reference today (the
+ * fix3 census, 2026-09-27: 69 unresolved references, every one in a test or
+ * a tool that no production module loads or ships).
+ */
+const SRD_UNPROVEN_REFERENCES = [];
+
+/**
  * R3: `from` is a repository path or a directory prefix ending in `/`; `to` a
  * graph node (a resource carries its query) or a directory prefix ending in
  * `/`, which stands for every file below it in any form; `via` the edges
@@ -320,9 +355,10 @@ function ruleR1(graph) {
 }
 
 /**
- * `srd`: `{ text, testPrefix, provenPrefix, importers }`: the SRD text's
- * directory, the tests' directory, the directory whose every reference must
- * resolve for R2 to prove it (the app and engine, src/), and the allowlist.
+ * `srd`: `{ text, testPrefix, toolingPrefixes, importers, unproven }`: the SRD
+ * text's directory, the tests' directory, the tooling directories, the SRD
+ * text allowlist (SRD_TEXT_IMPORTERS) and the unresolved-reference allowlist
+ * (SRD_UNPROVEN_REFERENCES).
  */
 function ruleR2(graph, srd) {
   const diagnostics = [];
@@ -416,22 +452,69 @@ function ruleR2(graph, srd) {
   }
   diagnostics.push(...crossings);
 
-  // A computed reference might name the SRD text; a literal one names its
-  // path. Static ones are R0's.
+  // Every production path must be provable, not only src/ (review r3 P2). A
+  // computed reference there might name the SRD text; a literal one names
+  // its path. Static ones are R0's.
+  const onProductionPath = productionPaths(graph, srd);
+  const unproven = new Map();
   for (const reference of graph.unresolved) {
-    if (!reference.file.startsWith(srd.provenPrefix) || reference.evaluation === EVALUATION.STATIC) continue;
+    if (!onProductionPath.has(reference.file) || reference.evaluation === EVALUATION.STATIC) continue;
     const named = reference.specifier.startsWith('<')
       ? undefined
       : path.posix.join(path.posix.dirname(reference.file), reference.specifier.split(/[?#]/u)[0]);
     if (named !== undefined && !named.startsWith(srd.text)) continue;
-    diagnostics.push(`R2 ${reference.file}:${String(reference.line)}: cannot resolve ${reference.evaluation} reference ` +
-      `'${reference.specifier}', so R2 cannot prove it reads no SRD text; name the file literally`);
+    const list = unproven.get(reference.file) ?? [];
+    list.push(reference);
+    unproven.set(reference.file, list);
+  }
+  // A file's entry, or null when an entry for it is wrong (and so fails).
+  const accepted = new Map();
+  for (const entry of srd.unproven) {
+    const problems = [];
+    if (typeof entry.why !== 'string' || entry.why.trim() === '') {
+      problems.push('gives no reason; say why none of its references can name the SRD text');
+    }
+    if (accepted.has(entry.file)) problems.push('is listed twice');
+    for (const problem of problems) diagnostics.push(`R2 unresolved-reference allowlist entry ${entry.file} ${problem}`);
+    accepted.set(entry.file, problems.length === 0 && !accepted.has(entry.file) ? entry : null);
+  }
+  let acceptedReferences = 0;
+  for (const [file, entry] of accepted) {
+    const references = unproven.get(file) ?? [];
+    if (references.length === 0) {
+      diagnostics.push(`R2 stale unresolved-reference allowlist entry: ${file} has no unresolved reference on a ` +
+        'production path; delete the entry');
+    } else if (entry !== null && entry.references !== references.length) {
+      diagnostics.push(`R2 ${file}: ${String(references.length)} unresolved reference(s) on a production path (line(s) ` +
+        `${references.map((reference) => String(reference.line)).join(', ')}), but its allowlist entry accepts ` +
+        `${String(entry.references)}; name the files literally, or change the entry and its reason where review sees it`);
+    } else if (entry !== null) {
+      acceptedReferences += references.length;
+    }
+  }
+  for (const [file, references] of unproven) {
+    // Accepted, or its entry is wrong and has failed above.
+    if (accepted.has(file)) continue;
+    const way = onProductionPath.get(file) === null
+      ? ''
+      : ` (reached from production by ${pathTo(onProductionPath, file).join(' -> ')})`;
+    for (const reference of references) {
+      diagnostics.push(`R2 ${file}:${String(reference.line)}: cannot resolve ${reference.evaluation} reference ` +
+        `'${reference.specifier}' on a production path${way}, so R2 cannot prove it reads no SRD text; name the ` +
+        'file literally, or list this file in SRD_UNPROVEN_REFERENCES with a reason');
+    }
   }
 
   const runtimeEntries = srd.importers.filter((entry) => moduleKind(entry.importer, srd) === 'production');
   const runtimeFiles = runtimeEntries.reduce((sum, entry) => sum + (entry.files?.length ?? 0), 0);
-  const notes = [`R2 ${String(runtimeEntries.length)} runtime importer(s) of the SRD text, ${String(runtimeFiles)} ` +
-    `file reference(s), left for ${SRD_BUILDTIME} to remove`];
+  const pathModules = [...onProductionPath.keys()].filter((id) => graph.edges.has(id));
+  const reachedOthers = pathModules.filter((file) => moduleKind(file, srd) !== 'production');
+  const notes = [
+    `R2 ${String(runtimeEntries.length)} runtime importer(s) of the SRD text, ${String(runtimeFiles)} ` +
+      `file reference(s), left for ${SRD_BUILDTIME} to remove`,
+    `R2 ${String(pathModules.length)} module(s) on production paths, ${String(reachedOthers.length)} of them tests or ` +
+      `tools that production loads or ships; ${String(acceptedReferences)} unresolved reference(s) there accepted unproven`,
+  ];
   return { diagnostics, notes };
 }
 
@@ -651,16 +734,17 @@ function readBudgets(host) {
   return parsed;
 }
 
-/** The repository's R2 allowlist, R3 entries and R4 cycles. */
+/** The repository's R2 allowlists, R3 entries and R4 cycles. */
 const REPOSITORY_RULES = Object.freeze({
   srdImporters: SRD_TEXT_IMPORTERS,
+  srdUnproven: SRD_UNPROVEN_REFERENCES,
   forbidden: FORBIDDEN_REACHABILITY,
   cycles: ALLOWED_CYCLES,
 });
 
 /**
  * One run over a checkout. `host`: as for buildModuleGraph, plus roots(),
- * sizeOf() and writeFile(); `rules`: `{ srdImporters, forbidden, cycles }`.
+ * sizeOf() and writeFile(); `rules`: `{ srdImporters, srdUnproven, forbidden, cycles }`.
  * With `update`, the budgets file is rewritten to the measurement and R5 is
  * judged again against the file as written, so the run fails only on what an
  * update cannot settle (another rule, or a sentinel that is not in the graph).
@@ -672,7 +756,7 @@ function checkCheckout(host, rules, update) {
   const graphSeconds = (performance.now() - started) / 1000;
   const budgets = readBudgets(host);
   const results = runRules(graph, {
-    srd: { ...SRD_POLICY, importers: rules.srdImporters },
+    srd: { ...SRD_POLICY, importers: rules.srdImporters, unproven: rules.srdUnproven },
     forbidden: rules.forbidden,
     cycles: rules.cycles,
     budgets,
@@ -741,8 +825,8 @@ function fixtureResults(files, policy = {}) {
     isFile: host.isFile,
     filesBelow: host.filesBelow,
     ...policy,
-    // The real SRD policy, with the fixture's allowlist.
-    srd: { ...SRD_POLICY, importers: policy.srdImporters ?? [] },
+    // The real SRD policy, with the fixture's allowlists.
+    srd: { ...SRD_POLICY, importers: policy.srdImporters ?? [], unproven: policy.srdUnproven ?? [] },
   });
 }
 
@@ -961,13 +1045,105 @@ const SELF_TESTS = [
   },
   {
     rule: 'R2',
-    name: 'a computed dynamic import in src/ (a tool\'s is not R2\'s to prove)',
+    name: 'a computed dynamic import in src/ (a tool that no production module loads is not R2\'s to prove)',
     expect: 1,
     mentions: ["R2 src/load.ts:1: cannot resolve dynamic reference '<non-literal>'"],
     files: {
       'src/load.ts': 'export const load = (name: string) => import(`../docs/srd/source/${name}.txt?raw`);\n',
       'tools/run.ts': 'export const run = (name: string) => import(name);\n',
       'docs/srd/source/feats.txt': 'feats',
+    },
+  },
+  {
+    rule: 'R2',
+    name: 'computed imports in production outside src/: db/srd.ts and a root config file (the r3 P2 case)',
+    expect: 2,
+    mentions: [
+      "R2 db/srd.ts:1: cannot resolve dynamic reference '<non-literal>' on a production path, so R2 cannot prove",
+      "R2 vite.config.ts:1: cannot resolve dynamic reference '<non-literal>' on a production path, so R2 cannot prove",
+    ],
+    noteMentions: ['R2 2 module(s) on production paths, 0 of them tests or tools'],
+    files: {
+      'db/srd.ts': 'export const load = (name: string) => import(`../docs/srd/source/${name}.txt?raw`);\n',
+      'vite.config.ts': 'export default (name: string) => import(name);\n',
+      'docs/srd/source/feats.txt': 'feats',
+    },
+  },
+  {
+    rule: 'R2',
+    name: 'computed imports in tools and a test helper that src/main.ts loads or ships (the r3 P2 case): statically, ' +
+      'through another tool, lazily and as a worker; a tool that no production module reaches is not R2\'s to prove',
+    expect: 5,
+    mentions: [
+      "R2 tools/bridge.ts:2: cannot resolve dynamic reference '<non-literal>' on a production path " +
+        '(reached from production by src/main.ts:1 -> tools/bridge.ts)',
+      "R2 tools/deeper.ts:1: cannot resolve dynamic reference '<non-literal>' on a production path " +
+        '(reached from production by src/main.ts:1 -> tools/bridge.ts:1 -> tools/deeper.ts)',
+      "R2 tools/lazy.ts:1: cannot resolve dynamic reference '<non-literal>' on a production path " +
+        '(reached from production by src/main.ts:2 -> tools/lazy.ts)',
+      "R2 tools/worker.ts:1: cannot resolve dynamic reference '<non-literal>' on a production path " +
+        '(reached from production by src/main.ts:3 -> tools/worker.ts)',
+      "R2 tests/helpers/fixture.ts:1: cannot resolve dynamic reference '<non-literal>' on a production path " +
+        '(reached from production by src/main.ts:4 -> tests/helpers/fixture.ts)',
+    ],
+    noteMentions: ['R2 6 module(s) on production paths, 5 of them tests or tools that production loads or ships'],
+    files: {
+      'src/main.ts': "import { load } from '../tools/bridge';\nexport const later = () => import('../tools/lazy');\n" +
+        "export const worker = new URL('../tools/worker.ts', import.meta.url);\n" +
+        "export const fixture = () => import('../tests/helpers/fixture');\n",
+      'tools/bridge.ts': "import { deeper } from './deeper';\nexport const load = (name: string) => import(name);\n",
+      'tools/deeper.ts': 'export const deeper = (name: string) => import(name);\n',
+      'tools/lazy.ts': 'export const lazy = (name: string) => import(name);\n',
+      'tools/worker.ts': 'export const work = (name: string) => import(name);\n',
+      'tests/helpers/fixture.ts': 'export const fixture = (name: string) => import(name);\n',
+      'tools/run.ts': 'export const run = (name: string) => import(name);\n',
+    },
+  },
+  {
+    rule: 'R2',
+    name: 'computed imports on a production path, listed with their count and reason',
+    expect: 0,
+    noteMentions: ['; 2 unresolved reference(s) there accepted unproven'],
+    policy: {
+      srdUnproven: [{ file: 'db/plugins.ts', references: 2, why: 'loads a named package plugin, never a repository file' }],
+    },
+    files: {
+      'db/plugins.ts': 'export const a = (name: string) => import(name);\n' +
+        'export const b = (name: string) => import(`${name}/plugin`);\n',
+    },
+  },
+  {
+    rule: 'R2',
+    name: 'unresolved-reference entries that are wrong: no reason, a count one short (a new computed import) and one ' +
+      'over, stale, for a file no production module reaches, listed twice',
+    expect: 6,
+    mentions: [
+      'R2 unresolved-reference allowlist entry db/no-why.ts gives no reason',
+      'R2 unresolved-reference allowlist entry db/twice.ts is listed twice',
+      'R2 db/grown.ts: 2 unresolved reference(s) on a production path (line(s) 1, 2), but its allowlist entry accepts 1',
+      'R2 db/shrunk.ts: 1 unresolved reference(s) on a production path (line(s) 1), but its allowlist entry accepts 2',
+      'R2 stale unresolved-reference allowlist entry: db/fixed.ts has no unresolved reference on a production path',
+      'R2 stale unresolved-reference allowlist entry: tools/unreached.ts has no unresolved reference on a production path',
+    ],
+    policy: {
+      srdUnproven: [
+        { file: 'db/no-why.ts', references: 1, why: ' ' },
+        { file: 'db/grown.ts', references: 1, why: 'a plugin loader' },
+        { file: 'db/shrunk.ts', references: 2, why: 'a plugin loader' },
+        { file: 'db/fixed.ts', references: 1, why: 'a plugin loader' },
+        { file: 'tools/unreached.ts', references: 1, why: 'a maintenance CLI' },
+        { file: 'db/twice.ts', references: 1, why: 'a plugin loader' },
+        { file: 'db/twice.ts', references: 1, why: 'a plugin loader' },
+      ],
+    },
+    files: {
+      'db/no-why.ts': 'export const a = (name: string) => import(name);\n',
+      'db/grown.ts': 'export const a = (name: string) => import(name);\nexport const b = (name: string) => import(name);\n',
+      'db/shrunk.ts': 'export const a = (name: string) => import(name);\n',
+      'db/fixed.ts': "export const a = () => import('./plugin');\n",
+      'db/plugin.ts': 'export const plugin = 1;\n',
+      'tools/unreached.ts': 'export const a = (name: string) => import(name);\n',
+      'db/twice.ts': 'export const a = (name: string) => import(name);\n',
     },
   },
   {
@@ -1158,7 +1334,7 @@ function updateWitness() {
   };
   const before = files[BUDGETS_FILE];
   const host = fixtureHost(files);
-  const rules = { srdImporters: [], forbidden: [], cycles: [] };
+  const rules = { srdImporters: [], srdUnproven: [], forbidden: [], cycles: [] };
   const run = (step, update) => {
     const outcome = checkCheckout(host, rules, update);
     const others = Object.entries(outcome.results).filter(([rule]) => rule !== 'R5').flatMap(([, result]) => result.diagnostics);
