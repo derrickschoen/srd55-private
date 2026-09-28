@@ -29,8 +29,9 @@
  *                         production path must be provable (review r3 P2):
  *                         on a production module, or on any test or tool
  *                         one loads or ships, an unresolved reference that
- *                         might name the SRD text (a computed one) fails
- *                         unless its file is allowlisted with a reason.
+ *                         might name the SRD text (a computed or an absolute
+ *                         one) fails unless its file is allowlisted with a
+ *                         reason.
  *   R3 forbidden          no path, however indirect, from an entry to a
  *      reachability       forbidden module (or any file under a directory). A
  *                         `pending` entry is one that does not hold yet; it
@@ -453,13 +454,15 @@ function ruleR2(graph, srd) {
   diagnostics.push(...crossings);
 
   // Every production path must be provable, not only src/ (review r3 P2). A
-  // computed reference there might name the SRD text; a literal one names
-  // its path. Static ones are R0's.
+  // computed reference there might name the SRD text, and so might an
+  // absolute one: Vite reads '/docs/srd/...' from the root, or any absolute
+  // path from the file system. A relative literal names its path. Static
+  // ones are R0's.
   const onProductionPath = productionPaths(graph, srd);
   const unproven = new Map();
   for (const reference of graph.unresolved) {
     if (!onProductionPath.has(reference.file) || reference.evaluation === EVALUATION.STATIC) continue;
-    const named = reference.specifier.startsWith('<')
+    const named = reference.specifier.startsWith('<') || reference.specifier.startsWith('/')
       ? undefined
       : path.posix.join(path.posix.dirname(reference.file), reference.specifier.split(/[?#]/u)[0]);
     if (named !== undefined && !named.startsWith(srd.text)) continue;
@@ -1097,6 +1100,20 @@ const SELF_TESTS = [
       'tools/worker.ts': 'export const work = (name: string) => import(name);\n',
       'tests/helpers/fixture.ts': 'export const fixture = (name: string) => import(name);\n',
       'tools/run.ts': 'export const run = (name: string) => import(name);\n',
+    },
+  },
+  {
+    rule: 'R2',
+    name: 'absolute specifiers on a production path: Vite reads them from the root or the file system, so neither is proven',
+    expect: 2,
+    mentions: [
+      "R2 src/abs.ts:1: cannot resolve dynamic reference '/docs/srd/full/srd.txt?raw' on a production path",
+      "R2 src/abs.ts:2: cannot resolve dynamic reference '/assets/other.js' on a production path",
+    ],
+    files: {
+      'src/abs.ts': "export const srd = () => import('/docs/srd/full/srd.txt?raw');\n" +
+        "export const other = () => import('/assets/other.js');\n",
+      'docs/srd/full/srd.txt': 'SRD',
     },
   },
   {

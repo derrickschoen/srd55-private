@@ -254,6 +254,9 @@ describe('the import-boundary guard', () => {
     expect(result.stdout).toContain(
       'R2 red   5 finding(s): computed imports in tools and a test helper that src/main.ts loads or ships (the r3 P2 case)',
     );
+    // An absolute specifier is unproven wherever it points: Vite reads
+    // '/docs/srd/...' from the root (2 findings: that one and '/assets/other.js').
+    expect(result.stdout).toContain('R2 red   2 finding(s): absolute specifiers on a production path');
     // D927: --update raises a budget as well as lowers one, and R5 then holds.
     // Worked by hand in the self-test's witness, at margins of 10% (files) and
     // 30% (bytes): 2 files and 45 bytes are ceil(2.2) = 3 and ceil(58.5) = 59;
