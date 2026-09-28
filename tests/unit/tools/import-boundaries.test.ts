@@ -240,6 +240,13 @@ describe('the import-boundary guard', () => {
       expect(result.stdout).toMatch(new RegExp(`^${rule} green 0 finding\\(s\\)`, 'mu'));
       expect(result.stdout).toMatch(new RegExp(`^${rule} red {3}[1-9]\\d* finding\\(s\\)`, 'mu'));
     }
-    expect(result.stdout).toContain('fixtures and the --update ratchet passed');
+    // D927: --update raises a budget as well as lowers one, and R5 then holds.
+    // Worked by hand in the self-test's witness: 2 files and 45 bytes at a 10%
+    // margin are 3 and 50; 1 file of 23 bytes is 2 and 26.
+    expect(result.stdout).toContain(
+      'R5 --update src/main.ts files: 1 -> 3 (raised); src/main.ts bytes: 30 -> 50 (raised); ' +
+        'src/lean.ts files: 5 -> 2 (lowered); src/lean.ts bytes: 1000 -> 26 (lowered); then R5 green',
+    );
+    expect(result.stdout).toContain('fixtures and the --update witness passed');
   });
 });

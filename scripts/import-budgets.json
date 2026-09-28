@@ -1,5 +1,5 @@
 {
-  "about": "Guard rule R5 (scripts/check-import-boundaries.mjs): the static closure of each sentinel, in modules and source bytes, may not exceed its budget. `node scripts/check-import-boundaries.mjs --update` lowers a budget to ceil(measured x (100 + marginPercent) / 100) and never raises one; raising a budget is a hand edit, visible in review. Set 2026-09-27 at measured + 10%.",
+  "about": "Guard rule R5 (scripts/check-import-boundaries.mjs): the static closure of each sentinel, in modules and source bytes, may not exceed its budget; an ordinary run fails over budget. `node scripts/check-import-boundaries.mjs --update` sets every budget to ceil(measured x (100 + marginPercent) / 100), raising or lowering it (D927), so the diff of this file shows each change for review. Set 2026-09-27 at measured + 10%.",
   "marginPercent": {
     "files": 10,
     "bytes": 10

@@ -32,10 +32,12 @@
  *   R4 cycle allowlist    the static-edge cycles (SCCs) are exactly the listed
  *                         ones: a new, grown, shrunk or vanished SCC fails.
  *   R5 closure budgets    each sentinel's static closure stays within
- *                         scripts/import-budgets.json ({files, bytes}).
- *                         `--update` lowers a budget to the measured value
- *                         plus the file's margin and never raises one; raising
- *                         is a hand edit, visible in review.
+ *                         scripts/import-budgets.json ({files, bytes}); an
+ *                         ordinary run fails over budget and writes nothing.
+ *                         `--update` sets every budget to the measured value
+ *                         plus the file's margin, raising or lowering it
+ *                         (D927), and judges R5 again against the file it
+ *                         wrote; the diff of that file shows every change.
  *
  * usage: node scripts/check-import-boundaries.mjs [--self-test | --update] [--root <checkout>]
  */
@@ -508,7 +510,7 @@ function ruleR5(graph, budgets, sizeOf) {
     for (const unit of ['files', 'bytes']) {
       if (current[unit] > budget[unit]) {
         diagnostics.push(`R5 ${sentinel}: static closure has ${String(current[unit])} ${unit}, over its budget of ` +
-          `${String(budget[unit])}; slim the import, or raise the budget by hand in ${BUDGETS_FILE}`);
+          `${String(budget[unit])}; slim the import, or accept the growth with --update (the diff of ${BUDGETS_FILE} shows it)`);
       }
     }
     notes.push(`R5 ${sentinel}: ${String(current.files)}/${String(budget.files)} files, ` +
@@ -518,29 +520,26 @@ function ruleR5(graph, budgets, sizeOf) {
 }
 
 /**
- * `--update`: each budget becomes min(budget, ceil(measured × (100 +
- * marginPercent) / 100)), in integers so the ceiling is exact. It never
- * raises one; a measurement over budget is reported and left alone.
+ * `--update` (D927, owner: "Allow automatic raises"): each budget becomes
+ * ceil(measured × (100 + marginPercent) / 100), raised or lowered to it. A
+ * sentinel that is not in the graph keeps its budget, and R5 still fails on
+ * it. Returns the new budgets and one line per change.
  */
-function lowerBudgets(budgets, measured) {
+function updateBudgets(budgets, measured) {
   const next = structuredClone(budgets);
   const changes = [];
-  const refusals = [];
   for (const [sentinel, budget] of Object.entries(budgets.sentinels)) {
     const current = measured[sentinel];
     if (current === undefined) continue;
     for (const unit of ['files', 'bytes']) {
       const target = Math.ceil((current[unit] * (100 + budgets.marginPercent[unit])) / 100);
-      if (current[unit] > budget[unit]) {
-        refusals.push(`${sentinel} ${unit}: measured ${String(current[unit])} is over the budget ` +
-          `${String(budget[unit])}; --update never raises a budget`);
-      } else if (target < budget[unit]) {
-        next.sentinels[sentinel][unit] = target;
-        changes.push(`${sentinel} ${unit}: ${String(budget[unit])} -> ${String(target)}`);
-      }
+      if (target === budget[unit]) continue;
+      next.sentinels[sentinel][unit] = target;
+      changes.push(`${sentinel} ${unit}: ${String(budget[unit])} -> ${String(target)} ` +
+        `(${target > budget[unit] ? 'raised' : 'lowered'})`);
     }
   }
-  return { budgets: next, changes, refusals };
+  return { budgets: next, changes };
 }
 
 function runRules(graph, policy) {
@@ -590,6 +589,7 @@ function checkoutHost(root) {
   return {
     isFile: (file) => stat(file)?.isFile() === true,
     readFile: (file) => fs.readFileSync(path.join(root, file), 'utf8'),
+    writeFile: (file, text) => fs.writeFileSync(path.join(root, file), text),
     filesBelow: walk,
     sizeOf: (file) => stat(file)?.size ?? 0,
     roots: () => [
@@ -599,9 +599,8 @@ function checkoutHost(root) {
   };
 }
 
-function readBudgets(root) {
-  const file = path.join(root, BUDGETS_FILE);
-  const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+function readBudgets(host) {
+  const parsed = JSON.parse(host.readFile(BUDGETS_FILE));
   for (const unit of ['files', 'bytes']) {
     if (!Number.isInteger(parsed.marginPercent?.[unit]) || parsed.marginPercent[unit] < 0) {
       throw new Error(`${BUDGETS_FILE}: marginPercent.${unit} must be a non-negative integer`);
@@ -617,33 +616,54 @@ function readBudgets(root) {
   return parsed;
 }
 
-function runCheckout(root, update) {
+/** The repository's R2 allowlist, R3 entries and R4 cycles. */
+const REPOSITORY_RULES = Object.freeze({
+  srdImporters: SRD_TEXT_IMPORTERS,
+  forbidden: FORBIDDEN_REACHABILITY,
+  cycles: ALLOWED_CYCLES,
+});
+
+/**
+ * One run over a checkout. `host`: as for buildModuleGraph, plus roots(),
+ * sizeOf() and writeFile(); `rules`: `{ srdImporters, forbidden, cycles }`.
+ * With `update`, the budgets file is rewritten to the measurement and R5 is
+ * judged again against the file as written, so the run fails only on what an
+ * update cannot settle (another rule, or a sentinel that is not in the graph).
+ * The CLI and the self-test both run exactly this.
+ */
+function checkCheckout(host, rules, update) {
   const started = performance.now();
-  const host = checkoutHost(root);
-  const roots = host.roots();
-  const graph = buildModuleGraph(roots, host);
-  const built = performance.now();
-  const budgets = readBudgets(root);
+  const graph = buildModuleGraph(host.roots(), host);
+  const graphSeconds = (performance.now() - started) / 1000;
+  const budgets = readBudgets(host);
   const results = runRules(graph, {
-    srd: { ...SRD_POLICY, importers: SRD_TEXT_IMPORTERS },
-    forbidden: FORBIDDEN_REACHABILITY,
-    cycles: ALLOWED_CYCLES,
+    srd: { ...SRD_POLICY, importers: rules.srdImporters },
+    forbidden: rules.forbidden,
+    cycles: rules.cycles,
     budgets,
     sizeOf: host.sizeOf,
     isFile: host.isFile,
     filesBelow: host.filesBelow,
   });
+  const changes = [];
+  if (update) {
+    const updated = updateBudgets(budgets, results.R5.measured);
+    changes.push(...updated.changes);
+    if (updated.changes.length > 0) host.writeFile(BUDGETS_FILE, `${JSON.stringify(updated.budgets, null, 2)}\n`);
+    results.R5 = ruleR5(graph, readBudgets(host), host.sizeOf);
+  }
+  return { graph, graphSeconds, results, changes };
+}
+
+function runCheckout(root, update) {
+  const started = performance.now();
+  const { graph, graphSeconds, results, changes } = checkCheckout(checkoutHost(root), REPOSITORY_RULES, update);
   const diagnostics = Object.values(results).flatMap((result) => result.diagnostics);
   for (const note of Object.values(results).flatMap((result) => result.notes)) console.log(note);
   if (update) {
-    const lowered = lowerBudgets(budgets, results.R5.measured);
-    for (const refusal of lowered.refusals) console.error(`--update: ${refusal}`);
-    if (lowered.changes.length > 0) {
-      fs.writeFileSync(path.join(root, BUDGETS_FILE), `${JSON.stringify(lowered.budgets, null, 2)}\n`);
-    }
-    console.log(lowered.changes.length === 0
-      ? '--update: no budget lowered'
-      : `--update: lowered ${lowered.changes.join('; ')}`);
+    console.log(changes.length === 0
+      ? '--update: every budget already equals its measurement plus the margin'
+      : `--update: ${changes.join('; ')}`);
   }
   const edgeCount = [...graph.edges.values()].reduce((sum, edges) => sum + edges.length, 0);
   const seconds = ((performance.now() - started) / 1000).toFixed(2);
@@ -654,20 +674,24 @@ function runCheckout(root, update) {
     return;
   }
   console.log(`import boundaries: R0-R5 hold over ${String(graph.edges.size)} modules and ${String(edgeCount)} edges ` +
-    `(${String(results.R4.found.length)} allowed cycles; graph ${((built - started) / 1000).toFixed(2)} s, total ${seconds} s)`);
+    `(${String(results.R4.found.length)} allowed cycles; graph ${graphSeconds.toFixed(2)} s, total ${seconds} s)`);
 }
 
 // ---------------------------------------------------------------------------
 // Self-test: every rule, green on a clean fixture and red on each planted
 // violation. Fixtures are in-memory checkouts.
 
+/** An in-memory checkout over `files`, which writeFile() changes in place. */
 function fixtureHost(files) {
-  const names = Object.keys(files);
   return {
     isFile: (file) => Object.hasOwn(files, file),
     readFile: (file) => files[file],
-    filesBelow: (directory) => names.filter((name) => name.startsWith(`${directory}/`)),
+    writeFile: (file, text) => {
+      files[file] = text;
+    },
+    filesBelow: (directory) => Object.keys(files).filter((name) => name.startsWith(`${directory}/`)),
     sizeOf: (file) => Buffer.byteLength(files[file] ?? ''),
+    roots: () => Object.keys(files).filter(isCodeFile).sort(),
   };
 }
 
@@ -1019,20 +1043,71 @@ const SELF_TESTS = [
   },
 ];
 
-function lowerBudgetsSelfTest() {
+/**
+ * The --update witness (D927), run through checkCheckout exactly as the CLI
+ * runs it. src/main.ts is over both budgets and src/lean.ts far under them.
+ * The budgets after --update are worked by hand, at a 10% margin:
+ *   src/main.ts loads itself (25 bytes) and src/b.ts (20 bytes): 2 files and
+ *     45 bytes, so ceil(2 × 1.1) = 3 files and ceil(45 × 1.1) = ceil(49.5) = 50
+ *     bytes, raised from 1 and 30;
+ *   src/lean.ts is 1 file of 23 bytes, so ceil(1.1) = 2 files and ceil(25.3) =
+ *     26 bytes, lowered from 5 and 1000.
+ */
+const UPDATE_WITNESS_BUDGETS = {
+  about: 'the --update witness',
+  marginPercent: { files: 10, bytes: 10 },
+  sentinels: { 'src/main.ts': { files: 1, bytes: 30 }, 'src/lean.ts': { files: 5, bytes: 1000 } },
+};
+const UPDATE_WITNESS_WRITTEN = '{\n  "about": "the --update witness",\n  "marginPercent": {\n    "files": 10,\n    "bytes": 10\n  },\n' +
+  '  "sentinels": {\n    "src/main.ts": {\n      "files": 3,\n      "bytes": 50\n    },\n    "src/lean.ts": {\n' +
+  '      "files": 2,\n      "bytes": 26\n    }\n  }\n}\n';
+const UPDATE_WITNESS_CHANGES = [
+  'src/main.ts files: 1 -> 3 (raised)',
+  'src/main.ts bytes: 30 -> 50 (raised)',
+  'src/lean.ts files: 5 -> 2 (lowered)',
+  'src/lean.ts bytes: 1000 -> 26 (lowered)',
+];
+
+function updateWitness() {
   const failures = [];
-  const budgets = {
-    marginPercent: { files: 10, bytes: 50 },
-    sentinels: { 'a.ts': { files: 100, bytes: 1000 }, 'b.ts': { files: 10, bytes: 100 } },
+  const files = {
+    'src/main.ts': "import { b } from './b';\n",
+    'src/b.ts': 'export const b = 1;\n',
+    'src/lean.ts': 'export const lean = 1;\n',
+    [BUDGETS_FILE]: `${JSON.stringify(UPDATE_WITNESS_BUDGETS, null, 2)}\n`,
   };
-  const result = lowerBudgets(budgets, { 'a.ts': { files: 50, bytes: 800 }, 'b.ts': { files: 11, bytes: 90 } });
-  const a = result.budgets.sentinels['a.ts'];
-  const b = result.budgets.sentinels['b.ts'];
-  if (a.files !== 55 || a.bytes !== 1000) failures.push(`--update lowered a.ts to ${JSON.stringify(a)}, expected {files:55, bytes:1000}`);
-  if (b.files !== 10 || b.bytes !== 100) failures.push(`--update changed b.ts to ${JSON.stringify(b)}, expected it unchanged`);
-  if (result.refusals.length !== 1) failures.push(`--update reported ${String(result.refusals.length)} refusal(s), expected 1`);
-  if (budgets.sentinels['a.ts'].files !== 100) failures.push('--update mutated its input');
-  return failures;
+  const before = files[BUDGETS_FILE];
+  const host = fixtureHost(files);
+  const rules = { srdImporters: [], forbidden: [], cycles: [] };
+  const run = (step, update) => {
+    const outcome = checkCheckout(host, rules, update);
+    const others = Object.entries(outcome.results).filter(([rule]) => rule !== 'R5').flatMap(([, result]) => result.diagnostics);
+    if (others.length > 0) failures.push(`--update witness, ${step}: other rules fired:\n  ${others.join('\n  ')}`);
+    return { r5: outcome.results.R5.diagnostics, changes: outcome.changes };
+  };
+
+  const ordinary = run('an ordinary run', false);
+  if (ordinary.r5.length !== 2 || !ordinary.r5.every((diagnostic) => diagnostic.startsWith('R5 src/main.ts: static closure has'))) {
+    failures.push(`--update witness: an ordinary run must fail src/main.ts's file and byte budgets, got:\n  ${ordinary.r5.join('\n  ')}`);
+  }
+  if (files[BUDGETS_FILE] !== before) failures.push('--update witness: an ordinary run rewrote the budgets');
+
+  const updated = run('--update', true);
+  if (files[BUDGETS_FILE] !== UPDATE_WITNESS_WRITTEN) {
+    failures.push(`--update witness: wrote\n${files[BUDGETS_FILE]}expected\n${UPDATE_WITNESS_WRITTEN}`);
+  }
+  if (JSON.stringify(updated.changes) !== JSON.stringify(UPDATE_WITNESS_CHANGES)) {
+    failures.push(`--update witness: reported ${JSON.stringify(updated.changes)}, expected ${JSON.stringify(UPDATE_WITNESS_CHANGES)}`);
+  }
+  if (updated.r5.length > 0) failures.push(`--update witness: R5 still fails after --update:\n  ${updated.r5.join('\n  ')}`);
+
+  const again = run('a second --update', true);
+  if (again.changes.length > 0 || files[BUDGETS_FILE] !== UPDATE_WITNESS_WRITTEN) {
+    failures.push(`--update witness: a second --update changed ${JSON.stringify(again.changes)}`);
+  }
+  const after = run('an ordinary run after --update', false);
+  if (after.r5.length > 0) failures.push(`--update witness: an ordinary run after --update fails:\n  ${after.r5.join('\n  ')}`);
+  return { failures, report: `R5 --update ${updated.changes.join('; ')}; then R5 green` };
 }
 
 function runSelfTest() {
@@ -1060,7 +1135,9 @@ function runSelfTest() {
       failures.push(`${fixture.rule} fixture '${fixture.name}': other rules fired:\n  ${others.join('\n  ')}`);
     }
   }
-  failures.push(...lowerBudgetsSelfTest());
+  const witness = updateWitness();
+  failures.push(...witness.failures);
+  report.push(witness.report);
   for (const rule of ['R0', 'R1', 'R2', 'R3', 'R4', 'R5']) {
     const fixtures = SELF_TESTS.filter((fixture) => fixture.rule === rule);
     if (!fixtures.some((fixture) => fixture.expect === 0) ||
@@ -1074,7 +1151,7 @@ function runSelfTest() {
     return;
   }
   for (const line of report) console.log(line);
-  console.log(`import-boundaries self-test: ${String(SELF_TESTS.length)} fixtures and the --update ratchet passed`);
+  console.log(`import-boundaries self-test: ${String(SELF_TESTS.length)} fixtures and the --update witness passed`);
 }
 
 // ---------------------------------------------------------------------------
