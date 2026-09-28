@@ -14,7 +14,7 @@ import {
   verifySessionHistoryArchive,
   type SessionHistoryArchive,
 } from '../src/vtt/session-persistence';
-import type { DriverReport, DriverTurn } from './session-archive-replay-driver';
+import { SESSION_ARCHIVE_REPLAY_DRIVER_PATH, type DriverReport, type DriverTurn } from './session-archive-replay-driver';
 
 /**
  * OFFLINE ARCHIVE VERIFICATION (FOOTPRINT fix1; owner D919 "verifiable with the rules it was recorded under, on
@@ -40,7 +40,6 @@ import type { DriverReport, DriverTurn } from './session-archive-replay-driver';
  */
 
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const DRIVER_PATH = 'tools/session-archive-replay-driver.ts';
 
 /** Whose word names the commit a replay ran at. */
 export type ReplayBasis = 'recorded' | 'operator_assumed';
@@ -127,14 +126,14 @@ function extractCommit(repositoryRoot: string, commit: EngineCommit, directory: 
   const untar = spawnSync('tar', ['-x', '-C', directory], { input: tree.stdout });
   if (untar.error !== undefined || untar.status !== 0) return `tar: ${untar.error?.message ?? untar.stderr.toString('utf8')}`;
   mkdirSync(join(directory, 'tools'), { recursive: true });
-  copyFileSync(join(REPOSITORY_ROOT, DRIVER_PATH), join(directory, DRIVER_PATH));
+  copyFileSync(join(REPOSITORY_ROOT, SESSION_ARCHIVE_REPLAY_DRIVER_PATH), join(directory, SESSION_ARCHIVE_REPLAY_DRIVER_PATH));
   return null;
 }
 
 async function bundleDriver(repositoryRoot: string, directory: string, outfile: string): Promise<void> {
   await esbuild.build({
     absWorkingDir: directory,
-    entryPoints: [join(directory, DRIVER_PATH)],
+    entryPoints: [join(directory, SESSION_ARCHIVE_REPLAY_DRIVER_PATH)],
     outfile,
     bundle: true,
     platform: 'node',

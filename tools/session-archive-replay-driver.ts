@@ -24,6 +24,13 @@ import {
  * argv[2]: a JSON file { "source": ArchivedSource }. stdout: one line of JSON, a DriverReport.
  */
 
+/**
+ * Where the driver lives in a checkout: the tool copies this checkout's driver to the same path in the throwaway
+ * checkout, so its `../src/...` imports resolve to THAT commit's src/. The tool imports this value, which also makes
+ * the driver a runtime import of the tool for every import-graph reader (it is otherwise only copied and spawned).
+ */
+export const SESSION_ARCHIVE_REPLAY_DRIVER_PATH = 'tools/session-archive-replay-driver.ts';
+
 export type DriverTurn =
   | { readonly revision: number; readonly transition: string; readonly status: 'pass' }
   | { readonly revision: number; readonly transition: string; readonly status: 'fail'; readonly error: string }
