@@ -4,8 +4,11 @@ import { OWNER_RULINGS } from './owner-rulings';
 import { RULE_STATUS } from './rule-status';
 import {
   CAPABILITY_OWNER,
+  OWNER_EXCLUSIONS,
   RULE_STATUS_NAMES,
   type Capability,
+  type ExcludedClause,
+  type OwnerExclusionId,
   type RuleStatus,
   type RuleStatusName,
   type UnitId,
@@ -28,6 +31,8 @@ export interface RuleCoverage {
   readonly byStatus: Readonly<Record<RuleStatusName, number>>;
   /** Rules not yet executed, by the unit that owns the next step. */
   readonly byOwner: Readonly<Partial<Record<UnitId | 'owner_decision' | 'none', number>>>;
+  /** What each owner exclusion keeps out: whole rules, and clauses of rules that also print retained behaviour. */
+  readonly byExclusion: Readonly<Record<OwnerExclusionId, { readonly rules: number; readonly clauses: number }>>;
 }
 
 /** Who owns the next step for a rule in this status. */
@@ -46,6 +51,21 @@ export function nextOwner(status: RuleStatus): UnitId | 'owner_decision' | 'none
       return status.ruling === null ? 'owner_decision' : OWNER_RULINGS[status.ruling].executedBy[0];
     case 'unrepresented':
       return status.unit;
+  }
+}
+
+/** The clauses of a rule the owner excluded while the rest of it is kept. */
+export function excludedClauses(status: RuleStatus): readonly ExcludedClause[] {
+  switch (status.status) {
+    case 'executed':
+    case 'partial':
+    case 'typed_only':
+    case 'unrepresented':
+      return status.excluded ?? [];
+    case 'excluded_by_owner':
+    case 'not_executable':
+    case 'source_disagreement':
+      return [];
   }
 }
 
@@ -75,14 +95,23 @@ export function ruleCoverage(
   const byKind = Object.fromEntries(SRD_RULE_KINDS.map((kind) => [kind, zeroes()])) as Record<SrdRuleKind, Record<RuleStatusName, number>>;
   const byStatus = zeroes();
   const byOwner: Partial<Record<UnitId | 'owner_decision' | 'none', number>> = {};
+  const byExclusion = Object.fromEntries(
+    (Object.keys(OWNER_EXCLUSIONS) as OwnerExclusionId[]).map((exclusion) => [exclusion, { rules: 0, clauses: 0 }]),
+  ) as Record<OwnerExclusionId, { rules: number; clauses: number }>;
   for (const id of SRD_RULE_IDS) {
     const status = statusOf(id);
     byKind[SRD_RULE_INDEX[id].kind][status.status] += 1;
     byStatus[status.status] += 1;
     const owner = nextOwner(status);
     byOwner[owner] = (byOwner[owner] ?? 0) + 1;
+    if (status.status === 'excluded_by_owner') {
+      byExclusion[status.exclusion].rules += 1;
+    }
+    for (const { exclusion } of excludedClauses(status)) {
+      byExclusion[exclusion].clauses += 1;
+    }
   }
-  return { total: SRD_RULE_IDS.length, byKind, byStatus, byOwner };
+  return { total: SRD_RULE_IDS.length, byKind, byStatus, byOwner, byExclusion };
 }
 
 /** The matrix as fixed-width text, one row per kind. */
@@ -103,6 +132,8 @@ export function formatRuleCoverage(coverage: RuleCoverage): string {
     const ruling = OWNER_RULINGS[id];
     return `  ${id} (${ruling.decision}, ${ruling.kind}): ${String(ruling.rules.length)} rules; executed by ${ruling.executedBy.join(', ')}`;
   });
+  const exclusions = (Object.keys(OWNER_EXCLUSIONS) as OwnerExclusionId[]).map((exclusion) =>
+    `  ${exclusion} (${OWNER_EXCLUSIONS[exclusion].decisions.join(', ')}): ${String(coverage.byExclusion[exclusion].rules)} whole rules, ${String(coverage.byExclusion[exclusion].clauses)} clauses`);
   return [
     'SRD 5.2.1 rule coverage (derived from RULE_STATUS; a report, never a pinned expectation)',
     '',
@@ -114,6 +145,9 @@ export function formatRuleCoverage(coverage: RuleCoverage): string {
     '',
     'Owner rulings (data; each executed by its unit, failing test first):',
     ...rulings,
+    '',
+    'Owner exclusions (typed, never executed; D923 Q8):',
+    ...exclusions,
     '',
   ].join('\n');
 }

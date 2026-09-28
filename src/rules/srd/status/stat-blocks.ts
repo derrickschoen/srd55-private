@@ -312,7 +312,10 @@ export const STAT_BLOCKS_STATUS = {
   'stat_block.lizard': UNREPRESENTED_SRD_MONSTERS,
   'stat_block.mammoth': UNREPRESENTED_SRD_MONSTERS,
   'stat_block.mastiff': UNREPRESENTED_SRD_MONSTERS,
-  'stat_block.mule': UNREPRESENTED_SRD_MONSTERS,
+  'stat_block.mule': {
+    ...UNREPRESENTED_SRD_MONSTERS,
+    excluded: [{ clause: 'Beast of Burden. The mule counts as one size larger for the purpose of determining its carrying capacity.', exclusion: 'encumbrance' }],
+  },
   'stat_block.octopus': UNREPRESENTED_SRD_MONSTERS,
   'stat_block.owl': UNREPRESENTED_SRD_MONSTERS,
   'stat_block.panther': UNREPRESENTED_SRD_MONSTERS,

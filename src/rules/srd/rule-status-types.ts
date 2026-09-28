@@ -22,7 +22,10 @@ import type { SrdSpan } from './rule-index-types';
  * `typed_only` clause names the declaration that types it and the member that
  * does. A clause no type holds cannot be quoted anywhere, so a rule with one
  * cannot be `typed_only` — the P1 of the RULE-INDEX r1 review (Burrow, Climb
- * and Swim Speed, whose restrictions no type holds).
+ * and Swim Speed, whose restrictions no type holds). A clause the owner
+ * excluded (D923 Q8) is quoted the same way, citing `OWNER_EXCLUSIONS`, on any
+ * status whose rule also prints retained behaviour; a rule excluded whole is
+ * `excluded_by_owner`.
  *
  * `unrepresented` is TRANSITIONAL. The rules program ends when that member is
  * deleted from this union, which makes "every SRD rule is represented" a
@@ -91,6 +94,14 @@ export interface TypedClause {
  * RULES-CORE for the core rules no planned unit owned, PERCEPTION for hearing
  * and sight filters). `UNASSIGNED` is honest: no planned unit owns the rule
  * yet, which is an owner question, never a silent default.
+ *
+ * The plan's OWNER-GATED-ROWS (rank 16) typed rows the owner had not ruled on.
+ * D923 Q8 ruled: the exclusions it kept are statuses and clauses citing
+ * `OWNER_EXCLUSIONS`, and the two areas it moved into execution have their
+ * own units, named after its two selections: TOOLS-LANGUAGES ("Tools &
+ * languages typed": tool and language proficiencies the sheet and checks use)
+ * and COINS-COSTS ("Coins and equipment costs": gold, item prices, buying
+ * starting equipment, spell material costs in gp).
  */
 export const UNIT_IDS = [
   'FOOTPRINT',
@@ -118,7 +129,8 @@ export const UNIT_IDS = [
   'SRD-MONSTERS',
   'WORLD-TOOLBOX',
   'MAGIC-ITEMS',
-  'OWNER-GATED-ROWS',
+  'TOOLS-LANGUAGES',
+  'COINS-COSTS',
   'WEAPON-EXEC',
   'MONSTER-EXEC',
   'ACTIONS-COMPLETE',
@@ -195,23 +207,60 @@ export const OWNER_RULING_IDS = [
 ] as const;
 export type OwnerRulingId = (typeof OWNER_RULING_IDS)[number];
 
+/**
+ * THE OWNER'S EXCLUSIONS (D923 Q8): mechanics the SRD prints that the owner
+ * keeps out of execution, each with the decisions that rule it out. A whole
+ * rule cites one as `excluded_by_owner`; a rule that also prints retained
+ * behaviour quotes each excluded clause (`ExcludedClause`) and keeps its
+ * status for the rest.
+ *
+ * NOT here, because D923 moved them into execution: tools and languages
+ * (D44/D102 superseded) and coins and equipment costs (D86/D40's "no coins"
+ * superseded), which are `unrepresented` with TOOLS-LANGUAGES and COINS-COSTS.
+ * D65's gold alternative is buying starting equipment, which coins cover, so
+ * nothing of D61/D65 stays excluded but the background's fixed feat.
+ */
+export const OWNER_EXCLUSIONS = {
+  /** Carrying capacity and the weight limits it sets ("Encumbrance is not included"). */
+  encumbrance: { decisions: ['D923', 'D86'] },
+  /** A character's Experience Points and levelling by them (a monster's XP value is kept). */
+  character_xp: { decisions: ['D923', 'D142'] },
+  /** Rolling a character's parts at random: ability scores by 4d6, a trinket. */
+  random_generation: { decisions: ['D923', 'D55'] },
+  /** The Origin feat a background fixes; the feat is the player's choice, the printed one a suggestion. */
+  fixed_background_feat: { decisions: ['D923', 'D61'] },
+} as const satisfies Readonly<Record<string, { readonly decisions: readonly [DecisionId, ...DecisionId[]] }>>;
+export type OwnerExclusionId = keyof typeof OWNER_EXCLUSIONS;
+
+/** A clause the owner keeps out of execution, quoted from the rule's printed text. */
+export interface ExcludedClause {
+  readonly clause: ClauseQuote;
+  readonly exclusion: OwnerExclusionId;
+}
+
+/**
+ * The clauses of a rule the owner excluded, when the rule also prints
+ * retained behaviour. Their quotes count toward a claiming status's coverage.
+ */
+type WithExclusions = { readonly excluded?: readonly [ExcludedClause, ...ExcludedClause[]] };
+
 export type RuleStatus =
-  /** Every clause executes; the clauses quote all of the rule's text. */
-  | { readonly status: 'executed'; readonly clauses: readonly [ExecutedClause, ...ExecutedClause[]] }
+  /** Every clause executes (or is excluded); the clauses quote all of the rule's text. */
+  | ({ readonly status: 'executed'; readonly clauses: readonly [ExecutedClause, ...ExecutedClause[]] } & WithExclusions)
   /** Some clauses execute (witnessed); the rest are quoted with what they await. Together they quote all of it. */
-  | {
+  | ({
       readonly status: 'partial';
       readonly executed: readonly [ExecutedClause, ...ExecutedClause[]];
       readonly missing: readonly [MissingClause, ...MissingClause[]];
-    }
+    } & WithExclusions)
   /** Every clause is typed and nothing executes it yet. */
-  | {
+  | ({
       readonly status: 'typed_only';
       readonly clauses: readonly [TypedClause, ...TypedClause[]];
       readonly awaiting: readonly [Capability, ...Capability[]];
-    }
-  /** Represented as data; the owner ruled it out of execution. */
-  | { readonly status: 'excluded_by_owner'; readonly decision: DecisionId }
+    } & WithExclusions)
+  /** Represented as data; the owner ruled the whole rule out of execution. */
+  | { readonly status: 'excluded_by_owner'; readonly exclusion: OwnerExclusionId }
   /** Nothing to execute. */
   | { readonly status: 'not_executable'; readonly reason: 'definitional' | 'gm_narrative' | 'table_adjudicated' }
   /** The SRD contradicts itself; the spans say where, the ruling (if any) which reading holds. */
@@ -220,8 +269,11 @@ export type RuleStatus =
       readonly spans: readonly [SrdSpan, SrdSpan, ...SrdSpan[]];
       readonly ruling: OwnerRulingId | null;
     }
-  /** TRANSITIONAL: identified, not yet typed; `unit` is who types it. */
-  | { readonly status: 'unrepresented'; readonly unit: UnitId };
+  /**
+   * TRANSITIONAL: identified, not yet typed; `unit` is who types it. Clauses
+   * the owner excluded are quoted already, so the typing unit starts from them.
+   */
+  | ({ readonly status: 'unrepresented'; readonly unit: UnitId } & WithExclusions);
 
 export type RuleStatusName = RuleStatus['status'];
 

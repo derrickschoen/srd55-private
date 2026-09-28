@@ -8,15 +8,17 @@ import {
   uncoveredText,
 } from '../../helpers/srd-rule-evidence';
 import { existsSync, readFileSync } from '../../helpers/test-filesystem';
-import { formatRuleCoverage, nextOwner, ruleCoverage } from '../../../src/rules/srd/rule-coverage';
+import { excludedClauses, formatRuleCoverage, nextOwner, ruleCoverage } from '../../../src/rules/srd/rule-coverage';
 import { SRD_RULE_IDS, SRD_RULE_INDEX, type SrdRuleId } from '../../../src/rules/srd/rule-index';
 import { RULE_STATUS } from '../../../src/rules/srd/rule-status';
 import {
   CAPABILITIES,
   CAPABILITY_OWNER,
+  OWNER_EXCLUSIONS,
   RULE_STATUS_NAMES,
   UNIT_IDS,
   type ClauseQuote,
+  type OwnerExclusionId,
   type RuleStatus,
   type RuleStatusRecord,
   type TypedClause,
@@ -38,14 +40,21 @@ import {
 const STATUS = RULE_STATUS as RuleStatusRecord;
 const ROOT = process.cwd();
 
+/**
+ * The quotes of a status that claims the whole rule, which must cover all of
+ * its text: its executed, missing or typed clauses and the clauses the owner
+ * excluded. `unrepresented` claims nothing (its excluded clauses are checked
+ * on their own).
+ */
 function quotesOf(status: RuleStatus): readonly ClauseQuote[] {
+  const excluded = excludedClauses(status).map(({ clause }) => clause);
   switch (status.status) {
     case 'executed':
-      return status.clauses.map(({ clause }) => clause);
+      return [...status.clauses.map(({ clause }) => clause), ...excluded];
     case 'partial':
-      return [...status.executed.map(({ clause }) => clause), ...status.missing.map(({ clause }) => clause)];
+      return [...status.executed.map(({ clause }) => clause), ...status.missing.map(({ clause }) => clause), ...excluded];
     case 'typed_only':
-      return status.clauses.map(({ clause }) => clause);
+      return [...status.clauses.map(({ clause }) => clause), ...excluded];
     case 'excluded_by_owner':
     case 'not_executable':
     case 'source_disagreement':
@@ -183,7 +192,7 @@ describe('RULE_STATUS', () => {
           }
           break;
         case 'excluded_by_owner':
-          expect(status.decision).toMatch(/^D\d+(?:\.\d+)?$/);
+          expect(Object.keys(OWNER_EXCLUSIONS)).toContain(status.exclusion);
           break;
         case 'not_executable':
           break;
@@ -274,6 +283,104 @@ describe('RULE_STATUS', () => {
   });
 });
 
+/* ==========================================================================
+ * THE OWNER'S EXCLUSIONS (D923 Q8). Each is re-derived from the printed text:
+ * every rule that names an excluded mechanic is excluded whole, or quotes the
+ * clause that names it, and nothing is excluded that does not name it.
+ * ========================================================================== */
+
+/** How the SRD names each excluded mechanic in a rule's text. */
+const MENTIONS: { readonly [E in OwnerExclusionId]: RegExp } = {
+  encumbrance: /carrying capacit/gi,
+  character_xp: /\bXP\b|Experience Points?\b/g,
+  random_generation: /Random Generation|roll once on the Trinkets table/g,
+  // A background's printed feat, and the rule that it is fixed.
+  fixed_background_feat: /specified Origin feat|Feat: [A-Z][^“]*\(see “Feats”\)/g,
+};
+
+/**
+ * Rules that print a MONSTER's XP, which is kept (its value, the encounter
+ * budgets spent in it: MON-TABLES, D922 Q7), hand-listed with why: the
+ * glossary's abbreviation list ("XP Experience"), the XP budgets of Combat
+ * Encounters, Parts of a Stat Block (its value and the XP table; the award to
+ * characters is excluded there as a clause), the glossary's description of a
+ * stat block's XP entry, and every stat block, including the ones printed in
+ * spells ("CR None (XP 0; …)").
+ */
+function printsMonsterXp(id: SrdRuleId): boolean {
+  const monsterXp: readonly SrdRuleId[] = [
+    'rule_section.rules-glossary',
+    'rule_section.gameplay-toolbox.combat-encounters',
+    'rule_section.monsters.parts-of-a-stat-block',
+    'glossary.stat-block',
+  ];
+  return monsterXp.includes(id) || SRD_RULE_INDEX[id].kind === 'stat_block' || SRD_RULE_INDEX[id].kind === 'spell';
+}
+
+describe('the owner\'s exclusions (D923 Q8)', () => {
+  it('are the four mechanics D923 kept out, each citing D923 and the decision it upholds', () => {
+    expect(Object.entries(OWNER_EXCLUSIONS).map(([id, { decisions }]) => [id, [...decisions]])).toEqual([
+      ['encumbrance', ['D923', 'D86']],
+      ['character_xp', ['D923', 'D142']],
+      ['random_generation', ['D923', 'D55']],
+      ['fixed_background_feat', ['D923', 'D61']],
+    ]);
+  });
+
+  it('quotes each excluded clause from its rule\'s printed text', () => {
+    const excluded = SRD_RULE_IDS.flatMap((id) => excludedClauses(STATUS[id]).map((clause) => ({ id, clause })));
+    expect(excluded.length).toBeGreaterThan(0);
+    for (const { id, clause } of excluded) {
+      expect({ id, clause: clause.clause, printed: ruleText(id).includes(clause.clause) }).toEqual({ id, clause: clause.clause, printed: true });
+    }
+  });
+
+  it('marks every rule that names an excluded mechanic, where it names it, and only there', () => {
+    for (const id of SRD_RULE_IDS) {
+      const status = STATUS[id];
+      const text = ruleText(id);
+      const clauses = excludedClauses(status);
+      for (const exclusion of Object.keys(MENTIONS) as OwnerExclusionId[]) {
+        const whole = status.status === 'excluded_by_owner' && status.exclusion === exclusion;
+        const mine = clauses.filter((clause) => clause.exclusion === exclusion);
+        // Every mention lies inside the whole exclusion or one of its clauses.
+        if (!(exclusion === 'character_xp' && printsMonsterXp(id))) {
+          for (const mention of text.matchAll(MENTIONS[exclusion])) {
+            const covered = whole || mine.some(({ clause }) => {
+              for (let at = text.indexOf(clause); at >= 0; at = text.indexOf(clause, at + 1)) {
+                if (mention.index >= at && mention.index + mention[0].length <= at + clause.length) {
+                  return true;
+                }
+              }
+              return false;
+            });
+            expect({ id, exclusion, mention: mention[0], covered }).toEqual({ id, exclusion, mention: mention[0], covered: true });
+          }
+        }
+        // And nothing is excluded that does not name the mechanic.
+        if (whole) {
+          expect({ id, exclusion, named: [...text.matchAll(MENTIONS[exclusion])].length > 0 }).toEqual({ id, exclusion, named: true });
+        }
+        for (const { clause } of mine) {
+          expect({ id, clause, named: [...clause.matchAll(MENTIONS[exclusion])].length > 0 }).toEqual({ id, clause, named: true });
+        }
+      }
+    }
+  });
+
+  it('leaves what D923 moved into execution unrepresented with its unit: tools and languages, coins and costs', () => {
+    const units = (ids: readonly SrdRuleId[]): string[] => [...new Set(ids.map((id) => {
+      const status = STATUS[id];
+      return status.status === 'unrepresented' ? status.unit : status.status;
+    }))];
+    expect(units([...SRD_RULE_IDS.filter((id) => id.startsWith('tool.')), 'rule_section.equipment.tools'])).toEqual(['TOOLS-LANGUAGES']);
+    expect(units([...SRD_RULE_IDS.filter((id) => id.startsWith('adventuring_gear.')), 'rule_section.equipment.coins', 'rule_section.equipment.adventuring-gear']))
+      .toEqual(['COINS-COSTS']);
+    // No rule is excluded for its tools, languages, coins or prices.
+    expect(Object.keys(OWNER_EXCLUSIONS).filter((id) => /tool|language|coin|cost|gold|price/.test(id))).toEqual([]);
+  });
+});
+
 describe('the rule coverage report', () => {
   it('counts every rule once, in the status the record gives it', () => {
     const coverage = ruleCoverage();
@@ -295,7 +402,8 @@ describe('the rule coverage report', () => {
     expect(nextOwner({ status: 'partial', executed: [{ clause: 'x', witness: [witness] }], missing: [{ clause: 'y', awaiting: 'movement_cost_kinds' }] }))
       .toBe('MOVE-COST');
     expect(nextOwner({ status: 'unrepresented', unit: 'SPELL-HEADERS' })).toBe('SPELL-HEADERS');
-    expect(nextOwner({ status: 'excluded_by_owner', decision: 'D102' })).toBe('owner_decision');
+    expect(nextOwner({ status: 'excluded_by_owner', exclusion: 'encumbrance' })).toBe('owner_decision');
+    expect(nextOwner({ status: 'unrepresented', unit: 'CLASS-TABLES', excluded: [{ clause: 'x', exclusion: 'character_xp' }] })).toBe('CLASS-TABLES');
     expect(nextOwner({ status: 'source_disagreement', spans: ['docs/srd/source/a.txt:1-1', 'docs/srd/source/b.txt:1-1'], ruling: null }))
       .toBe('owner_decision');
     expect(nextOwner({ status: 'source_disagreement', spans: ['docs/srd/source/a.txt:1-1', 'docs/srd/source/b.txt:1-1'], ruling: 'spell-classes-union' }))

@@ -16,6 +16,12 @@ import type { RuleStatus } from '../rule-status-types';
  * materials a burrower passes through, the extra movement a climber or swimmer
  * does not spend), so nothing could be quoted for those clauses (RULE-INDEX r1
  * P1).
+ *
+ * The owner's exclusions (D923 Q8, `OWNER_EXCLUSIONS`): Carrying Capacity,
+ * Experience Points and Trinkets are excluded whole; a rule that names an
+ * excluded mechanic among retained ones quotes it in `excluded` (the status
+ * test re-derives every mention from the text). Tools, coins and costs, which
+ * D923 moved into execution, are TOOLS-LANGUAGES' and COINS-COSTS'.
  */
 const UNREPRESENTED_ACTIONS_COMPLETE = { status: 'unrepresented', unit: 'ACTIONS-COMPLETE' } as const;
 const UNREPRESENTED_CLASS_TABLES = { status: 'unrepresented', unit: 'CLASS-TABLES' } as const;
@@ -29,7 +35,8 @@ const UNREPRESENTED_MON_VOCAB = { status: 'unrepresented', unit: 'MON-VOCAB' } a
 const UNREPRESENTED_MOVE_COST = { status: 'unrepresented', unit: 'MOVE-COST' } as const;
 const UNREPRESENTED_MOVEMENT_MODES = { status: 'unrepresented', unit: 'MOVEMENT-MODES' } as const;
 const UNREPRESENTED_ORIGINS_FEATS = { status: 'unrepresented', unit: 'ORIGINS-FEATS' } as const;
-const UNREPRESENTED_OWNER_GATED_ROWS = { status: 'unrepresented', unit: 'OWNER-GATED-ROWS' } as const;
+const UNREPRESENTED_COINS_COSTS = { status: 'unrepresented', unit: 'COINS-COSTS' } as const;
+const UNREPRESENTED_TOOLS_LANGUAGES = { status: 'unrepresented', unit: 'TOOLS-LANGUAGES' } as const;
 const UNREPRESENTED_SPELL_EFFECT_FACTS = { status: 'unrepresented', unit: 'SPELL-EFFECT-FACTS' } as const;
 const UNREPRESENTED_SPELL_HEADERS = { status: 'unrepresented', unit: 'SPELL-HEADERS' } as const;
 const UNREPRESENTED_SRD_MONSTERS = { status: 'unrepresented', unit: 'SRD-MONSTERS' } as const;
@@ -54,7 +61,13 @@ export const RULES_STATUS = {
   'rule_section.playing-the-game.exploration': UNREPRESENTED_WORLD_TOOLBOX,
   'rule_section.playing-the-game.vision-and-light': UNREPRESENTED_WORLD_TOOLBOX,
   'rule_section.playing-the-game.hiding': UNREPRESENTED_ACTIONS_COMPLETE,
-  'rule_section.playing-the-game.interacting-with-objects': UNREPRESENTED_WORLD_TOOLBOX,
+  'rule_section.playing-the-game.interacting-with-objects': {
+    ...UNREPRESENTED_WORLD_TOOLBOX,
+    excluded: [{
+      clause: 'If you try to haul an unusually heavy object or a massive number of lighter objects, the GM might require you to abide by the rules for carrying capacity in “Rules Glossary.”',
+      exclusion: 'encumbrance',
+    }],
+  },
   'rule_section.playing-the-game.hazards': UNREPRESENTED_WORLD_TOOLBOX,
   'rule_section.playing-the-game.travel': UNREPRESENTED_WORLD_TOOLBOX,
   'rule_section.playing-the-game.combat': UNREPRESENTED_RULES_CORE,
@@ -78,16 +91,65 @@ export const RULES_STATUS = {
   'rule_section.playing-the-game.temporary-hit-points': UNREPRESENTED_RULES_CORE,
   'rule_section.character-creation': UNREPRESENTED_RULES_CORE,
   'rule_section.character-creation.choose-a-character-sheet': UNREPRESENTED_RULES_CORE,
-  'rule_section.character-creation.create-your-character': UNREPRESENTED_RULES_CORE,
-  'rule_section.character-creation.level-advancement': UNREPRESENTED_CLASS_TABLES,
-  'rule_section.character-creation.starting-at-higher-levels': UNREPRESENTED_OWNER_GATED_ROWS,
-  'rule_section.character-creation.multiclassing': UNREPRESENTED_CLASS_TABLES,
-  'rule_section.character-creation.trinkets': UNREPRESENTED_OWNER_GATED_ROWS,
+  'rule_section.character-creation.create-your-character': {
+    ...UNREPRESENTED_RULES_CORE,
+    excluded: [
+      { clause: 'advances in level by adventuring and gaining Experience Points (XP).', exclusion: 'character_xp' },
+      { clause: 'Write Your XP. Also record your Experience Points. A level 1 character has 0 XP.', exclusion: 'character_xp' },
+      {
+        clause: 'Random Generation. Roll four d6s and record the total of the highest three dice. Do this five more times, so you have six numbers.',
+        exclusion: 'random_generation',
+      },
+    ],
+  },
+  // The XP column and the XP rules are excluded; the Proficiency Bonus column,
+  // Gaining a Level and the tiers are CLASS-TABLES'.
+  'rule_section.character-creation.level-advancement': {
+    ...UNREPRESENTED_CLASS_TABLES,
+    excluded: [
+      {
+        clause: 'While going on adventures, your character gains experience, represented by Experience Points (XP). A character who reaches a specified Experience Point total advances in capability.',
+        exclusion: 'character_xp',
+      },
+      { clause: 'The Character Advancement table lists the XP you need to advance to a level', exclusion: 'character_xp' },
+      { clause: 'When your XP total equals or exceeds a number in the Experience Points column, you reach the corresponding level.', exclusion: 'character_xp' },
+      // The Character Advancement table's Experience Points column.
+      { clause: 'Level Experience Points', exclusion: 'character_xp' },
+    ],
+  },
+  // The starting money and magic items by level are COINS-COSTS' (D923: buying
+  // starting equipment); the starting XP and the XP-bought bonus feats are not.
+  'rule_section.character-creation.starting-at-higher-levels': {
+    ...UNREPRESENTED_COINS_COSTS,
+    excluded: [
+      {
+        clause: 'With this approach, each character gains one feat of their choice for every 30,000 XP the character earns above 355,000 XP.',
+        exclusion: 'character_xp',
+      },
+      {
+        clause: 'You begin with the minimum amount of XP required to reach your starting level. For example, if the GM starts you at level 10, you have 64,000 XP.',
+        exclusion: 'character_xp',
+      },
+    ],
+  },
+  'rule_section.character-creation.multiclassing': {
+    ...UNREPRESENTED_CLASS_TABLES,
+    excluded: [{
+      clause: 'Experience Points The Experience Point cost to gain a level is based on your total character level, not your level in a particular class, as shown in the Character Advancement table in “Character Creation.” For example, if you are a level 6 Cleric / level 1 Fighter, you must gain enough XP to reach level 8 before you can take your second level as a Fighter or your seventh level as a Cleric.',
+      exclusion: 'character_xp',
+    }],
+  },
+  // "When you make your character, you can roll once on the Trinkets table":
+  // a random table, for the character or the GM.
+  'rule_section.character-creation.trinkets': { status: 'excluded_by_owner', exclusion: 'random_generation' },
   'rule_section.classes': UNREPRESENTED_CLASS_TABLES,
   'rule_section.sorcerer.metamagic-options': UNREPRESENTED_FEATURE_REGISTRY,
   'rule_section.warlock.eldritch-invocation-options': UNREPRESENTED_FEATURE_REGISTRY,
   'rule_section.character-origins': UNREPRESENTED_ORIGINS_FEATS,
-  'rule_section.character-origins.character-backgrounds': UNREPRESENTED_ORIGINS_FEATS,
+  'rule_section.character-origins.character-backgrounds': {
+    ...UNREPRESENTED_ORIGINS_FEATS,
+    excluded: [{ clause: 'A background gives your character a specified Origin feat (described in “Feats”).', exclusion: 'fixed_background_feat' }],
+  },
   'rule_section.character-origins.character-species': UNREPRESENTED_ORIGINS_FEATS,
   'rule_section.feats': UNREPRESENTED_ORIGINS_FEATS,
   'rule_section.feats.feat-descriptions': UNREPRESENTED_ORIGINS_FEATS,
@@ -96,22 +158,34 @@ export const RULES_STATUS = {
   'rule_section.feats.fighting-style-feats': UNREPRESENTED_ORIGINS_FEATS,
   'rule_section.feats.epic-boon-feats': UNREPRESENTED_ORIGINS_FEATS,
   'rule_section.equipment': UNREPRESENTED_WEAPONS_ARMOR_DATA,
-  'rule_section.equipment.coins': UNREPRESENTED_OWNER_GATED_ROWS,
+  'rule_section.equipment.coins': UNREPRESENTED_COINS_COSTS,
   'rule_section.equipment.weapons': UNREPRESENTED_WEAPONS_ARMOR_DATA,
   'rule_section.equipment.properties': UNREPRESENTED_WEAPONS_ARMOR_DATA,
   'rule_section.equipment.mastery-properties': UNREPRESENTED_WEAPONS_ARMOR_DATA,
   'rule_section.equipment.armor': UNREPRESENTED_WEAPONS_ARMOR_DATA,
-  'rule_section.equipment.tools': UNREPRESENTED_OWNER_GATED_ROWS,
-  'rule_section.equipment.adventuring-gear': UNREPRESENTED_OWNER_GATED_ROWS,
-  'rule_section.equipment.mounts-and-vehicles': UNREPRESENTED_OWNER_GATED_ROWS,
-  'rule_section.equipment.lifestyle-expenses': UNREPRESENTED_OWNER_GATED_ROWS,
-  'rule_section.equipment.food-drink-and-lodging': UNREPRESENTED_OWNER_GATED_ROWS,
-  'rule_section.equipment.hirelings': UNREPRESENTED_OWNER_GATED_ROWS,
-  'rule_section.equipment.spellcasting': UNREPRESENTED_OWNER_GATED_ROWS,
-  'rule_section.equipment.magic-items': UNREPRESENTED_OWNER_GATED_ROWS,
-  'rule_section.equipment.crafting-nonmagical-items': UNREPRESENTED_OWNER_GATED_ROWS,
-  'rule_section.equipment.brewing-potions-of-healing': UNREPRESENTED_OWNER_GATED_ROWS,
-  'rule_section.equipment.scribing-spell-scrolls': UNREPRESENTED_OWNER_GATED_ROWS,
+  'rule_section.equipment.tools': UNREPRESENTED_TOOLS_LANGUAGES,
+  'rule_section.equipment.adventuring-gear': UNREPRESENTED_COINS_COSTS,
+  'rule_section.equipment.mounts-and-vehicles': {
+    ...UNREPRESENTED_COINS_COSTS,
+    excluded: [
+      { clause: 'The Mounts and Other Animals table shows each animal’s carrying capacity.', exclusion: 'encumbrance' },
+      // The table's Carrying Capacity column (its Cost column is COINS-COSTS').
+      { clause: 'Carrying Capacity', exclusion: 'encumbrance' },
+      {
+        clause: 'An animal pulling a carriage, cart, chariot, sled, or wagon can move weight up to five times its base carrying capacity, including the weight of the vehicle. If multiple animals pull the same vehicle, add their carrying capacities together.',
+        exclusion: 'encumbrance',
+      },
+    ],
+  },
+  'rule_section.equipment.lifestyle-expenses': UNREPRESENTED_COINS_COSTS,
+  'rule_section.equipment.food-drink-and-lodging': UNREPRESENTED_COINS_COSTS,
+  'rule_section.equipment.hirelings': UNREPRESENTED_COINS_COSTS,
+  'rule_section.equipment.spellcasting': UNREPRESENTED_COINS_COSTS,
+  // Identifying, attuning to and wearing magic items: magic item rules, not costs.
+  'rule_section.equipment.magic-items': UNREPRESENTED_MAGIC_ITEMS,
+  'rule_section.equipment.crafting-nonmagical-items': UNREPRESENTED_COINS_COSTS,
+  'rule_section.equipment.brewing-potions-of-healing': UNREPRESENTED_COINS_COSTS,
+  'rule_section.equipment.scribing-spell-scrolls': UNREPRESENTED_COINS_COSTS,
   'rule_section.spells': UNREPRESENTED_SPELL_HEADERS,
   'rule_section.spells.gaining-spells': UNREPRESENTED_SPELL_HEADERS,
   'rule_section.spells.casting-spells': UNREPRESENTED_SPELL_HEADERS,
@@ -138,7 +212,12 @@ export const RULES_STATUS = {
   'rule_section.magic-items.magic-items-a-z': UNREPRESENTED_MAGIC_ITEMS,
   'rule_section.monsters': UNREPRESENTED_SRD_MONSTERS,
   'rule_section.monsters.stat-block-overview': UNREPRESENTED_MON_VOCAB,
-  'rule_section.monsters.parts-of-a-stat-block': UNREPRESENTED_MON_VOCAB,
+  // A monster's XP value is kept (MON-TABLES, D922 Q7); awarding XP to the
+  // characters is character XP.
+  'rule_section.monsters.parts-of-a-stat-block': {
+    ...UNREPRESENTED_MON_VOCAB,
+    excluded: [{ clause: 'XP is awarded for defeating the monster in combat or otherwise neutralizing it.', exclusion: 'character_xp' }],
+  },
   'rule_section.monsters.running-a-monster': UNREPRESENTED_MON_VOCAB,
   'rule_section.monsters.monsters-a-z': UNREPRESENTED_SRD_MONSTERS,
   'rule_section.monsters.animals': UNREPRESENTED_SRD_MONSTERS,
@@ -188,7 +267,7 @@ export const RULES_STATUS = {
   'glossary.burrow-speed': UNREPRESENTED_MOVEMENT_MODES,
   'glossary.campaign': UNREPRESENTED_RULES_CORE,
   'glossary.cantrip': UNREPRESENTED_SPELL_HEADERS,
-  'glossary.carrying-capacity': UNREPRESENTED_OWNER_GATED_ROWS,
+  'glossary.carrying-capacity': { status: 'excluded_by_owner', exclusion: 'encumbrance' },
   'glossary.challenge-rating': UNREPRESENTED_MON_TABLES,
   'glossary.character-sheet': UNREPRESENTED_RULES_CORE,
   'glossary.climbing': UNREPRESENTED_MOVEMENT_MODES,
@@ -235,7 +314,7 @@ export const RULES_STATUS = {
   'glossary.disadvantage': UNREPRESENTED_CONDITION_D20,
   'glossary.encounter': UNREPRESENTED_RULES_CORE,
   'glossary.enemy': UNREPRESENTED_RULES_CORE,
-  'glossary.experience-points': UNREPRESENTED_OWNER_GATED_ROWS,
+  'glossary.experience-points': { status: 'excluded_by_owner', exclusion: 'character_xp' },
   'glossary.expertise': UNREPRESENTED_CLASS_TABLES,
   'glossary.flying': UNREPRESENTED_MOVEMENT_MODES,
   'glossary.fly-speed': UNREPRESENTED_MOVEMENT_MODES,

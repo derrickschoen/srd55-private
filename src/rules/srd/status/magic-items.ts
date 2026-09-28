@@ -37,7 +37,11 @@ export const MAGIC_ITEMS_STATUS = {
   'magic_item.boots-of-elvenkind': UNREPRESENTED_MAGIC_ITEMS,
   'magic_item.boots-of-levitation': UNREPRESENTED_MAGIC_ITEMS,
   'magic_item.boots-of-speed': UNREPRESENTED_MAGIC_ITEMS,
-  'magic_item.boots-of-striding-and-springing': UNREPRESENTED_MAGIC_ITEMS,
+  // The Heavy Armor clause of the same sentence is kept.
+  'magic_item.boots-of-striding-and-springing': {
+    ...UNREPRESENTED_MAGIC_ITEMS,
+    excluded: [{ clause: 'isn’t reduced by you carrying weight in excess of your carrying capacity', exclusion: 'encumbrance' }],
+  },
   'magic_item.boots-of-the-winterlands': UNREPRESENTED_MAGIC_ITEMS,
   'magic_item.bowl-of-commanding-water-elementals': UNREPRESENTED_MAGIC_ITEMS,
   'magic_item.bracers-of-archery': UNREPRESENTED_MAGIC_ITEMS,

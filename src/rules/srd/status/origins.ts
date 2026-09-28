@@ -40,7 +40,10 @@ export const ORIGINS_STATUS = {
   'species_trait.gnome.gnomish-lineage': UNREPRESENTED_ORIGINS_FEATS,
   'species_trait.goliath.giant-ancestry': UNREPRESENTED_ORIGINS_FEATS,
   'species_trait.goliath.large-form': UNREPRESENTED_ORIGINS_FEATS,
-  'species_trait.goliath.powerful-build': UNREPRESENTED_ORIGINS_FEATS,
+  'species_trait.goliath.powerful-build': {
+    ...UNREPRESENTED_ORIGINS_FEATS,
+    excluded: [{ clause: 'You also count as one size larger when determining your carrying capacity.', exclusion: 'encumbrance' }],
+  },
   'species_trait.halfling.brave': UNREPRESENTED_ORIGINS_FEATS,
   'species_trait.halfling.halfling-nimbleness': UNREPRESENTED_ORIGINS_FEATS,
   'species_trait.halfling.luck': UNREPRESENTED_ORIGINS_FEATS,
@@ -54,10 +57,23 @@ export const ORIGINS_STATUS = {
   'species_trait.tiefling.darkvision': UNREPRESENTED_ORIGINS_FEATS,
   'species_trait.tiefling.fiendish-legacy': UNREPRESENTED_ORIGINS_FEATS,
   'species_trait.tiefling.otherworldly-presence': UNREPRESENTED_ORIGINS_FEATS,
-  'background.acolyte': UNREPRESENTED_ORIGINS_FEATS,
-  'background.criminal': UNREPRESENTED_ORIGINS_FEATS,
-  'background.sage': UNREPRESENTED_ORIGINS_FEATS,
-  'background.soldier': UNREPRESENTED_ORIGINS_FEATS,
+  // D61: the printed feat is a suggestion; the player chooses the Origin feat.
+  'background.acolyte': {
+    ...UNREPRESENTED_ORIGINS_FEATS,
+    excluded: [{ clause: 'Feat: Magic Initiate (Cleric) (see “Feats”)', exclusion: 'fixed_background_feat' }],
+  },
+  'background.criminal': {
+    ...UNREPRESENTED_ORIGINS_FEATS,
+    excluded: [{ clause: 'Feat: Alert (see “Feats”)', exclusion: 'fixed_background_feat' }],
+  },
+  'background.sage': {
+    ...UNREPRESENTED_ORIGINS_FEATS,
+    excluded: [{ clause: 'Feat: Magic Initiate (Wizard) (see “Feats”)', exclusion: 'fixed_background_feat' }],
+  },
+  'background.soldier': {
+    ...UNREPRESENTED_ORIGINS_FEATS,
+    excluded: [{ clause: 'Feat: Savage Attacker (see “Feats”)', exclusion: 'fixed_background_feat' }],
+  },
   'feat.alert': UNREPRESENTED_ORIGINS_FEATS,
   'feat.magic-initiate': UNREPRESENTED_ORIGINS_FEATS,
   'feat.savage-attacker': UNREPRESENTED_ORIGINS_FEATS,
