@@ -18,6 +18,8 @@ import {
   contentsEntries,
   isProse,
   rawColumnRows,
+  rawColumnRuns,
+  rawColumnText,
   rawHeadings,
   rawPages,
   rawSegments,
@@ -128,6 +130,37 @@ function magicItemCount(): number {
     }
   }
   return count;
+}
+
+/**
+ * The magic items' NAMES, read a second way: the raw reader's column rows (no
+ * measured gutter) of printed pages 209 to 253. An item's name is the row its
+ * column prints directly above its category-and-rarity line, or that row and
+ * the one above it when the name wraps (its second line starts lowercase:
+ * "Amulet of Proof against Detection" / "and Location"). The names come out in
+ * printed order, so the chapter's own A–Z arrangement checks them.
+ */
+function magicItemNames(): string[] {
+  const rows = rawColumnRows(LINES, pageOf('Magic Items A–Z'), pageOf('Monsters') - 1);
+  const category = '(?:Armor|Potion|Ring|Rod|Scroll|Staff|Wand|Weapon|Wondrous Item)';
+  const rarity = '(?:Common|Uncommon|Rare|Very Rare|Legendary|Artifact|Rarity Varies)';
+  const itemLine = new RegExp(`^${category}(?: \\([^)]*\\))?(?:, (?:[^,()]*?\\()?${rarity}\\b|,$| \\([^)]*$)`);
+  const names: string[] = [];
+  rows.forEach((row, index) => {
+    if (row.segments.length !== 1 || !itemLine.test(row.segments[0] ?? '')) {
+      return;
+    }
+    const above = (offset: number): string => {
+      const printed = rows[index - offset];
+      if (printed === undefined || printed.page !== row.page || printed.column !== row.column || printed.segments.length !== 1) {
+        throw new Error(`The item line at ${String(row.line)} has no name printed above it in its column.`);
+      }
+      return printed.segments[0] ?? '';
+    };
+    const last = above(1);
+    names.push(/^[a-z]/.test(last) ? `${above(2)} ${last}` : last);
+  });
+  return names;
 }
 
 function tableRows(from: RegExp, to: RegExp, row: RegExp): string[] {
@@ -324,7 +357,7 @@ const DERIVED: { readonly [K in SrdRuleKind]: () => Derivation } = {
   adventuring_gear: () => named(adventuringGearTable()),
   spell: () => named(listedSpells()),
   stat_block: () => counted(statBlockIndexNames().length + statBlocksOutsideTheChapter()),
-  magic_item: () => counted(magicItemCount()),
+  magic_item: () => named(magicItemNames()),
   environmental_effect: () => named(headingNames(rawHeadings(sectionRows('Environmental Effects', 'Fear and Mental Stress'), isProse))),
   trap: () => named(headingNames(rawHeadings(sectionRows('Traps', 'Combat Encounters'), (next) => /^(?:Nuisance|Deadly) Trap \(Levels/.test(next.segments[0] ?? '')))),
   poison: () => named(headingNames(rawHeadings(sectionRows('Poison', 'Traps'), (next) => /^(?:Contact|Ingested|Inhaled|Injury) Poison$/.test(next.segments[0] ?? '')))),
@@ -444,6 +477,22 @@ describe('SRD_RULE_INDEX against the SRD\'s own lists', () => {
     expect(entriesOf('magic_item')).toHaveLength(count);
   });
 
+  it('the magic items are the names printed above their category-and-rarity lines, in the chapter\'s A–Z order', () => {
+    const names = magicItemNames();
+    expect(names).toHaveLength(magicItemCount());
+    expect(new Set(names).size).toBe(names.length);
+    // Printed alphabetically, letters only; the one group heading in the plural
+    // ("Potions of Healing") is filed under its singular.
+    const key = (name: string): string => name.replace(/^Potions /, 'Potion ').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const unordered = names.flatMap((name, index) => (index > 0 && key(names[index - 1] ?? '') >= key(name) ? [`${names[index - 1] ?? ''} / ${name}`] : []));
+    expect(unordered).toEqual([]);
+    // The set, not the count: a consistently generated wrong name
+    // ("Staff of Prowess" for the printed "Staff of Power") fails here.
+    expect(namesOf('magic_item')).toEqual([...names].sort());
+    expect(names).toContain('Staff of Power');
+    expect(names).toContain('Amulet of Proof against Detection and Location');
+  });
+
   it('the class features are the names each class Features table prints, at a level it prints them', () => {
     const table = new Map<string, Map<string, Set<number>>>();
     let owner: string | null = null;
@@ -526,33 +575,198 @@ describe('SRD_RULE_INDEX structure', () => {
     }
   });
 
-  it('points every first span at the line that prints the unit\'s name', () => {
-    const corpora: Readonly<Record<string, readonly string[]>> = {
-      'docs/srd/full/srd-5.2.1.txt': LINES,
+  it('points every first span at the line that prints the unit\'s whole name', () => {
+    const extracts: Readonly<Record<string, readonly string[]>> = {
       'docs/srd/source/armor-table.txt': armorTableText.split('\n'),
       'docs/srd/source/spell-descriptions.txt': spellDescriptionsText.split('\n'),
       'docs/srd/source/weapons-table.txt': weaponsTableText.split('\n'),
     };
+    /**
+     * The text a span's first line prints in its column from each run on,
+     * alone and joined with the column's next printed line (a name wrapped
+     * over two lines: "Amulet of Proof against Detection" / "and Location",
+     * "Curses and" / "Magical Contagions"). From each run on, because a
+     * left-column table cell can reach the raw reader's right column (printed
+     * page 40: the Cleric Spell List's Special column, at character 55, beside
+     * "Level 3: Preserve Life").
+     */
+    const firstPrinted = (file: string, line: number, column: 'left' | 'right' | 'whole'): readonly string[] => {
+      const nextPrinted = (lines: readonly string[], read: (text: string) => string): string => {
+        for (let at = line; at < lines.length; at += 1) {
+          const text = read(lines[at] ?? '');
+          if (text !== '') {
+            return text;
+          }
+        }
+        return '';
+      };
+      if (file !== 'docs/srd/full/srd-5.2.1.txt') {
+        const lines = extracts[file] ?? [];
+        const own = (lines[line - 1] ?? '').trim();
+        return [own, `${own} ${nextPrinted(lines, (text) => text.trim())}`];
+      }
+      const runs = rawColumnRuns(LINES[line - 1] ?? '', column);
+      const next = nextPrinted(LINES, (text) => rawColumnText(text, column));
+      return runs.flatMap((_, from) => {
+        const own = runs.slice(from).join(' ');
+        return [own, `${own} ${next}`];
+      });
+    };
     for (const id of SRD_RULE_IDS) {
-      const { name, spans, kind } = INDEX[id];
+      const { name, spans, kind, parent } = INDEX[id];
       for (const span of spans) {
         const match = /^(docs\/srd\/[^:]+):(\d+)-(\d+)(?:@(left|right))?$/.exec(span);
         expect({ id, span, wellFormed: match !== null }).toEqual({ id, span, wellFormed: true });
         expect(Number(match?.[2])).toBeLessThanOrEqual(Number(match?.[3]));
       }
-      const first = /^(docs\/srd\/[^:]+):(\d+)-/.exec(spans[0] ?? '');
-      const lines = corpora[first?.[1] ?? ''];
-      if (lines === undefined) {
-        continue;
-      }
-      const line = Number(first?.[2]);
-      // A name printed over two lines (a wrapped item or section name) starts
-      // on the span's first line: probe its first word there. A subclass
-      // heading prints `<Class> Subclass:` first and its name after.
-      const wraps = kind === 'rule_section' || kind === 'magic_item';
-      const probe = kind === 'subclass' ? 'Subclass:' : wraps ? name.split(/[ ,]/)[0] ?? name : name;
-      expect({ id, printsName: (lines[line - 1] ?? '').includes(probe) }).toEqual({ id, printsName: true });
+      const first = /^(docs\/srd\/[^:]+):(\d+)-\d+(?:@(left|right))?$/.exec(spans[0] ?? '');
+      // The heading as printed: a (sub)class feature is `Level N: Name`, a
+      // subclass `<Class> Subclass: Name`; everything else starts with its name.
+      const heading = kind === 'class_feature' || kind === 'subclass_feature'
+        ? `Level ${/\.(\d+)\.[^.]+$/.exec(id)?.[1] ?? ''}: ${name}`
+        : kind === 'subclass'
+          ? `${INDEX[parent as SrdRuleId].name} Subclass: ${name}`
+          : name;
+      const printed = firstPrinted(first?.[1] ?? '', Number(first?.[2]), (first?.[3] as 'left' | 'right' | undefined) ?? 'whole');
+      expect({ id, printed: printed[0], printsName: printed.some((text) => text.startsWith(heading)) })
+        .toEqual({ id, printed: printed[0], printsName: true });
     }
+  });
+});
+
+/* ==========================================================================
+ * SPAN OWNERSHIP. A span must hold every line its rule prints, across page
+ * and column breaks, tables printed over both columns and sidebar boxes, and
+ * no other rule's. The expectations are hand-read from the printed pages; the
+ * printed rows are found by the raw reader, never by the generator's columns.
+ * ========================================================================== */
+
+type RawColumn = 'left' | 'right' | 'whole';
+let spanOwnersCache: ReadonlyMap<string, readonly SrdRuleId[]> | null = null;
+/** Every full-text span, as `line@column` keys of the units that hold that printed line. */
+function spanOwners(): ReadonlyMap<string, readonly SrdRuleId[]> {
+  if (spanOwnersCache === null) {
+    const owners = new Map<string, SrdRuleId[]>();
+    for (const id of SRD_RULE_IDS) {
+      for (const span of INDEX[id].spans) {
+        const match = /^docs\/srd\/full\/srd-5\.2\.1\.txt:(\d+)-(\d+)(?:@(left|right))?$/.exec(span);
+        if (match === null) {
+          continue;
+        }
+        for (let line = Number(match[1]); line <= Number(match[2]); line += 1) {
+          const key = `${String(line)}@${match[3] ?? 'whole'}`;
+          owners.set(key, [...(owners.get(key) ?? []), id]);
+        }
+      }
+    }
+    spanOwnersCache = owners;
+  }
+  return spanOwnersCache;
+}
+
+/** The units whose spans hold printed line `line` of `column`. */
+function ownersAt(line: number, column: RawColumn): readonly SrdRuleId[] {
+  const owners = spanOwners();
+  return [...(owners.get(`${String(line)}@${column}`) ?? []), ...(owners.get(`${String(line)}@whole`) ?? [])];
+}
+
+/** A unit's printed text read raw: each span's lines in its column, joined as prose. */
+function rawUnitText(id: SrdRuleId): string {
+  return INDEX[id].spans.flatMap((span) => {
+    const match = /^docs\/srd\/full\/srd-5\.2\.1\.txt:(\d+)-(\d+)(?:@(left|right))?$/.exec(span);
+    if (match === null) {
+      return [];
+    }
+    return LINES.slice(Number(match[1]) - 1, Number(match[2]))
+      .map((line) => rawColumnText(line, (match[3] as RawColumn | undefined) ?? 'whole'))
+      .filter((text) => text !== '');
+  }).join('\n').replace(/(\p{L})-\n(\p{Ll})/gu, '$1$2').replace(/\s+/g, ' ');
+}
+
+describe('SRD_RULE_INDEX spans follow the printed text', () => {
+  it('gives Parts of a Stat Block the text around and after the Running a Monster box, up to Monsters A–Z', () => {
+    // Printed pages 254-258: "Parts of a Stat Block" starts on page 254 and runs
+    // to "Monsters A–Z" on page 258. "Running a Monster" is a box at the top of
+    // page 255's right column: its heading, a lead sentence and three run-in
+    // rules, ending "uses them as often as it can." Every other row between is
+    // the section's (Immunities and Gear below the box; Senses, Languages,
+    // Challenge Rating and the XP table on page 256; the notation rules on 257).
+    const parts: SrdRuleId = 'rule_section.monsters.parts-of-a-stat-block';
+    const box: SrdRuleId = 'rule_section.monsters.running-a-monster';
+    const rows = rowsBetween(rawColumnRows(LINES, pageOf('Parts of a Stat Block'), pageOf('Monsters A–Z')), 'Parts of a Stat Block', 'Monsters A–Z');
+    const text = (row: RawRow): string => row.segments.join(' ');
+    const boxFrom = rows.findIndex((row) => text(row) === 'Running a Monster');
+    const boxTo = rows.findIndex((row) => text(row) === 'uses them as often as it can.');
+    expect({ boxFrom: boxFrom > 0, boxRows: boxTo - boxFrom + 1 }).toEqual({ boxFrom: true, boxRows: 16 });
+    const owned = rows.map((row) => ({ line: row.line, text: text(row), owners: ownersAt(row.line, row.column) }));
+    const expected = rows.map((row, index) => ({ line: row.line, text: text(row), owners: [index >= boxFrom && index <= boxTo ? box : parts] }));
+    expect(owned).toEqual(expected);
+    // The parts a stat block prints, hand-listed in the order these pages
+    // print them: each a heading of the section, and each once.
+    const headings = [
+      'Size', 'Creature Type', 'Descriptive Tags', 'Alignment', 'Armor Class', 'Initiative', 'Hit Points', 'Hit Dice by Size',
+      'Speed', 'Ability Scores', 'Skills', 'Resistances and Vulnerabilities', 'Immunities', 'Gear', 'Ammunition and Ranged Attacks',
+      'Equipping a Monster with Other Items', 'Senses', 'Languages', 'Telepathy', 'Challenge Rating', 'Experience Points',
+      'Experience Points by Challenge Rating', 'Proficiency Bonus', 'Proficiency Bonus by Challenge Rating', 'Traits', 'Actions',
+      'Attack Notation', 'Saving Throw Effect Notation', 'Damage Notation', 'Multiattack', 'Spellcasting', 'Bonus Action',
+      'Reactions', 'Legendary Actions', 'Limited Usage',
+    ];
+    expect(rows.filter((row) => headings.includes(text(row))).map(text)).toEqual(headings);
+    // The clauses round 2 found in the wrong rule, now in the section's text.
+    const section = rawUnitText(parts);
+    for (const clause of [
+      'The Senses entry specifies a monster’s Passive Perception score',
+      'This entry lists languages that the monster can use to communicate.',
+      'Challenge Rating is defined in “Rules Glossary,”',
+      'The number of Experience Points (XP) a monster is worth is based on its CR',
+      '12 8,400 29 135,000',
+    ]) {
+      expect({ clause, inSection: section.includes(clause) }).toEqual({ clause, inSection: true });
+    }
+    expect(rawUnitText(box)).toBe(
+      'Running a Monster To ensure a monster acts in accordance with its Challenge Rating, follow these rules during combat: '
+      + 'Special Abilities. If the monster has a special ability that deals a lot of damage but has a limited number of uses, '
+      + 'such as a recharging breath weapon or a spell it can cast only once per day, have it use that special ability as '
+      + 'quickly and as often as possible. Multiattack. If the monster has Multiattack, have it use Multiattack on any of its '
+      + 'turns in which it’s not using one of its more powerful abilities. Bonus Actions, Reactions, Legendary Actions. If the '
+      + 'monster has Bonus Actions, Reactions, or Legendary Actions in its stat block, make sure it uses them as often as it can.',
+    );
+  });
+
+  it('reads each table printed across both columns, both halves, into the unit that refers to it', () => {
+    // Hand-read: the caption, the unit whose text names "<caption> table", and
+    // how many printed lines the table takes from its caption (footnotes
+    // included), on the page Contents' neighbours put it.
+    const tables = [
+      { caption: 'Starting Equipment at Higher Levels', page: 24, lines: 9, owner: 'rule_section.character-creation.starting-at-higher-levels' },
+      { caption: 'Elven Lineages', page: 85, lines: 9, owner: 'species_trait.elf.elven-lineage' },
+      { caption: 'Fiendish Legacies', page: 86, lines: 8, owner: 'species_trait.tiefling.fiendish-legacy' },
+      { caption: 'Airborne and Waterborne Vehicles', page: 101, lines: 9, owner: 'rule_section.equipment.mounts-and-vehicles' },
+      { caption: 'Travel Terrain', page: 192, lines: 16, owner: 'rule_section.gameplay-toolbox.travel-pace' },
+    ] as const satisfies readonly { caption: string; page: number; lines: number; owner: SrdRuleId }[];
+    for (const { caption, page, lines, owner } of tables) {
+      const rows = rawColumnRows(LINES, page, page);
+      const captionRow = rows.find((row) => row.segments.length === 1 && row.segments[0] === caption);
+      expect({ caption, printed: captionRow !== undefined }).toEqual({ caption, printed: true });
+      const from = captionRow?.line ?? 0;
+      const table = rows.filter((row) => row.line >= from && row.line < from + lines);
+      expect({ caption, rightHalf: table.some((row) => row.column === 'right') }).toEqual({ caption, rightHalf: true });
+      // Owned line by line, whichever column a reader files a cell under: the
+      // table has the whole width of the page to itself.
+      for (const line of new Set(table.map((row) => row.line))) {
+        const owners = [...new Set([...ownersAt(line, 'left'), ...ownersAt(line, 'right')])];
+        expect({ caption, line, owners }).toEqual({ caption, line, owners: [owner] });
+      }
+      expect({ caption, referred: rawUnitText(owner).includes(`${caption} table`) }).toEqual({ caption, referred: true });
+    }
+  });
+
+  it('holds each printed line of a column in at most one unit\'s span', () => {
+    const shared = [...spanOwners()].filter(([, ids]) => ids.length > 1);
+    expect(shared).toEqual([]);
+    // A whole-line span and a column span never meet on one line either.
+    const lines = new Set([...spanOwners().keys()].filter((key) => key.endsWith('@whole')).map((key) => key.split('@')[0]));
+    expect([...spanOwners().keys()].filter((key) => !key.endsWith('@whole') && lines.has(key.split('@')[0]))).toEqual([]);
   });
 });
 

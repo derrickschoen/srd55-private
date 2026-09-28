@@ -130,10 +130,14 @@ describe('the highest XP (D922 Q7)', () => {
     // 256): CR 0 to 10 and 14 to 27 at the foot of the left column, CR 11 to 13
     // and 28 to 30 continued at the head of the right. Rows print "CR XP CR XP".
     const table = new Map<string, string>();
-    const tableLines = [
-      ...spanLines('docs/srd/full/srd-5.2.1.txt:16668-16690@left'),
-      ...spanLines('docs/srd/full/srd-5.2.1.txt:16631-16635@right'),
-    ];
+    const tableSpans = ['docs/srd/full/srd-5.2.1.txt:16668-16690@left', 'docs/srd/full/srd-5.2.1.txt:16631-16635@right'] as const;
+    const tableLines = tableSpans.flatMap((span) => spanLines(span));
+    // Both halves are Parts of a Stat Block's text, which the ruling names.
+    const section = INDEX['rule_section.monsters.parts-of-a-stat-block'].spans.flatMap((span) => spanLines(span));
+    for (const line of tableLines) {
+      expect({ line, inSection: section.includes(line) }).toEqual({ line, inSection: true });
+    }
+    expect(RULINGS['xp-highest-wins'].rules).toContain('rule_section.monsters.parts-of-a-stat-block');
     for (const row of tableLines) {
       const match = /^(\d+(?:\/\d)?)\s+(0 or 10|[\d,]+)\s+(\d+)\s+([\d,]+)$/.exec(row);
       if (match !== null) {

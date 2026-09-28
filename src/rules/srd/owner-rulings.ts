@@ -198,12 +198,13 @@ export const OWNER_RULINGS = {
     },
   },
   // D922 Q7, owner: "Highest wins in all case". Owner of the change:
-  // MON-TABLES / SRD-MONSTERS.
+  // MON-TABLES / SRD-MONSTERS. The Experience Points by Challenge Rating table
+  // is printed in Parts of a Stat Block (page 256).
   'xp-highest-wins': {
     id: 'xp-highest-wins',
     decision: 'D922',
     kind: 'source_resolution',
-    rules: ['stat_block.archmage'],
+    rules: ['stat_block.archmage', 'rule_section.monsters.parts-of-a-stat-block'],
     concerns: null,
     executedBy: ['MON-TABLES', 'SRD-MONSTERS'],
     data: {

@@ -51,7 +51,12 @@ import { srdReadingOrder, type StreamRow } from './srd-columns.ts';
  *   table's Mastery column, located in the Mastery Properties section.
  *
  * A unit's full-text span runs from its heading to the row before the next
- * indexed heading in reading order. THE DERIVATION FAILS LOUDLY: a Contents
+ * indexed heading in reading order, across page and column breaks. Two
+ * layouts interrupt that order and are claimed instead: a table printed across
+ * both columns (`FULL_WIDTH_TABLES`, the class Features tables, the full-page
+ * tables) belongs whole to the unit that refers to it, and a sidebar box
+ * (`SIDEBARS`) holds its own rows while the section around it runs on past it.
+ * THE DERIVATION FAILS LOUDLY: a Contents
  * entry that cannot be located, a subclass feature list that disagrees with
  * the extract, a duplicate id, an empty span, an unknown glossary tag — each
  * throws, because a short index would silently leave rules unidentified.
@@ -102,6 +107,44 @@ const CHAPTERS = [
   ['Gameplay Toolbox', 192],
   ['Magic Items', 204],
   ['Monsters', 254],
+] as const;
+
+/**
+ * Contents entries printed as a SIDEBAR: a box set inside another section's
+ * column. "Running a Monster" is a box at the top of the right column of
+ * printed page 255; "Parts of a Stat Block" is printed around it and continues
+ * below it (Immunities, Gear) and over pages 256 and 257 (Senses, Languages,
+ * Challenge Rating, the XP table, …). Contents lists the box like any section,
+ * but its heading ends no other unit's span: the box's rows are its own, and
+ * the section it interrupts resumes after it. The box is printed inset from
+ * its column's margin, and it ends at the first row back at the margin, which
+ * must be a heading of the resumed section; the derivation checks each of
+ * those facts and throws otherwise. Like `CHAPTERS`, this is the document's
+ * layout, not rules data.
+ */
+const SIDEBARS = [['Running a Monster', 255]] as const;
+
+/**
+ * Tables printed across BOTH columns of a two-column page. Reading order cuts
+ * each of their rows at the gutter, so without a claim the right-hand cells
+ * read as the top or the bottom of the right column and land in whichever
+ * unit's span runs there: the Starting Equipment at Higher Levels table's
+ * Magic Items column read as the end of "Multiclassing", the Travel Terrain
+ * table's DC columns as the start of "Creating a Background". Each table is
+ * claimed, both halves and its footnotes, by the unit that prints the
+ * reference to it by its caption ("The Starting Equipment at Higher Levels
+ * table is a guide for the GM."; the independent test checks the reference).
+ * The derivation checks that the caption is printed alone on its line on that
+ * page and that the table's header row crosses the gutter, and throws
+ * otherwise. The class Features tables are the same shape and are claimed by
+ * their class below.
+ */
+const FULL_WIDTH_TABLES = [
+  { caption: 'Starting Equipment at Higher Levels', page: 24, owner: 'rule_section.character-creation.starting-at-higher-levels' },
+  { caption: 'Elven Lineages', page: 85, owner: 'species_trait.elf.elven-lineage' },
+  { caption: 'Fiendish Legacies', page: 86, owner: 'species_trait.tiefling.fiendish-legacy' },
+  { caption: 'Airborne and Waterborne Vehicles', page: 101, owner: 'rule_section.equipment.mounts-and-vehicles' },
+  { caption: 'Travel Terrain', page: 192, owner: 'rule_section.gameplay-toolbox.travel-pace' },
 ] as const;
 
 const GLOSSARY_TAG_KINDS = {
@@ -337,11 +380,15 @@ interface Derivation {
   readonly boundaries: Set<number>;
   /**
    * Rows of a full-width table printed inside a two-column page (a class's
-   * Features table) or of a full-page table, by the unit that owns the table.
-   * Reading order meets such a table between two columns of prose, so without
-   * this the table would land in whichever unit's span it interrupts.
+   * Features table, `FULL_WIDTH_TABLES`), of a full-page table, or of a
+   * sidebar box, by the unit that owns them. Reading order meets such a table
+   * or box between two runs of another unit's prose, so without this it would
+   * land in whichever unit's span it interrupts. A row has one owner: a second
+   * claim throws.
    */
   readonly claims: Map<number, string>;
+  /** The sidebar units (`SIDEBARS`): their spans are their claimed rows and nothing after them. */
+  readonly sidebars: Set<string>;
 }
 
 function add(derivation: Derivation, draft: Draft): void {
@@ -351,10 +398,17 @@ function add(derivation: Derivation, draft: Draft): void {
   }
 }
 
-function sectionIdAt(sections: readonly { readonly row: number; readonly id: string }[], row: number): string | null {
+interface Section {
+  readonly row: number;
+  readonly id: string;
+  /** A sidebar box: it holds no unit printed after it. */
+  readonly sidebar: boolean;
+}
+
+function sectionIdAt(sections: readonly Section[], row: number): string | null {
   let found: string | null = null;
   for (const section of sections) {
-    if (section.row <= row) {
+    if (section.row <= row && !section.sidebar) {
       found = section.id;
     }
   }
@@ -406,15 +460,30 @@ function subclassCatalog(extract: string): Map<string, { name: string; features:
 function deriveDrafts(read: SrdCorpusReader): Derivation {
   const fullText = read(FULL);
   const rows = srdReadingOrder(fullText);
-  const derivation: Derivation = { rows, drafts: [], boundaries: new Set(), claims: new Map() };
+  const derivation: Derivation = { rows, drafts: [], boundaries: new Set(), claims: new Map(), sidebars: new Set() };
   const rawLines = fullText.split('\n');
+  const claimRow = (owner: string, index: number): void => {
+    const held = derivation.claims.get(index);
+    if (held !== undefined && held !== owner) {
+      throw new SrdRuleIndexError(`Line ${String(rowAt(rows, index).line)} is claimed by both ${held} and ${owner}.`);
+    }
+    derivation.claims.set(index, owner);
+  };
   /** Claims every row printed on `page` between the two lines, in either column. */
   const claim = (owner: string, page: number, fromLine: number, toLine: number): void => {
     rows.forEach((row, index) => {
       if (row.page === page && row.line >= fromLine && row.line <= toLine) {
-        derivation.claims.set(index, owner);
+        claimRow(owner, index);
       }
     });
+  };
+  /** The raw line after `line` that ends a table: the first of two blank lines. */
+  const tableEnd = (line: number): number => {
+    let last = line;
+    while (last < rawLines.length && !((rawLines[last] ?? '').trim() === '' && (rawLines[last + 1] ?? '').trim() === '')) {
+      last += 1;
+    }
+    return last;
   };
   const anchor = (title: string, page: number): number => {
     const index = locateHeading(rows, title, page);
@@ -453,7 +522,7 @@ function deriveDrafts(read: SrdCorpusReader): Derivation {
     return found;
   };
   const chapterId = (chapter: string): string => `rule_section.${srdSlug(chapter)}`;
-  const sections: { row: number; id: string }[] = [];
+  const sections: Section[] = [];
   const classAnchors = new Map<string, number>();
   const spellListAnchors = new Map<string, number>();
   const optionAnchors = new Map<string, { row: number; cls: string }>();
@@ -512,8 +581,41 @@ function deriveDrafts(read: SrdCorpusReader): Derivation {
       continue;
     }
     const id = isChapter ? chapterId(chapter) : `${chapterId(chapter)}.${srdSlug(entry.title)}`;
-    sections.push({ row, id });
-    add(derivation, { id, kind: 'rule_section', name: entry.title, parent: isChapter ? null : chapterId(chapter), at: { corpus: 'full', row } });
+    const draft: Draft = { id, kind: 'rule_section', name: entry.title, parent: isChapter ? null : chapterId(chapter), at: { corpus: 'full', row } };
+    if (SIDEBARS.some(([title, page]) => title === entry.title && page === entry.page)) {
+      const last = sidebarEnd(rows, row);
+      for (let index = row; index <= last; index += 1) {
+        claimRow(id, index);
+      }
+      derivation.sidebars.add(id);
+      derivation.drafts.push(draft);
+      sections.push({ row, id, sidebar: true });
+      continue;
+    }
+    sections.push({ row, id, sidebar: false });
+    add(derivation, draft);
+  }
+  for (const [title, page] of SIDEBARS) {
+    if (!entries.some((entry) => entry.title === title && entry.page === page)) {
+      throw new SrdRuleIndexError(`Contents does not list the sidebar "${title}" at page ${String(page)}.`);
+    }
+  }
+
+  /* ---- Tables printed across both columns ---- */
+  for (const { caption, page, owner } of FULL_WIDTH_TABLES) {
+    const captionRow = rows.find((row) => row.page === page && row.text === caption && (rawLines[row.line - 1] ?? '').replace(/^\f/, '').trim() === caption);
+    if (captionRow === undefined) {
+      throw new SrdRuleIndexError(`The table "${caption}" is not captioned alone on a line of printed page ${String(page)}.`);
+    }
+    let header = captionRow.line + 1;
+    while (header < rawLines.length && (rawLines[header - 1] ?? '').trim() === '') {
+      header += 1;
+    }
+    const halves = rows.filter((row) => row.line === header);
+    if (!halves.some((row) => row.column === 'left') || !halves.some((row) => row.column === 'right')) {
+      throw new SrdRuleIndexError(`The header of the table "${caption}" (line ${String(header)}) does not cross the gutter.`);
+    }
+    claim(owner, page, captionRow.line, tableEnd(captionRow.line));
   }
   const sectionAnchor = (id: string): number => {
     const found = sections.find((section) => section.id === id);
@@ -573,11 +675,7 @@ function deriveDrafts(read: SrdCorpusReader): Derivation {
       if (titleRow === undefined) {
         throw new SrdRuleIndexError(`The ${owner} Features table was not found.`);
       }
-      let last = titleRow.line;
-      while (last < rawLines.length && !((rawLines[last] ?? '').trim() === '' && (rawLines[last + 1] ?? '').trim() === '')) {
-        last += 1;
-      }
-      claim(`class.${srdSlug(owner)}`, titleRow.page, titleRow.line, last);
+      claim(`class.${srdSlug(owner)}`, titleRow.page, titleRow.line, tableEnd(titleRow.line));
     }
     let cls: string | null = null;
     let context: 'class' | 'subclass' | 'none' = 'none';
@@ -852,6 +950,31 @@ function deriveDrafts(read: SrdCorpusReader): Derivation {
   return derivation;
 }
 
+/**
+ * The last row of the sidebar box headed at `row`. The box is printed inset:
+ * its heading and every row of it start right of its column's margin. It ends
+ * at the column's first row back at the margin, which must be a heading of
+ * the section the box interrupted, or at the end of the column.
+ */
+function sidebarEnd(rows: readonly StreamRow[], row: number): number {
+  const heading = rowAt(rows, row);
+  if (heading.indent < 1) {
+    throw new SrdRuleIndexError(`The sidebar "${heading.text}" (line ${String(heading.line)}) is not printed inset from its column.`);
+  }
+  let last = row;
+  for (let next = rows[last + 1]; next !== undefined && samePlace(heading, next) && next.indent >= 1; next = rows[last + 1]) {
+    last += 1;
+  }
+  if (last === row) {
+    throw new SrdRuleIndexError(`The sidebar "${heading.text}" (line ${String(heading.line)}) has no inset text.`);
+  }
+  const after = rows[last + 1];
+  if (after !== undefined && samePlace(heading, after) && !isHeadingAt(rows, last + 1)) {
+    throw new SrdRuleIndexError(`The text after the sidebar "${heading.text}" (line ${String(after.line)}) does not resume at a heading.`);
+  }
+  return last;
+}
+
 function acFollows(rows: readonly StreamRow[], from: number): boolean {
   for (let index = from; index < from + 3; index += 1) {
     const row = rows[index];
@@ -951,24 +1074,31 @@ function spellEntries(extract: string): SpellEntry[] {
 }
 
 function fullSpans(derivation: Derivation, row: number, owner: string): [SrdSpan, ...SrdSpan[]] {
-  let end = derivation.rows.length;
+  // A sidebar is its box and nothing after it; any other unit runs to the
+  // next boundary, less the rows another unit claims, plus the rows it claims.
+  let end = derivation.sidebars.has(owner) ? row + 1 : derivation.rows.length;
   for (const boundary of derivation.boundaries) {
     if (boundary > row && boundary < end) {
       end = boundary;
     }
   }
-  const indices: number[] = [];
+  const unique = new Set<number>();
   for (let index = row; index < end; index += 1) {
     if (index === row || !derivation.claims.has(index)) {
-      indices.push(index);
+      unique.add(index);
     }
   }
   for (const [index, claimant] of derivation.claims) {
     if (claimant === owner) {
-      indices.push(index);
+      unique.add(index);
     }
   }
-  indices.sort((a, b) => a - b);
+  // The span starts at the unit's heading. A claimed table that reading order
+  // meets before the heading (the Fiendish Legacies table across the foot of
+  // page 86, whose left half reads before the right column that prints the
+  // trait) follows the unit's text instead of preceding its name.
+  const sorted = [...unique].sort((a, b) => a - b);
+  const indices = [...sorted.filter((index) => index >= row), ...sorted.filter((index) => index < row)];
   const spans: SrdSpan[] = [];
   // A segment is a run of rows adjacent in reading order and in one column of
   // one page; a claimed table or another unit between two rows splits it.
@@ -1022,6 +1152,11 @@ export function deriveSrdRuleIndex(read: SrdCorpusReader): readonly SrdRuleIndex
   for (const { entry } of indexed) {
     if (entry.parent !== undefined && !seen.has(entry.parent)) {
       throw new SrdRuleIndexError(`${entry.id} names the parent ${entry.parent}, which is not a rule unit.`);
+    }
+  }
+  for (const owner of new Set(derivation.claims.values())) {
+    if (!seen.has(owner)) {
+      throw new SrdRuleIndexError(`Rows are claimed by ${owner}, which is not a rule unit: they would be in no span.`);
     }
   }
   const kindOrder = new Map<SrdRuleKind, number>(SRD_RULE_KINDS.map((kind, index) => [kind, index]));

@@ -10,8 +10,9 @@
  *
  * - `rawSegments`: a raw line cut into its runs of text (two or more spaces
  *   separate runs), each with its character column. No gutter is measured.
- * - `rawColumnRows`: a page's rows, left then right, a run belonging to the
- *   right column when it starts at character 55 or later. Every two-column
+ * - `rawColumnRows` and `rawColumnText`: a page's rows, left then right (or one
+ *   line's text in one column), a run belonging to the right column when it
+ *   starts at character 55 or later. Every two-column
  *   page these pins read prints its right column from character 56 on, and a
  *   full-width table's cells reach character 54 at most (the Sorcerer
  *   Features table's last column, printed page 66, starts at 50).
@@ -58,6 +59,22 @@ export function rawPages(lines: readonly string[]): ReadonlyMap<number, { readon
 export function rawSegments(line: string): RawSegment[] {
   const text = line.replaceAll('\f', ' ').replaceAll('\t', '    ');
   return [...text.matchAll(/\S(?:\S| (?! ))*/g)].map((match) => ({ x: match.index, text: match[0] }));
+}
+
+/**
+ * A raw line's runs in one column: the runs that start before character 55
+ * (`left`), at 55 or later (`right`), or all of them (`whole`, a single-column
+ * page).
+ */
+export function rawColumnRuns(line: string, column: 'left' | 'right' | 'whole'): string[] {
+  return rawSegments(line)
+    .filter(({ x }) => column === 'whole' || (column === 'right') === (x >= RIGHT_COLUMN_FROM))
+    .map(({ text }) => text);
+}
+
+/** A raw line's text in one column, its runs joined by a space. */
+export function rawColumnText(line: string, column: 'left' | 'right' | 'whole'): string {
+  return rawColumnRuns(line, column).join(' ');
 }
 
 /** The rows of printed pages `first` to `last`, each page's left column before its right. */
