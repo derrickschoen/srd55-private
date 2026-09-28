@@ -3663,5 +3663,18 @@ QUESTION (AskUserQuestion; recommendation "Trust recorded history"). OWNER, verb
 - Relation: D939's typed refusal stays the strict/default behaviour. D940's deterministic migrations stay preferred where practical. This mode is the test-time way to reuse existing saves and recorded runs.
 - Placement: the first rules unit to land (MOVE-COST or CONDITION-D20) introduces it together with the D939 refusal, unless the plan review splits it into its own small unit first.
 
-Next free id: D942.
+## D942 — 2026-09-28 14:42 — owner: legacy difficult-terrain areas are inferred best-effort, ground when unsure (MOVE-COST Q2); supervisor rulings Q4, Q5
+
+QUESTION (MOVE-COST plan Q2, raised by codex r1 P2: the plan mapped every unknown legacy `difficultTerrain: true` area to volume). My recommendation was "volume: affects flyers".
+OWNER, verbatim: "best effort to figure it out. ground if unsure about volume".
+- The migration (sessions v13→v14, content packs v1→v2, party packs v2→v3) infers each legacy area's tag from every piece of evidence the stored data holds: the origin spell or effect id, the material (webs → volume, grease → ground), the declared shape or height (a 3-D shape or stated height → volume), and the known SRD spells (Grease and Entangle → ground, Web → volume).
+- When the evidence does not establish volume, the tag is GROUND (flyers ignore it, as today). Deterministic (D940), no data lost, and each inferred area is listed in the migration report with the evidence used.
+- The inference rules are one typed, total table with golden fixtures, and a mutant on a plausible wrong tag must be killed.
+SUPERVISOR RULINGS (codex r1 showed these are not owner questions):
+- Q4: Sleet Storm stays volume; D921 names it.
+- Q5: the three geometric estimates (controllers.ts:152 clip, recovery-capability.ts:211, option-outcome.ts:1049) are fixed in MOVE-COST with witnesses. Deferring them would narrow D905 ("in all cases").
+- Q3 and Q6–Q10: supervisor-settled in the plan revision, within the cited rulings.
+CONDITION-D20: no owner question now. Q-E waits for measured before and after results. Q-C reaches the owner only if it becomes an auto-stand house rule.
+
+Next free id: D943.
 
