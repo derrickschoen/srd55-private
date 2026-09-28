@@ -237,8 +237,11 @@ describe('renderer-neutral scene snapshot', () => {
       pendingRequestHash: 'a0e19e534b070ffc1a82b2f303588573578852bc75720abd780af7e749e0d44a',
       coordinatorHash: '336fc59733a7f90a51b0cb1dbe95ce690a411ef0dab428fc5ef3c9f1e5344f22',
       // Session schema 13 (FOOTPRINT): the same revision body with schemaVersion 13; with 12 it hashes to the
-      // earlier pin 519a01b4fdcc4f02bf8f8c925c8ec70acd09443924944bac454dcb293a751d3d (checked in python).
-      revisionChecksum: '461a8890da133483eaa39dc1b8a90bd2b68a218473f603a01d7b05ff746cc357',
+      // earlier pin 519a01b4fdcc4f02bf8f8c925c8ec70acd09443924944bac454dcb293a751d3d (checked in python). FOOTPRINT
+      // fix1 adds recordedBy {kind: unrecorded, reason: build_without_commit} (a test run compiles in no commit):
+      // the v13 body pinned at 461a8890da133483eaa39dc1b8a90bd2b68a218473f603a01d7b05ff746cc357 with that one field
+      // hashes to this (re-derived in python from the saved body, .tmp/runs/footprint/fix1/scene-snapshot-checksum.py).
+      revisionChecksum: 'a0af64853e939be065a4a612de953575999bc604e1a6fff013d41df344a376bb',
     });
     expect(coordinator.pendingRequest).toMatchObject({
       kind: 'turn',

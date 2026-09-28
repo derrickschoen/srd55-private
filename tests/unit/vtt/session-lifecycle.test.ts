@@ -14,6 +14,7 @@ import {
   exportSavedSession,
 } from '../../../src/vtt/session-persistence';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { RUNNING_ENGINE_BUILD } from '../../../src/vtt/engine-build';
 
 const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
@@ -62,6 +63,7 @@ describe('typed IndexedDB session lifecycle', () => {
       import: () => sessionId,
       exported: () => '',
       exportedStored: () => '',
+      recordingEngine: RUNNING_ENGINE_BUILD,
       flush: async () => { events.push('flush'); },
     } satisfies SessionLifecycleStore;
     const lifecycle = new IndexedDbSessionLifecycle(store, {
@@ -94,6 +96,7 @@ describe('typed IndexedDB session lifecycle', () => {
       import: () => sessionId,
       exported: () => '',
       exportedStored: () => '',
+      recordingEngine: RUNNING_ENGINE_BUILD,
       flush: async () => { events.push('flush'); },
     } satisfies SessionLifecycleStore;
     const lifecycle = new IndexedDbSessionLifecycle(store, inactiveBinding(events));
@@ -117,6 +120,7 @@ describe('typed IndexedDB session lifecycle', () => {
       import: () => sessionId,
       exported: () => '',
       exportedStored: () => { events.push('export'); return 'durable-bytes'; },
+      recordingEngine: RUNNING_ENGINE_BUILD,
       flush: async () => {
         events.push('flush');
         if (rejectFlush) throw new Error('durability failed');

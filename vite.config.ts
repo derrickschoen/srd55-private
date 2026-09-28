@@ -320,6 +320,24 @@ const shared = {
 };
 
 /**
+ * FOOTPRINT fix1 (owner D919, D929): a production build compiles in the commit it is built from, so every session
+ * revision it records names the engine build, and so the rules, it was recorded under (src/vtt/engine-build.ts;
+ * tools/session-archive-replay.ts replays an archived history at that commit). A tree that differs from HEAD in any
+ * file git sees is not that commit: it compiles in nothing, and its revisions record 'build_without_commit'. The
+ * dev server, vite-node and vitest never define it. Returns the `define` value: a JSON string, or `undefined`.
+ */
+export function engineCommitDefine(git: (args: readonly string[]) => string): string {
+  if (git(['status', '--porcelain']).trim() !== '') return 'undefined';
+  const commit = git(['rev-parse', 'HEAD']).trim();
+  if (!/^[0-9a-f]{40}$/u.test(commit)) throw new Error('The build commit is invalid.');
+  return JSON.stringify(commit);
+}
+
+function checkoutGit(args: readonly string[]): string {
+  return execFileSync('git', [...args], { cwd: process.cwd(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
+}
+
+/**
  * The AI bridge is DEV-ONLY and is registered here ONLY for `command === 'serve'`.
  *
  * That is the outermost of four independent gates; the others are `apply: 'serve'`
@@ -339,5 +357,5 @@ const shared = {
 export default defineConfig(({ command }) =>
   command === 'serve'
     ? { ...shared, plugins: [...shared.plugins, aiBridge()] }
-    : shared,
+    : { ...shared, define: { __VTT_ENGINE_COMMIT__: engineCommitDefine(checkoutGit) } },
 );

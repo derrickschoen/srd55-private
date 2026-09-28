@@ -14,6 +14,7 @@ import { combatantId, encounterSessionId, type CombatantId } from '../../../src/
 import { sha256 } from '../../../src/crypto/sha256';
 import { DatabaseContext } from '../../../src/db/database';
 import { IndexedDbBrowserSessionStore } from '../../../src/vtt/local-session-store';
+import { engineCommit, RUNNING_ENGINE_BUILD } from '../../../src/vtt/engine-build';
 import {
   EncounterSessionJournal,
   exportSavedSession,
@@ -143,6 +144,21 @@ describe('FOOTPRINT session v13: a save v13 cannot express is repaired and archi
     expect(replaySessionRevisions(revisions)).toBe(root);
   });
 
+  it('fix1: the migrated root records the build that migrated it; the archive records that its history names no commit', () => {
+    // D929: "record it at archive time: the build commit". A store that records commit c...c migrates the v12 save;
+    // its root names that build, and the archived v12 history, recorded before revisions named their engine, names
+    // none. On-demand verification re-derives the root with the build the root names.
+    const migrating = engineCommit('c'.repeat(40));
+    const store = new MemoryBrowserSessionStore({ kind: 'engine_commit', commit: migrating });
+    const root = rootOf(store.revisions(importSavedSession(store, text('overhangRevisions'))));
+    expect(root.recordedBy).toEqual({ kind: 'engine_commit', commit: 'c'.repeat(40) });
+    expect(root.transition.archive.recordedEngine).toEqual({ kind: 'recorded_commit_unknown', reason: 'recorded_before_engine_recording' });
+    expect(verifySessionHistoryArchive(root).recordedEngine).toEqual({ kind: 'recorded_commit_unknown', reason: 'recorded_before_engine_recording' });
+    // The same save migrated by a build without a commit (this test run) records that.
+    expect(rootOf(imported(text('overhangRevisions')).revisions).recordedBy).toEqual(RUNNING_ENGINE_BUILD);
+    expect(RUNNING_ENGINE_BUILD).toEqual({ kind: 'unrecorded', reason: 'build_without_commit' });
+  });
+
   it('W21b: the same save as a v12 journal DAG gives the same repaired root, archiving the DAG', () => {
     const fromDag = rootOf(imported(text('overhangDag')).revisions);
     const fromRevisions = rootOf(imported(text('overhangRevisions')).revisions);
@@ -178,7 +194,7 @@ describe('FOOTPRINT session v13: a save v13 cannot express is repaired and archi
     }
     // A stored stream's revisions, each stored in non-canonical text: the archive keeps each text exactly.
     const stored = storedTexts('mixed').map(nonCanonical);
-    const root = rootOf(accepted(() => migrateStoredSessionRevisions(stored)));
+    const root = rootOf(accepted(() => migrateStoredSessionRevisions(stored, RUNNING_ENGINE_BUILD)));
     expect(root.transition.archive.source).toEqual({
       kind: 'stored_stream', revisions: stored.map((revision) => ({ text: revision, sha256: sha256(revision) })),
     });
@@ -259,7 +275,7 @@ describe('FOOTPRINT session v13: a save v13 cannot express is repaired and archi
     // Revision 1 (session_started, the overhang) was recorded under v11, revisions 2 (initiative) and 3 (the PC to
     // (1,0)) under v12. The current state is revision 3's: the Huge still at (17,3) -> (16,2), the PC at (1,0).
     const stream = JSON.parse(text('mixed')) as unknown[];
-    const migrated = accepted(() => migrateStoredSessionRevisions(storedTexts('mixed')));
+    const migrated = accepted(() => migrateStoredSessionRevisions(storedTexts('mixed'), RUNNING_ENGINE_BUILD));
     expect(migrated).toHaveLength(1);
     const root = rootOf(migrated);
     expect(root.transition.archive).toMatchObject({ source: { kind: 'stored_stream' }, recordedSchemaVersions: [11, 12] });
@@ -318,9 +334,11 @@ describe('FOOTPRINT session v13: a save v13 cannot express is repaired and archi
           { $sessionId: revision.sessionId, $revision: revision.revision, $schemaVersion: revision.schemaVersion, $payload: canonicalJson(revision), $checksum: revision.checksum },
         );
       }
-      const store = new SqliteBrowserSessionStore(database);
+      const store = new SqliteBrowserSessionStore(database, { kind: 'engine_commit', commit: engineCommit('d'.repeat(40)) });
       const sessionId = encounterSessionId('session:footprint-mixed');
       expect(accepted(() => store.revisions(sessionId)).map((revision) => revision.transition.kind)).toEqual(['session_migrated']);
+      // fix1: the root the SQLite store rewrote records that store's build.
+      expect(store.revisions(sessionId)[0]?.recordedBy).toEqual({ kind: 'engine_commit', commit: 'd'.repeat(40) });
       expect(database.allRaw('SELECT revision, schema_version FROM vtt_session_revisions ORDER BY revision'))
         .toEqual([{ revision: 1, schema_version: 13 }]);
       expect(store.revisions(sessionId)).toHaveLength(1);
@@ -394,7 +412,7 @@ describe('FOOTPRINT session v13: a save v13 cannot express is repaired and archi
 
   it('W21f-mismatch: a v12 mode of another size is re-moded from geometry (the v12 spend could never save one)', () => {
     // The W13b map with the Large held {normal, Medium} at (2,1): as for W21f-sq, only squeezed fits at (2,1).
-    const root = rootOf(accepted(() => migrateStoredSessionRevisions(storedTexts('mismatch'))));
+    const root = rootOf(accepted(() => migrateStoredSessionRevisions(storedTexts('mismatch'), RUNNING_ENGINE_BUILD)));
     const large = combatantId('combatant:mismatch-large');
     const squeezed = { kind: 'squeezed', actual: 'Large', sizedFor: 'Medium' } as const;
     expect(tokenAt(root.encounterState, large)).toMatchObject({ position: { column: 2, row: 1 }, placementMode: squeezed });

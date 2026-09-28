@@ -503,10 +503,14 @@ describe('event-sourced encounter persistence', () => {
       agentSession: _migratedAgentSession,
       encounterState: migratedEncounterState,
       branchRngStateFingerprint: _migratedBranchFingerprint,
+      recordedBy: migratedRecordedBy,
       ...migratedUnrelated
     } = migratedRevision;
     expect(new TextEncoder().encode(canonicalJson(migratedUnrelated))).toEqual(legacyUnrelatedBytes);
     expect(migratedRevision.schemaVersion).toBe(13);
+    // FOOTPRINT fix1: the one field the v12 -> v13 bump adds. A v7 revision was recorded before revisions named
+    // their engine build.
+    expect(migratedRecordedBy).toEqual({ kind: 'unrecorded', reason: 'recorded_before_engine_recording' });
     expect(migratedEncounterState.tokens).toEqual([]);
     expect(migratedEncounterState.sharedSpaceRelations).toEqual([]);
     expect(migratedEncounterState.environment.narrowOpeningRegions).toEqual([]);

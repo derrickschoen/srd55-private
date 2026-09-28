@@ -71,6 +71,7 @@ export type SessionLifecycleStore = Pick<
   | 'exported'
   | 'exportedStored'
   | 'flush'
+  | 'recordingEngine'
 >;
 
 export class IndexedDbSessionLifecycle implements SessionLifecyclePort {
@@ -125,11 +126,12 @@ export class IndexedDbSessionLifecycle implements SessionLifecyclePort {
   }
 
   async #import(bytes: string): Promise<SessionLifecycleResult> {
-    const decoded = decodeSavedSessionFingerprint(bytes);
+    const decoded = decodeSavedSessionFingerprint(bytes, this.store.recordingEngine);
     const existing = this.store.revisions(decoded.sessionId);
     if (existing.length !== 0) {
       const existingFingerprint = decodeSavedSessionFingerprint(
         this.store.exported(decoded.sessionId),
+        this.store.recordingEngine,
       ).fingerprint;
       return existingFingerprint === decoded.fingerprint
         ? { kind: 'duplicate', sessionId: decoded.sessionId }

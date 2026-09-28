@@ -11,6 +11,7 @@ import {
   type DecodedSavedSessionFingerprint,
   type SessionRevision,
 } from './session-persistence';
+import { RUNNING_ENGINE_BUILD, type EngineBuild } from './engine-build';
 import type { SaveRetention } from './save-manager';
 import { autosavePoolForTrigger, type AutosavePool, type AutosaveTrigger } from './save-manager';
 
@@ -342,12 +343,13 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
     private readonly database: IDBDatabase,
     private readonly legacyStorage: Storage,
     private readonly clock: Clock,
+    readonly recordingEngine: EngineBuild,
   ) {}
 
   static async open(
     indexedDb: IDBFactory,
     legacyStorage: Storage,
-    options: { readonly databaseName?: string; readonly clock?: Clock } = {},
+    options: { readonly databaseName?: string; readonly clock?: Clock; readonly recordingEngine?: EngineBuild } = {},
   ): Promise<IndexedDbBrowserSessionStore> {
     let database: IDBDatabase;
     try {
@@ -359,6 +361,7 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
       database,
       legacyStorage,
       options.clock ?? SYSTEM_CLOCK,
+      options.recordingEngine ?? RUNNING_ENGINE_BUILD,
     );
     try {
       await store.#migrateLegacy();
@@ -557,7 +560,7 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
       if (sessionsWithSnapshots.has(sessionId) && metadata.retention.kind !== 'named') continue;
       const bytes = this.exported(sessionId);
       saves.push({
-        ...decodeSavedSessionFingerprint(bytes),
+        ...decodeSavedSessionFingerprint(bytes, this.recordingEngine),
         storageId: `session:${sessionId}`,
         name: metadata.name,
         updatedAt: metadata.updatedAt,
@@ -602,7 +605,7 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
   #archivedPoint(snapshot: ArchivedAutosaveSnapshot): readonly SessionRevision[] {
     const archived = this.#archivedRevisions(snapshot);
     if (archived === null) throw new RestorePointUnavailableError(snapshot.storageId);
-    return migrateStoredSessionRevisions(archived);
+    return migrateStoredSessionRevisions(archived, this.recordingEngine);
   }
 
   /** The stored texts of an archived restore point's prefix, or null when the live root does not archive it. */
@@ -666,7 +669,7 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
   #captureAutosave(revision: SessionRevision, trigger: AutosaveTrigger): StoredAutosaveSnapshot {
     const pool = autosavePoolForTrigger(trigger);
     const storageId = `${pool}:${revision.sessionId}:${String(revision.revision).padStart(12, '0')}:${trigger}`;
-    const decoded = decodeSavedSessionFingerprint(this.#exportPrefix(revision.sessionId, revision.revision));
+    const decoded = decodeSavedSessionFingerprint(this.#exportPrefix(revision.sessionId, revision.revision), this.recordingEngine);
     return {
       ...decoded,
       storageId,
@@ -810,7 +813,7 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
     for (const stream of bySession.values()) {
       stream.sort((left, right) => left.header.revision - right.header.revision);
       const texts = stream.map((stored) => stored.text);
-      const migrated = [...migrateStoredSessionRevisions(texts)];
+      const migrated = [...migrateStoredSessionRevisions(texts, this.recordingEngine)];
       nextMemory.appendAll(migrated);
       if (stream.some((stored, index) => stored.header.schemaVersion !== migrated[index]?.schemaVersion)) {
         migratedStreams.push(migrated);
@@ -869,7 +872,7 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
     }
     return {
       ...snapshot,
-      ...decodeSavedSessionFingerprint(this.#exportPrefix(snapshot.sessionId, 1)),
+      ...decodeSavedSessionFingerprint(this.#exportPrefix(snapshot.sessionId, 1), this.recordingEngine),
       restorePoint: { kind: 'live', headChecksum: checksumAt(this.#memory.revisions(snapshot.sessionId), 1) },
     };
   }
@@ -881,7 +884,7 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
       const bytes = this.legacyStorage.getItem(key);
       if (bytes === null) continue;
       const sessionId = key.slice(LEGACY_SESSION_PREFIX.length) as EncounterSessionId;
-      const imported = new MemoryBrowserSessionStore();
+      const imported = new MemoryBrowserSessionStore(this.recordingEngine);
       const decodedSessionId = importSavedSession(imported, bytes);
       if (decodedSessionId !== sessionId) throw new Error('Stored VTT session identity does not match its storage key.');
       const storedMetadata = legacyMetadata(
@@ -918,9 +921,9 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
       if (raw === null) continue;
       const legacy = legacySnapshot(raw);
       if (legacy === null) throw new Error('Stored browser autosave is malformed.');
-      const imported = new MemoryBrowserSessionStore();
+      const imported = new MemoryBrowserSessionStore(this.recordingEngine);
       importSavedSession(imported, legacy.bytes);
-      const decoded = decodeSavedSessionFingerprint(legacy.bytes);
+      const decoded = decodeSavedSessionFingerprint(legacy.bytes, this.recordingEngine);
       const snapshot: StoredAutosaveSnapshot = {
         ...decoded,
         storageId: legacy.storageId,
