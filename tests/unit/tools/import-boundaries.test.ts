@@ -244,11 +244,12 @@ describe('the import-boundary guard', () => {
     // whatever its entry says; labelled tooling, it fails (1 finding).
     expect(result.stdout).toContain('R2 red   1 finding(s): an src/ importer labelled tooling (the r2 P2 case)');
     // D927: --update raises a budget as well as lowers one, and R5 then holds.
-    // Worked by hand in the self-test's witness: 2 files and 45 bytes at a 10%
-    // margin are 3 and 50; 1 file of 23 bytes is 2 and 26.
+    // Worked by hand in the self-test's witness, at margins of 10% (files) and
+    // 30% (bytes): 2 files and 45 bytes are ceil(2.2) = 3 and ceil(58.5) = 59;
+    // 1 file of 23 bytes is ceil(1.1) = 2 and ceil(29.9) = 30.
     expect(result.stdout).toContain(
-      'R5 --update src/main.ts files: 1 -> 3 (raised); src/main.ts bytes: 30 -> 50 (raised); ' +
-        'src/lean.ts files: 5 -> 2 (lowered); src/lean.ts bytes: 1000 -> 26 (lowered); then R5 green',
+      'R5 --update src/main.ts files: 1 -> 3 (raised); src/main.ts bytes: 30 -> 59 (raised); ' +
+        'src/lean.ts files: 5 -> 2 (lowered); src/lean.ts bytes: 1000 -> 30 (lowered); then R5 green',
     );
     expect(result.stdout).toContain('fixtures and the --update witness passed');
   });

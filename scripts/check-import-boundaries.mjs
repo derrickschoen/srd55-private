@@ -1125,26 +1125,27 @@ const SELF_TESTS = [
 /**
  * The --update witness (D927), run through checkCheckout exactly as the CLI
  * runs it. src/main.ts is over both budgets and src/lean.ts far under them.
- * The budgets after --update are worked by hand, at a 10% margin:
+ * The budgets after --update are worked by hand, at margins of 10% for files
+ * and 30% for bytes (different, so each unit must use its own):
  *   src/main.ts loads itself (25 bytes) and src/b.ts (20 bytes): 2 files and
- *     45 bytes, so ceil(2 × 1.1) = 3 files and ceil(45 × 1.1) = ceil(49.5) = 50
- *     bytes, raised from 1 and 30;
- *   src/lean.ts is 1 file of 23 bytes, so ceil(1.1) = 2 files and ceil(25.3) =
- *     26 bytes, lowered from 5 and 1000.
+ *     45 bytes, so ceil(2 × 1.1) = ceil(2.2) = 3 files and ceil(45 × 1.3) =
+ *     ceil(58.5) = 59 bytes, raised from 1 and 30;
+ *   src/lean.ts is 1 file of 23 bytes, so ceil(1.1) = 2 files and
+ *     ceil(23 × 1.3) = ceil(29.9) = 30 bytes, lowered from 5 and 1000.
  */
 const UPDATE_WITNESS_BUDGETS = {
   about: 'the --update witness',
-  marginPercent: { files: 10, bytes: 10 },
+  marginPercent: { files: 10, bytes: 30 },
   sentinels: { 'src/main.ts': { files: 1, bytes: 30 }, 'src/lean.ts': { files: 5, bytes: 1000 } },
 };
-const UPDATE_WITNESS_WRITTEN = '{\n  "about": "the --update witness",\n  "marginPercent": {\n    "files": 10,\n    "bytes": 10\n  },\n' +
-  '  "sentinels": {\n    "src/main.ts": {\n      "files": 3,\n      "bytes": 50\n    },\n    "src/lean.ts": {\n' +
-  '      "files": 2,\n      "bytes": 26\n    }\n  }\n}\n';
+const UPDATE_WITNESS_WRITTEN = '{\n  "about": "the --update witness",\n  "marginPercent": {\n    "files": 10,\n    "bytes": 30\n  },\n' +
+  '  "sentinels": {\n    "src/main.ts": {\n      "files": 3,\n      "bytes": 59\n    },\n    "src/lean.ts": {\n' +
+  '      "files": 2,\n      "bytes": 30\n    }\n  }\n}\n';
 const UPDATE_WITNESS_CHANGES = [
   'src/main.ts files: 1 -> 3 (raised)',
-  'src/main.ts bytes: 30 -> 50 (raised)',
+  'src/main.ts bytes: 30 -> 59 (raised)',
   'src/lean.ts files: 5 -> 2 (lowered)',
-  'src/lean.ts bytes: 1000 -> 26 (lowered)',
+  'src/lean.ts bytes: 1000 -> 30 (lowered)',
 ];
 
 function updateWitness() {
