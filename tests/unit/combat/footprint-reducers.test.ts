@@ -256,4 +256,3 @@ describe('FOOTPRINT: the reducers place whole bodies only', () => {
     expect(tokenOf(returned, away.id)).toMatchObject({ position: { column: 2, row: 1 }, placementMode: { kind: 'normal', actual: 'Medium' } });
   });
 });
-
