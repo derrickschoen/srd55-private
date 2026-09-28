@@ -166,23 +166,35 @@ async function encodedStoredRevision(revision: SessionRevision): Promise<ArrayBu
   return new Response(compressed).arrayBuffer();
 }
 
-interface StoredRevisionHeader extends Readonly<Record<string, unknown>> {
+interface StoredRevisionHeader {
   readonly sessionId: EncounterSessionId;
   readonly revision: number;
-  readonly checksum: string;
+  readonly schemaVersion: unknown;
 }
 
-async function decodedStoredRevision(value: unknown): Promise<StoredRevisionHeader> {
-  const decoded: unknown = value instanceof ArrayBuffer
-    ? JSON.parse(await new Response(
-        new Blob([value]).stream().pipeThrough(new DecompressionStream('gzip')),
-      ).text())
-    : value;
+/**
+ * A stored revision record: its header, and the text it was stored as. A gzip record (what this store writes) is
+ * the decompressed JSON exactly; a structured-clone record (an older write) is its JSON serialization, in its
+ * stored key order. The text is what a migration archives byte for byte (FOOTPRINT D919).
+ */
+interface StoredRevisionRecord {
+  readonly header: StoredRevisionHeader;
+  readonly text: string;
+}
+
+async function decodedStoredRevision(value: unknown): Promise<StoredRevisionRecord> {
+  const text = value instanceof ArrayBuffer
+    ? await new Response(new Blob([value]).stream().pipeThrough(new DecompressionStream('gzip'))).text()
+    : JSON.stringify(value);
+  const decoded: unknown = JSON.parse(text);
   if (!isRecord(decoded) || typeof decoded.sessionId !== 'string' ||
     !Number.isSafeInteger(decoded.revision) || typeof decoded.checksum !== 'string') {
     throw new TypeError('Stored VTT session revision is malformed.');
   }
-  return decoded as StoredRevisionHeader;
+  return {
+    header: { sessionId: decoded.sessionId as EncounterSessionId, revision: decoded.revision as number, schemaVersion: decoded.schemaVersion },
+    text,
+  };
 }
 
 function retention(value: unknown): SaveRetention {
@@ -628,25 +640,27 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
     ]);
     await transactionComplete(transaction);
     const nextMemory = new MemoryBrowserSessionStore();
-    const bySession = new Map<EncounterSessionId, StoredRevisionHeader[]>();
-    for (const revision of await Promise.all(
+    const bySession = new Map<EncounterSessionId, StoredRevisionRecord[]>();
+    for (const stored of await Promise.all(
       (revisions as unknown[]).map(async (value) => decodedStoredRevision(value)),
     )) {
-      const current = bySession.get(revision.sessionId) ?? [];
-      current.push(revision);
-      bySession.set(revision.sessionId, current);
+      const current = bySession.get(stored.header.sessionId) ?? [];
+      current.push(stored);
+      bySession.set(stored.header.sessionId, current);
     }
     const migratedStreams: SessionRevision[][] = [];
     // A stream whose history v13 cannot express migrates to ONE archived root revision (FOOTPRINT, D919): the
-    // stored revisions past it are deleted, since the root's archive holds them verbatim.
+    // stored revisions past it are deleted, since the root's archive holds their stored texts byte for byte.
     const staleRevisionKeys: string[] = [];
     for (const stream of bySession.values()) {
-      stream.sort((left, right) => left.revision - right.revision);
-      const migrated = [...migrateStoredSessionRevisions(stream)];
+      stream.sort((left, right) => left.header.revision - right.header.revision);
+      const migrated = [...migrateStoredSessionRevisions(stream.map((stored) => stored.text))];
       nextMemory.appendAll(migrated);
-      if (stream.some((revision, index) => revision.schemaVersion !== migrated[index]?.schemaVersion)) {
+      if (stream.some((stored, index) => stored.header.schemaVersion !== migrated[index]?.schemaVersion)) {
         migratedStreams.push(migrated);
-        for (const stale of stream.slice(migrated.length)) staleRevisionKeys.push(revisionKey(stale.sessionId, stale.revision));
+        for (const stale of stream.slice(migrated.length)) {
+          staleRevisionKeys.push(revisionKey(stale.header.sessionId, stale.header.revision));
+        }
       }
     }
     this.#memory = nextMemory;

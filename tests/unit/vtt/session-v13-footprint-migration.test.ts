@@ -79,6 +79,23 @@ function tokenAt(state: EncounterState, id: CombatantId) {
   return state.tokens.find((token) => token.combatantId === id);
 }
 
+/** A stored stream fixture as its store holds it: each revision's text (the SQLite store writes canonical JSON). */
+function storedTexts(key: 'mixed' | 'mismatch'): readonly string[] {
+  return (JSON.parse(text(key)) as unknown[]).map((revision) => canonicalJson(revision));
+}
+
+/** `value` with every object's keys in reverse order: the same JSON value, other bytes. */
+function reversedKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(reversedKeys);
+  if (typeof value !== 'object' || value === null) return value;
+  return Object.fromEntries(Object.keys(value).reverse().map((key) => [key, reversedKeys((value as Record<string, unknown>)[key])]));
+}
+
+/** A valid save in non-canonical bytes: keys reversed, two-space indentation, a trailing newline. */
+function nonCanonical(bytes: string): string {
+  return `${JSON.stringify(reversedKeys(JSON.parse(bytes)), null, 2)}\n`;
+}
+
 /** A v13 'vtt-session-revisions' save of `revisions`, fingerprinted as the loader reads it. */
 function v13Save(revisions: readonly unknown[]): string {
   const first = revisions[0] as { readonly sessionId: string };
@@ -117,7 +134,7 @@ describe('FOOTPRINT session v13: a save v13 cannot express is repaired and archi
       kind: 'relocated', combatant: HUGE, from: { column: 17, row: 3 }, to: { column: 16, row: 2 },
       placementMode: { kind: 'normal', actual: 'Huge' },
     }]);
-    expect(root.transition.archive).toMatchObject({ kind: 'vtt_session_history_archive', sourceKind: 'saved_session', recordedSchemaVersions: [12] });
+    expect(root.transition.archive).toMatchObject({ kind: 'vtt_session_history_archive', source: { kind: 'saved_session' }, recordedSchemaVersions: [12] });
     // Every field but the state is carried from the v12 head.
     const head = (JSON.parse(text('overhangRevisions')) as { revisions: Record<string, unknown>[] }).revisions.at(-1)!;
     for (const field of ['sessionId', 'branchId', 'rngState', 'coordinatorState', 'controllers', 'partyState', 'agentSession'] as const) {
@@ -131,17 +148,41 @@ describe('FOOTPRINT session v13: a save v13 cannot express is repaired and archi
     const fromRevisions = rootOf(imported(text('overhangRevisions')).revisions);
     expect(canonicalJson(fromDag.encounterState)).toBe(canonicalJson(fromRevisions.encounterState));
     expect(fromDag.transition.placementRepair).toEqual(fromRevisions.transition.placementRepair);
-    expect((fromDag.transition.archive.source as { format?: unknown }).format).toBe('vtt-session-journal-dag');
+    expect(fromDag.transition.archive.source.kind).toBe('saved_session');
+    expect(fromDag.transition.archive.source.kind === 'saved_session' ? fromDag.transition.archive.source.save.text : null).toBe(text('overhangDag'));
+    expect((JSON.parse(text('overhangDag')) as { format?: unknown }).format).toBe('vtt-session-journal-dag');
   });
 
   it('D919 archive bytes: the archive is the imported save byte for byte, and exports back to it', () => {
     for (const key of ['overhangRevisions', 'overhangDag'] as const) {
       const bytes = text(key);
       const root = rootOf(imported(bytes).revisions);
-      expect(canonicalJson(root.transition.archive.source), key).toBe(bytes);
-      expect(root.transition.archive.sourceSha256, key).toBe(sha256(bytes));
-      expect(exportSessionHistoryArchive(root), key).toBe(bytes);
+      expect(root.transition.archive.source, key).toEqual({ kind: 'saved_session', save: { text: bytes, sha256: sha256(bytes) } });
+      expect(exportSessionHistoryArchive(root), key).toEqual([bytes]);
     }
+  });
+
+  it('D919 archive bytes, fix1: a valid save in non-canonical bytes is archived and exported as those bytes, not re-serialized', () => {
+    // codex r1 P1. The same save with every key order reversed, indented, and a trailing newline: its checksums and
+    // fingerprint are over canonical JSON, so it loads; the archive must hold these bytes, not canonical ones.
+    for (const key of ['overhangRevisions', 'overhangDag'] as const) {
+      const bytes = nonCanonical(text(key));
+      expect(bytes, key).not.toBe(text(key));
+      expect(canonicalJson(JSON.parse(bytes)), key).toBe(text(key));
+      const root = rootOf(imported(bytes).revisions);
+      expect(root.transition.archive.source, key).toEqual({ kind: 'saved_session', save: { text: bytes, sha256: sha256(bytes) } });
+      expect(exportSessionHistoryArchive(root), key).toEqual([bytes]);
+      expect(verifySessionHistoryArchive(root).recordedSchemaVersions, key).toEqual([12]);
+      // Only the archive differs from the canonical import: the repaired state is the same.
+      expect(canonicalJson(root.encounterState), key).toBe(canonicalJson(rootOf(imported(text(key)).revisions).encounterState));
+    }
+    // A stored stream's revisions, each stored in non-canonical text: the archive keeps each text exactly.
+    const stored = storedTexts('mixed').map(nonCanonical);
+    const root = rootOf(accepted(() => migrateStoredSessionRevisions(stored)));
+    expect(root.transition.archive.source).toEqual({
+      kind: 'stored_stream', revisions: stored.map((revision) => ({ text: revision, sha256: sha256(revision) })),
+    });
+    expect(exportSessionHistoryArchive(root)).toEqual(stored);
   });
 
   it('D919 verification: the archive verifies under its recorded rules, and those bytes replayed under v12 at the base', () => {
@@ -149,7 +190,8 @@ describe('FOOTPRINT session v13: a save v13 cannot express is repaired and archi
     expect(provenance.baseCommit).toBe('0d3ef2916e7fc4cd44eb7aca295850a3cd03ca6e');
     for (const [key, name] of [['overhangRevisions', 'overhang.revisions.v12.json'], ['overhangDag', 'overhang.dag.v12.json']] as const) {
       const root = rootOf(imported(text(key)).revisions);
-      expect(verifySessionHistoryArchive(root).sourceSha256, key).toBe(provenance.files[name]);
+      const verified = verifySessionHistoryArchive(root).source;
+      expect(verified.kind === 'saved_session' ? verified.save.sha256 : null, key).toBe(provenance.files[name]);
       expect(provenance.pass, key).toContain(`${name}: v12 import + replay PASS (revisions 1, head 1)`);
     }
   });
@@ -175,21 +217,26 @@ describe('FOOTPRINT session v13: a save v13 cannot express is repaired and archi
     const again = imported(exported);
     expect(again.revisions).toHaveLength(2);
     expect(exportSavedSession(again.store, root.sessionId)).toBe(exported);
-    expect(verifySessionHistoryArchive(rootOf(again.revisions)).sourceSha256).toBe(sha256(text('overhangRevisions')));
+    expect(exportSessionHistoryArchive(rootOf(again.revisions))).toEqual([text('overhangRevisions')]);
   });
 
   it('D919 tampering: an edited archive is refused on load, and a recomputed one on demand', () => {
     const root = rootOf(imported(text('overhangRevisions')).revisions);
-    // (a) The archived source edited, its sha left as recorded: the load refuses it.
-    const sourceEdited = rehashed(root, (body) => { body.transition.archive.source.revisions[0].encounterState.round = 7; });
+    // The archived save with revision 1's round set to 7, re-serialized as the fixture is (canonical JSON).
+    const editedSave = (() => {
+      const save = JSON.parse(text('overhangRevisions')) as { revisions: Array<{ encounterState: { round: number } }> };
+      save.revisions[0]!.encounterState.round = 7;
+      return canonicalJson(save);
+    })();
+    // (a) The archived text edited, its sha left as recorded: the load refuses it.
+    const sourceEdited = rehashed(root, (body) => { body.transition.archive.source.save.text = editedSave; });
     const onLoad = thrown(() => importSavedSession(new MemoryBrowserSessionStore(), v13Save([sourceEdited])));
     expect(onLoad).toBeInstanceOf(SessionHistoryArchiveError);
     expect(String(onLoad)).toContain('does not match its recorded sha256');
     // (b) The same edit with the archive sha, the root checksum and the fingerprint recomputed: the archived v12
     // revision no longer matches its own v12 checksum, so on-demand verification refuses it.
     const recomputed = rehashed(root, (body) => {
-      body.transition.archive.source.revisions[0].encounterState.round = 7;
-      body.transition.archive.sourceSha256 = sha256(canonicalJson(body.transition.archive.source));
+      body.transition.archive.source.save = { text: editedSave, sha256: sha256(editedSave) };
     });
     const loaded = rootOf(imported(v13Save([recomputed])).revisions);
     const refused = thrown(() => verifySessionHistoryArchive(loaded));
@@ -212,11 +259,11 @@ describe('FOOTPRINT session v13: a save v13 cannot express is repaired and archi
     // Revision 1 (session_started, the overhang) was recorded under v11, revisions 2 (initiative) and 3 (the PC to
     // (1,0)) under v12. The current state is revision 3's: the Huge still at (17,3) -> (16,2), the PC at (1,0).
     const stream = JSON.parse(text('mixed')) as unknown[];
-    const migrated = accepted(() => migrateStoredSessionRevisions(stream));
+    const migrated = accepted(() => migrateStoredSessionRevisions(storedTexts('mixed')));
     expect(migrated).toHaveLength(1);
     const root = rootOf(migrated);
-    expect(root.transition.archive).toMatchObject({ sourceKind: 'stored_stream', recordedSchemaVersions: [11, 12] });
-    expect(canonicalJson(root.transition.archive.source)).toBe(canonicalJson(stream));
+    expect(root.transition.archive).toMatchObject({ source: { kind: 'stored_stream' }, recordedSchemaVersions: [11, 12] });
+    expect(exportSessionHistoryArchive(root)).toEqual(storedTexts('mixed'));
     expect(tokenAt(root.encounterState, combatantId('combatant:w21-mixed-huge'))?.position).toEqual({ column: 16, row: 2 });
     expect(tokenAt(root.encounterState, combatantId('combatant:w21-mixed-pc'))?.position).toEqual({ column: 1, row: 0 });
     expect(root.encounterState.round).toBe((stream[2] as { encounterState: { round: number } }).encounterState.round);
@@ -347,7 +394,7 @@ describe('FOOTPRINT session v13: a save v13 cannot express is repaired and archi
 
   it('W21f-mismatch: a v12 mode of another size is re-moded from geometry (the v12 spend could never save one)', () => {
     // The W13b map with the Large held {normal, Medium} at (2,1): as for W21f-sq, only squeezed fits at (2,1).
-    const root = rootOf(accepted(() => migrateStoredSessionRevisions(JSON.parse(text('mismatch')) as unknown[])));
+    const root = rootOf(accepted(() => migrateStoredSessionRevisions(storedTexts('mismatch'))));
     const large = combatantId('combatant:mismatch-large');
     const squeezed = { kind: 'squeezed', actual: 'Large', sizedFor: 'Medium' } as const;
     expect(tokenAt(root.encounterState, large)).toMatchObject({ position: { column: 2, row: 1 }, placementMode: squeezed });

@@ -144,19 +144,31 @@ export const VTT_SESSION_MINIMUM_SCHEMA_VERSION = 1 as const;
 /** The last session schema before whole-body placement (FOOTPRINT, D900): the rules archived histories keep. */
 export const VTT_SESSION_LAST_V12_SCHEMA_VERSION = 12 as const;
 
+/** One input the loader accepted, kept exactly as it arrived (owner D919: byte for byte), and that text's sha256. */
+export interface ArchivedText {
+  readonly text: string;
+  readonly sha256: string;
+}
+
 /**
- * FOOTPRINT (owner D919): the history of a v12-or-older save that v13 cannot express, kept verbatim and
- * read-only. `source` is the save exactly as it reached the loader (a saved bundle, or a stored stream's
- * revisions), before any migration; its canonical bytes hash to `sourceSha256`. It is verifiable on demand under
- * the rules it was recorded under: verifySessionHistoryArchive re-reads it with those versions' integrity rules
- * and re-derives the migrated root, and exportSessionHistoryArchive writes the bytes back for the last v12 build
- * (the commit before VTT_SESSION_SCHEMA_VERSION 13) to import and replay. No old turn is re-interpreted here.
+ * What the loader accepted, kept exactly, before any parse or migration: an imported save's text, or a stored
+ * stream's revisions, each as the text its store holds (IndexedDB: the decompressed JSON it wrote; SQLite: the
+ * payload_json column), in revision order. Nothing here is a re-serialization.
+ */
+export type ArchivedSource =
+  | { readonly kind: 'saved_session'; readonly save: ArchivedText }
+  | { readonly kind: 'stored_stream'; readonly revisions: readonly ArchivedText[] };
+
+/**
+ * FOOTPRINT (owner D919): the history of a v12-or-older save that v13 cannot express, kept byte for byte and
+ * read-only. `source` holds every input the loader accepted as it arrived, each text with its sha256. It is
+ * verifiable on demand under the rules it was recorded under: verifySessionHistoryArchive re-reads it with those
+ * versions' integrity rules and re-derives the migrated root, and exportSessionHistoryArchive hands the texts back
+ * unchanged. No old turn is re-interpreted here.
  */
 export interface SessionHistoryArchive {
   readonly kind: 'vtt_session_history_archive';
-  readonly sourceKind: 'saved_session' | 'stored_stream';
-  readonly source: JsonValue;
-  readonly sourceSha256: string;
+  readonly source: ArchivedSource;
   /** Every session schema version the source's revisions were recorded under, ascending. */
   readonly recordedSchemaVersions: readonly number[];
 }
@@ -531,12 +543,13 @@ export class SqliteBrowserSessionStore implements SessionStore {
       ) {
         throw new Error('Stored VTT session row metadata disagrees with its payload.');
       }
-      return revision;
+      // The row's text, as stored: what a migration archives byte for byte (D919).
+      return row.payload_json;
     });
     if (stored.length === 0) return [];
     const migrated = migrateStoredSessionRevisions(stored);
     // A history v13 cannot express became one archived root revision (FOOTPRINT, D919): the rows are rewritten,
-    // since the root's archive holds every stored revision verbatim and new revisions number from the root.
+    // since the root's archive holds every stored row's text byte for byte and new revisions number from the root.
     if (migrated.length !== stored.length) {
       this.db.transaction((transaction) => {
         transaction.exec('DELETE FROM vtt_session_revisions WHERE session_id = $sessionId', { $sessionId: sessionId });
@@ -3397,10 +3410,68 @@ export function validateVttSessionMigrationRegistry(): void {
   }
 }
 
-/** How the loader received a save: the bytes a v13 archive keeps if the save has to be archived (D919). */
-interface ArchiveSource {
-  readonly sourceKind: SessionHistoryArchive['sourceKind'];
-  readonly source: unknown;
+/** What the loader accepted, as it arrived: the texts a v13 archive keeps if the save has to be archived (D919). */
+type AcceptedInput =
+  | { readonly kind: 'saved_session'; readonly text: string }
+  | { readonly kind: 'stored_stream'; readonly texts: readonly string[] };
+
+function archivedText(text: string): ArchivedText {
+  return { text, sha256: sha256(text) };
+}
+
+/** The texts of an archived source, in order: the save's, or each stored revision's. */
+function archivedTexts(source: ArchivedSource): readonly ArchivedText[] {
+  switch (source.kind) {
+    case 'saved_session': return [source.save];
+    case 'stored_stream': return source.revisions;
+  }
+}
+
+/** A revision bundle of `revisions` at `schemaVersion`, fingerprinted as the migration chain reads one. */
+function revisionBundleOf(
+  sessionId: string,
+  schemaVersion: number,
+  revisions: readonly unknown[],
+): Readonly<Record<string, unknown>> {
+  const body = { format: 'vtt-session-revisions' as const, schemaVersion, sessionId, revisions };
+  return { ...body, fingerprint: sha256(canonicalJson(body)) };
+}
+
+/** A stored stream's parsed revisions of one session, split into contiguous schema-version groups, in order. */
+function schemaVersionGroups(
+  revisions: readonly unknown[],
+): { readonly sessionId: string; readonly groups: readonly { readonly schemaVersion: number; readonly revisions: readonly unknown[] }[] } {
+  const first = revisions[0];
+  if (
+    !isRecord(first) ||
+    typeof first.sessionId !== 'string' ||
+    !Number.isSafeInteger(first.schemaVersion)
+  ) throw new TypeError('Stored VTT session revision stream is malformed.');
+  const groups: Array<{ readonly schemaVersion: number; readonly revisions: unknown[] }> = [];
+  for (const revision of revisions) {
+    if (
+      !isRecord(revision) ||
+      revision.sessionId !== first.sessionId ||
+      !Number.isSafeInteger(revision.schemaVersion)
+    ) throw new TypeError('Stored VTT session revision stream is malformed.');
+    const schemaVersion = revision.schemaVersion as number;
+    const current = groups.at(-1);
+    if (current?.schemaVersion === schemaVersion) current.revisions.push(revision);
+    else groups.push({ schemaVersion, revisions: [revision] });
+  }
+  return { sessionId: first.sessionId, groups };
+}
+
+/** A pre-v13 stored stream as one v12 bundle: each contiguous version group migrated by the registered chain. */
+function storedStreamV12Bundle(
+  sessionId: string,
+  groups: readonly { readonly schemaVersion: number; readonly revisions: readonly unknown[] }[],
+): Readonly<Record<string, unknown>> {
+  const v12Revisions = groups.flatMap((group) => {
+    const migrated = migratedToV12(revisionBundleOf(sessionId, group.schemaVersion, group.revisions));
+    return Array.isArray(migrated.revisions) ? migrated.revisions : [];
+  });
+  return revisionBundleOf(sessionId, VTT_SESSION_LAST_V12_SCHEMA_VERSION, v12Revisions);
 }
 
 /** A saved journal DAG of a pre-v13 version, expanded to its revision bundle (its fingerprint checked first). */
@@ -3535,13 +3606,12 @@ function archivedV13Bundle(
   return { ...migratedBody, fingerprint: sha256(canonicalJson(migratedBody)) };
 }
 
-function sessionHistoryArchive(from: ArchiveSource, recordedSchemaVersions: readonly number[]): SessionHistoryArchive {
-  const source = canonicalizeJson(from.source);
+function sessionHistoryArchive(from: AcceptedInput, recordedSchemaVersions: readonly number[]): SessionHistoryArchive {
   return {
     kind: 'vtt_session_history_archive',
-    sourceKind: from.sourceKind,
-    source,
-    sourceSha256: sha256(canonicalJson(source)),
+    source: from.kind === 'saved_session'
+      ? { kind: 'saved_session', save: archivedText(from.text) }
+      : { kind: 'stored_stream', revisions: from.texts.map(archivedText) },
     recordedSchemaVersions: [...new Set(recordedSchemaVersions)].sort((left, right) => left - right),
   };
 }
@@ -3549,7 +3619,7 @@ function sessionHistoryArchive(from: ArchiveSource, recordedSchemaVersions: read
 /** The v13 step of the loader: the version bump when v13 can express the whole stream, else the archive (D919). */
 function migratedToV13(
   v12Bundle: Readonly<Record<string, unknown>>,
-  from: ArchiveSource,
+  from: AcceptedInput,
   recordedSchemaVersions: readonly number[],
 ): Readonly<Record<string, unknown>> {
   const bump = VTT_SESSION_MIGRATIONS.find((candidate) => candidate.from === VTT_SESSION_LAST_V12_SCHEMA_VERSION);
@@ -3582,63 +3652,39 @@ function decodedV13Bundle(migrated: Readonly<Record<string, unknown>>): SavedSes
   return { ...body, fingerprint: migrated.fingerprint };
 }
 
-function migrateSavedBundle(value: unknown): SavedSessionBundleV2 {
+/** A saved session's text, parsed and migrated to v13. A save v13 cannot express archives `text` itself (D919). */
+function migrateSavedBundle(text: string): SavedSessionBundleV2 {
   validateVttSessionMigrationRegistry();
+  const value: unknown = JSON.parse(text);
   if (isRecord(value) && value.format === JOURNAL_DAG_FORMAT && value.schemaVersion === VTT_SESSION_SCHEMA_VERSION) {
     return decodeJournalDagBundle(value);
   }
   if (isRecord(value) && value.schemaVersion === VTT_SESSION_SCHEMA_VERSION) return decodedV13Bundle(value);
   const recorded = isRecord(value) && Number.isSafeInteger(value.schemaVersion) ? [value.schemaVersion as number] : [];
-  return decodedV13Bundle(migratedToV13(migratedToV12(value), { sourceKind: 'saved_session', source: value }, recorded));
+  return decodedV13Bundle(migratedToV13(migratedToV12(value), { kind: 'saved_session', text }, recorded));
 }
 
 /**
- * A stored stream (the local store's revisions of one session, in order) migrated to v13. Its contiguous
- * schema-version groups each migrate to v12 by the registered chain, as before; then the WHOLE stream takes the
- * v13 step, so a mixed-version stream is one save: one bump, or one archive of every stored revision verbatim.
+ * A stored stream (the local store's revisions of one session, in order, each the text its store holds) migrated
+ * to v13. Its contiguous schema-version groups each migrate to v12 by the registered chain, as before; then the
+ * WHOLE stream takes the v13 step, so a mixed-version stream is one save: one bump, or one archive of every stored
+ * revision's text, byte for byte.
  */
 export function migrateStoredSessionRevisions(
-  revisions: readonly unknown[],
+  texts: readonly string[],
 ): readonly SessionRevision[] {
-  const first = revisions[0];
-  if (
-    !isRecord(first) ||
-    typeof first.sessionId !== 'string' ||
-    !Number.isSafeInteger(first.schemaVersion)
-  ) throw new TypeError('Stored VTT session revision stream is malformed.');
-  const groups: Array<{
-    readonly schemaVersion: number;
-    readonly revisions: unknown[];
-  }> = [];
-  for (const revision of revisions) {
-    if (
-      !isRecord(revision) ||
-      revision.sessionId !== first.sessionId ||
-      !Number.isSafeInteger(revision.schemaVersion)
-    ) throw new TypeError('Stored VTT session revision stream is malformed.');
-    const schemaVersion = revision.schemaVersion as number;
-    const current = groups.at(-1);
-    if (current?.schemaVersion === schemaVersion) current.revisions.push(revision);
-    else groups.push({ schemaVersion, revisions: [revision] });
-  }
-  const bundleOf = (schemaVersion: number, groupRevisions: readonly unknown[]) => {
-    const body = { format: 'vtt-session-revisions' as const, schemaVersion, sessionId: first.sessionId, revisions: groupRevisions };
-    return { ...body, fingerprint: sha256(canonicalJson(body)) };
-  };
+  const revisions: readonly unknown[] = texts.map((text): unknown => JSON.parse(text));
+  const { sessionId, groups } = schemaVersionGroups(revisions);
   if (groups.every((group) => group.schemaVersion === VTT_SESSION_SCHEMA_VERSION)) {
-    return decodedV13Bundle(bundleOf(VTT_SESSION_SCHEMA_VERSION, revisions)).revisions;
+    return decodedV13Bundle(revisionBundleOf(sessionId, VTT_SESSION_SCHEMA_VERSION, revisions)).revisions;
   }
   if (groups.some((group) => group.schemaVersion > VTT_SESSION_LAST_V12_SCHEMA_VERSION)) {
     throw new TypeError('Stored VTT session revision stream mixes v13 revisions with older ones.');
   }
   validateVttSessionMigrationRegistry();
-  const v12Revisions = groups.flatMap((group) => {
-    const migrated = migratedToV12(bundleOf(group.schemaVersion, group.revisions));
-    return Array.isArray(migrated.revisions) ? migrated.revisions : [];
-  });
   const v13 = migratedToV13(
-    bundleOf(VTT_SESSION_LAST_V12_SCHEMA_VERSION, v12Revisions),
-    { sourceKind: 'stored_stream', source: revisions },
+    storedStreamV12Bundle(sessionId, groups),
+    { kind: 'stored_stream', texts },
     groups.map((group) => group.schemaVersion),
   );
   return decodedV13Bundle(v13).revisions;
@@ -3685,24 +3731,48 @@ export function migrateReplayEmbeddedRevision(revision: unknown): SessionRevisio
   return decoded;
 }
 
-/** A session history archive as decoded: its shape and its source bytes' sha256 are checked (tampering is refused). */
+function decodeArchivedText(value: unknown): ArchivedText {
+  if (!isRecord(value) || !hasExactlyKeys(value, ['text', 'sha256']) || typeof value.text !== 'string' ||
+    typeof value.sha256 !== 'string') {
+    throw new SessionHistoryArchiveError('The session history archive is malformed.');
+  }
+  if (sha256(value.text) !== value.sha256) {
+    throw new SessionHistoryArchiveError('The session history archive does not match its recorded sha256.');
+  }
+  return { text: value.text, sha256: value.sha256 };
+}
+
+function decodeArchivedSource(value: unknown): ArchivedSource {
+  if (isRecord(value) && value.kind === 'saved_session' && hasExactlyKeys(value, ['kind', 'save'])) {
+    return { kind: 'saved_session', save: decodeArchivedText(value.save) };
+  }
+  if (isRecord(value) && value.kind === 'stored_stream' && hasExactlyKeys(value, ['kind', 'revisions']) &&
+    Array.isArray(value.revisions) && value.revisions.length > 0) {
+    return { kind: 'stored_stream', revisions: value.revisions.map(decodeArchivedText) };
+  }
+  throw new SessionHistoryArchiveError('The session history archive is malformed.');
+}
+
+/**
+ * A session history archive as decoded: its shape, and every archived text against its recorded sha256
+ * (tampering is refused).
+ */
 function decodeSessionHistoryArchive(value: unknown): SessionHistoryArchive {
   if (
     !isRecord(value) ||
-    !hasExactlyKeys(value, ['kind', 'sourceKind', 'source', 'sourceSha256', 'recordedSchemaVersions']) ||
+    !hasExactlyKeys(value, ['kind', 'source', 'recordedSchemaVersions']) ||
     value.kind !== 'vtt_session_history_archive' ||
-    (value.sourceKind !== 'saved_session' && value.sourceKind !== 'stored_stream') ||
-    typeof value.sourceSha256 !== 'string' ||
     !Array.isArray(value.recordedSchemaVersions) || value.recordedSchemaVersions.length === 0 ||
     !value.recordedSchemaVersions.every((version) => Number.isSafeInteger(version) &&
       (version as number) >= VTT_SESSION_MINIMUM_SCHEMA_VERSION && (version as number) <= VTT_SESSION_LAST_V12_SCHEMA_VERSION)
   ) {
     throw new SessionHistoryArchiveError('The session history archive is malformed.');
   }
-  if (sha256(canonicalJson(value.source)) !== value.sourceSha256) {
-    throw new SessionHistoryArchiveError('The session history archive does not match its recorded sha256.');
-  }
-  return value as unknown as SessionHistoryArchive;
+  return {
+    kind: 'vtt_session_history_archive',
+    source: decodeArchivedSource(value.source),
+    recordedSchemaVersions: value.recordedSchemaVersions as readonly number[],
+  };
 }
 
 /** A session history archive that fails its own verification (D919: tampering is refused on demand). */
@@ -3727,24 +3797,18 @@ export function verifySessionHistoryArchive(root: SessionRevision): SessionHisto
   const archive = decodeSessionHistoryArchive(root.transition.archive);
   let v12Bundle: Readonly<Record<string, unknown>>;
   try {
-    if (archive.sourceKind === 'saved_session') {
-      v12Bundle = migratedToV12(archive.source);
-    } else {
-      const stream = Array.isArray(archive.source) ? archive.source : [];
-      const groups: { schemaVersion: number; revisions: unknown[] }[] = [];
-      for (const revision of stream) {
-        const schemaVersion = isRecord(revision) && Number.isSafeInteger(revision.schemaVersion) ? revision.schemaVersion as number : -1;
-        const current = groups.at(-1);
-        if (current?.schemaVersion === schemaVersion) current.revisions.push(revision);
-        else groups.push({ schemaVersion, revisions: [revision] });
+    switch (archive.source.kind) {
+      case 'saved_session':
+        v12Bundle = migratedToV12(JSON.parse(archive.source.save.text));
+        break;
+      case 'stored_stream': {
+        const { sessionId, groups } = schemaVersionGroups(
+          archive.source.revisions.map((revision): unknown => JSON.parse(revision.text)),
+        );
+        if (sessionId !== root.sessionId) throw new TypeError('The archived stream belongs to another session.');
+        v12Bundle = storedStreamV12Bundle(sessionId, groups);
+        break;
       }
-      const revisions = groups.flatMap((group) => {
-        const body = { format: 'vtt-session-revisions' as const, schemaVersion: group.schemaVersion, sessionId: root.sessionId, revisions: group.revisions };
-        const migrated = migratedToV12({ ...body, fingerprint: sha256(canonicalJson(body)) });
-        return Array.isArray(migrated.revisions) ? migrated.revisions : [];
-      });
-      const body = { format: 'vtt-session-revisions' as const, schemaVersion: VTT_SESSION_LAST_V12_SCHEMA_VERSION, sessionId: root.sessionId, revisions };
-      v12Bundle = { ...body, fingerprint: sha256(canonicalJson(body)) };
     }
     const rederived = archivedV13Bundle(v12Bundle, archive);
     const [expected] = Array.isArray(rederived.revisions) ? rederived.revisions : [];
@@ -3760,9 +3824,12 @@ export function verifySessionHistoryArchive(root: SessionRevision): SessionHisto
   return archive;
 }
 
-/** The archived save's bytes, as they reached the loader: importable by the last v12 build for a full replay. */
-export function exportSessionHistoryArchive(root: SessionRevision): string {
-  return canonicalJson(verifySessionHistoryArchive(root).source);
+/**
+ * The archived inputs exactly as the loader accepted them (D919: byte for byte), after on-demand verification: the
+ * imported save's text, or each stored revision's text, in order.
+ */
+export function exportSessionHistoryArchive(root: SessionRevision): readonly string[] {
+  return archivedTexts(verifySessionHistoryArchive(root).source).map((archived) => archived.text);
 }
 
 export function exportSavedSession(
@@ -3790,7 +3857,7 @@ export function exportSavedSession(
 export function decodeSavedSessionFingerprint(
   bytes: string,
 ): DecodedSavedSessionFingerprint {
-  const bundle = migrateSavedBundle(JSON.parse(bytes));
+  const bundle = migrateSavedBundle(bytes);
   const latest = replaySessionRevisions(bundle.revisions);
   return {
     sessionId: bundle.sessionId,
@@ -3806,7 +3873,7 @@ export function importSavedSession(
   store: SessionStore,
   bytes: string,
 ): EncounterSessionId {
-  const bundle = migrateSavedBundle(JSON.parse(bytes));
+  const bundle = migrateSavedBundle(bytes);
   if (store.revisions(bundle.sessionId).length !== 0) {
     throw new Error('Imported encounter session already exists.');
   }
