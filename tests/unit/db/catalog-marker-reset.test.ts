@@ -10,6 +10,15 @@ import {
   isDegraded,
 } from '../../../src/worker/boot';
 import { createSystemHandlers } from '../../../src/worker/handlers/system';
+import {
+  bootDatabaseWorkerWithRetry,
+  classifyDatabaseBootFailure,
+  type DatabaseWorkerBootPort,
+} from '../../../src/db/database-worker-boot';
+import { RpcClient } from '../../../src/rpc/client';
+import { RpcError } from '../../../src/rpc/protocol';
+import { STALE_CATALOG_MARKER } from '../../fixtures/stale-catalog-marker';
+import { DegradedWorkerTransport } from '../../helpers/degraded-worker-transport';
 import { getSqlite3, MemoryDatabaseStorage } from '../../helpers/open-db';
 
 /**
@@ -25,8 +34,8 @@ import { getSqlite3, MemoryDatabaseStorage } from '../../helpers/open-db';
  * (eb45b16b, src/catalog/catalog-data-migrations.ts) — exactly the row an
  * image created before PC-EXPORT-TRUTH carries.
  */
-const MARKER = 'reconcile_species_lineage_content_v2';
-const PRE_UNIT_CHECKSUM = 'e649951df8c8177c80ebc6363c6bbc4902e7c82d8e1e7c5a0749ede307b25125';
+const MARKER = STALE_CATALOG_MARKER.migrationId;
+const PRE_UNIT_CHECKSUM = STALE_CATALOG_MARKER.preUnitChecksum;
 
 let sqlite3: Sqlite3Static;
 
@@ -113,5 +122,47 @@ describe('a database whose catalog data marker predates this build', () => {
     const rebooted = bootDatabase(new DatabaseLifecycle(sqlite3, storage, schema));
     expect(rebooted.status).toBe('ready');
     rebooted.lifecycle.close();
+  });
+
+  it('reaches the main thread\'s boot screen as the typed reason with the reset remedy, across the worker boundary', async () => {
+    // PC-EXPORT-TRUTH fix 2 (codex r2 P1): the main thread used to collapse
+    // this rejection to `boot_failed` and render "Failed: …" with no action.
+    // The whole seam, as main.ts drives it: the boot probe `system.info`
+    // through the real RpcClient, answered by the degraded worker's rejection
+    // after a structured clone, then the shell's classification.
+    const storage = new MemoryDatabaseStorage(sqlite3);
+    await preUnitImage(storage);
+    const boot = bootDatabase(new DatabaseLifecycle(sqlite3, storage, schema));
+    const transport = new DegradedWorkerTransport(boot);
+    const client = new RpcClient(transport);
+    const port: DatabaseWorkerBootPort = { activate: () => undefined, restart: () => undefined };
+
+    let rejected: unknown;
+    try {
+      await bootDatabaseWorkerWithRetry(port, () => client.call('system.info', {}));
+    } catch (error: unknown) {
+      rejected = error;
+    }
+    client.close();
+    boot.lifecycle.close();
+
+    // Not retried: a degraded boot is a stored-data state, not a lost worker.
+    expect(transport.requestedMethods).toEqual(['system.info']);
+    expect(rejected).toBeInstanceOf(RpcError);
+    const failure = classifyDatabaseBootFailure(rejected);
+    expect(failure.kind).toBe('local_database_needs_reset');
+    if (failure.kind !== 'local_database_needs_reset') throw new Error('unreachable');
+    expect(failure.reason).toEqual({
+      kind: 'catalog_data_marker_disagreement',
+      migrationId: MARKER,
+      remedy: 'reset_local_database',
+    });
+    expect(failure.headline).toBe('Your local database was made by an earlier build');
+    expect(failure.explanation).toContain(`"${MARKER}"`);
+    expect(failure.remedy).toContain('Export database');
+    expect(failure.remedy).toContain('Reset local database');
+    // The worker's own words stay reachable as the technical detail.
+    expect(failure.detail).toContain(`"${MARKER}"`);
+    expect(failure.detail).toContain('"system.info" is unavailable');
   });
 });

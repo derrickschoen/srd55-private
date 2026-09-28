@@ -22,6 +22,10 @@ import {
 } from './db/database-boot-timeline';
 import type { SystemInfo } from './worker/handlers/system';
 import { Application } from './ui/app';
+import {
+  renderDatabaseRecoveryShell,
+  saveDatabaseFileInBrowser,
+} from './ui/database-recovery-shell';
 import { Router } from './ui/router';
 import { screen as legalScreen } from './ui/screens/legal/screen';
 import {
@@ -528,6 +532,20 @@ const runDatabaseBoot = (): void => {
         showBlockedByOtherTab(failure, () => {
           databaseWorkerTransport.terminate();
           runDatabaseBoot();
+        });
+        return;
+      }
+      if (failure.kind === 'local_database_needs_reset') {
+        // The worker stays up, degraded, with export and reset dispatchable.
+        // After a confirmed reset its lifecycle is open again, so the same
+        // boot probe now succeeds and the application starts as usual.
+        renderDatabaseRecoveryShell(root, failure, {
+          exportDatabase: system.exportDatabase,
+          resetDatabase: system.reset,
+          confirm: (message) => window.confirm(message),
+          save: saveDatabaseFileInBrowser,
+          now: () => new Date(),
+          recovered: runDatabaseBoot,
         });
         return;
       }

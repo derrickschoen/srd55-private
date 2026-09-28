@@ -92,6 +92,24 @@ a {
   cursor: pointer;
 }
 
+.error-shell button:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.database-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.error-shell details {
+  max-width: 48rem;
+  margin: 0 auto;
+  text-align: left;
+}
+
 .site-footer {
   display: flex;
   align-items: center;

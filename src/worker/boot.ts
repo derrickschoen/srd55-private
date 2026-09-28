@@ -4,6 +4,10 @@ import type {
 } from '../db/database-lifecycle';
 import { DatabaseStoragePoolLockedError } from '../db/storage-pool-lock';
 import { CatalogDataMigrationMarkerDisagreementError } from '../catalog/catalog-data-migrations-errors';
+import {
+  degradedBootReasonData,
+  type DegradedBootReason,
+} from '../db/degraded-boot-reason';
 import { RpcError } from '../rpc/protocol';
 import type { HandlerContext, RuntimeEnvironment } from './handler';
 
@@ -33,28 +37,15 @@ export type DatabaseBoot =
       readonly status: 'schema_mismatch';
       readonly lifecycle: DatabaseLifecycle;
       readonly detail: string;
-      readonly reason: DatabaseBootFailure;
+      /**
+       * WHY it degraded, so the remedy is data rather than a phrase in
+       * `detail`. The type is shared with the main thread, which renders the
+       * recovery screen from it (`src/db/degraded-boot-reason.ts`).
+       */
+      readonly reason: DegradedBootReason;
     };
 
-/**
- * WHY a boot degraded, by type, so the remedy is data rather than a phrase in
- * `detail`.
- *
- * `catalog_data_marker_disagreement`: the image ran a catalog data migration
- * whose frozen sources this build changed. The owner accepted a local
- * database reset for this in pre-alpha (D923 Q11), so the remedy is stated —
- * `system.reset`, after an optional `system.exportDatabase`.
- * `image_rejected`: any other refusal of the stored image.
- */
-export type DatabaseBootFailure =
-  | {
-      readonly kind: 'catalog_data_marker_disagreement';
-      readonly migrationId: string;
-      readonly remedy: CatalogDataMigrationMarkerDisagreementError['remedy'];
-    }
-  | { readonly kind: 'image_rejected' };
-
-function bootFailure(error: unknown): DatabaseBootFailure {
+function bootFailure(error: unknown): DegradedBootReason {
   return error instanceof CatalogDataMigrationMarkerDisagreementError
     ? {
         kind: 'catalog_data_marker_disagreement',
@@ -185,11 +176,7 @@ export function degradedRejection(
         `The stored database predates this build's catalog data update ` +
           `"${boot.reason.migrationId}", so "${method}" is unavailable. ` +
           `Details: ${boot.detail}`,
-        {
-          reason: boot.reason.kind,
-          migration_id: boot.reason.migrationId,
-          remedy: boot.reason.remedy,
-        },
+        degradedBootReasonData(boot.reason),
       );
     case 'image_rejected':
       return new RpcError(
@@ -197,6 +184,7 @@ export function degradedRejection(
         `The stored database does not match this build's schema, so "${method}" ` +
           'is unavailable. Export the database to keep a copy, then reset it. ' +
           `Details: ${boot.detail}`,
+        degradedBootReasonData(boot.reason),
       );
   }
 }
