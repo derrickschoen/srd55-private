@@ -16,6 +16,10 @@
  * column; the first spell and the first armour of their extracts), never taken
  * from the artifacts.
  */
+import type {
+  ClassResourceFormula,
+  ClassResourceFormulaRecord,
+} from '../../src/domain/class-resources';
 import type { Ability, CharacterLevel, Skill } from '../../src/domain/enums';
 import type { PerCharacterLevel } from '../../src/domain/per-level';
 import type { SpellRange } from '../../src/domain/spell-range';
@@ -124,3 +128,82 @@ type DescribedName = Spells[number]['name'];
 type ListedName = (typeof BUNDLED_SRD_SPELL_CATALOG)['memberships'][number]['spell_name'];
 type _EveryListedSpellIsDescribed = Assert<Accepts<ListedName, DescribedName>>;
 type _AnUndescribedNameIsNotListed = Assert<Refuses<'Chronal Shift', DescribedName>>;
+
+/**
+ * A CLASS-RESOURCE FORMULA IS A DISCRIMINATED UNION, NOT STORAGE COLUMNS
+ * (fix round 2, P1). Each arm carries exactly its payload, so none of these
+ * contradictory or stringly states is a recorded formula.
+ */
+type _FormulaRefusesStepsAsJsonText = Assert<Refuses<
+  {
+    readonly kind: 'fixed_count_by_class_level';
+    readonly steps: '[{"minimum_class_level":17,"count":2}]';
+  },
+  ClassResourceFormulaRecord
+>>;
+type _FormulaRefusesASteppedCountWithNoSteps = Assert<Refuses<
+  { readonly kind: 'fixed_count_by_class_level'; readonly steps: readonly [] },
+  ClassResourceFormulaRecord
+>>;
+type _FormulaRefusesAStepAtLevelTwentyOne = Assert<Refuses<
+  {
+    readonly kind: 'fixed_count_by_class_level';
+    readonly steps: readonly [{ readonly minimum_class_level: 21; readonly count: 1 }];
+  },
+  ClassResourceFormulaRecord
+>>;
+type _FormulaRefusesAFixedCountWithAnAbilityForItsCount = Assert<Refuses<
+  { readonly kind: 'fixed_count'; readonly minimum_class_level: 2; readonly ability: 'wisdom' },
+  ClassResourceFormulaRecord
+>>;
+type _FormulaRefusesAMultipleWithoutItsMultiplier = Assert<Refuses<
+  { readonly kind: 'class_level_multiple'; readonly minimum_class_level: 1 },
+  ClassResourceFormulaRecord
+>>;
+type _FormulaRefusesTheStorageColumns = Assert<Refuses<
+  {
+    readonly formula_kind: 'fixed_count';
+    readonly minimum_class_level: 2;
+    readonly fixed_count: 1;
+    readonly ability: null;
+    readonly multiplier: null;
+    readonly later_fixed_count_steps: null;
+  },
+  ClassResourceFormulaRecord
+>>;
+type _ARuntimeFormulaIsMintedNotWritten = Assert<Refuses<
+  { readonly kind: 'fixed_count'; readonly minimum_class_level: 2; readonly count: 1 },
+  ClassResourceFormula
+>>;
+
+type RecordedFormulas =
+  (typeof BUNDLED_SRD_CLASS_RESOURCES)['formula_manifest']['formulas'][number];
+type RecordedFormula<Kind extends string> =
+  Extract<RecordedFormulas, { readonly resource_kind: Kind }>['formula'];
+type _NoRecordedFormulaCarriesAStorageColumn = Assert<Exact<
+  Extract<RecordedFormulas['formula'], { readonly later_fixed_count_steps: unknown }>,
+  never
+>>;
+/** Read off `class-level-tables.txt`: 127 (one use at 9), 131 (two at 13), 135 (three at 17). */
+type _IndomitableIsTheThreePrintedSteps = Assert<Exact<
+  RecordedFormula<'indomitable'>,
+  {
+    readonly kind: 'fixed_count_by_class_level';
+    readonly steps: readonly [
+      { readonly minimum_class_level: 9; readonly count: 1 },
+      { readonly minimum_class_level: 13; readonly count: 2 },
+      { readonly minimum_class_level: 17; readonly count: 3 },
+    ];
+  }
+>>;
+/** Read off `class-level-tables.txt`: 120 (one use at 2), 135 (two uses at 17). */
+type _ActionSurgeIsTheTwoPrintedSteps = Assert<Exact<
+  RecordedFormula<'action_surge'>,
+  {
+    readonly kind: 'fixed_count_by_class_level';
+    readonly steps: readonly [
+      { readonly minimum_class_level: 2; readonly count: 1 },
+      { readonly minimum_class_level: 17; readonly count: 2 },
+    ];
+  }
+>>;

@@ -1,3 +1,4 @@
+import type { CharacterLevel } from './enums';
 import type { Brand, ClassLevel } from './ids';
 
 /** Closed bundle-owned vocabulary for the eight sourced level-table ladders. */
@@ -55,38 +56,78 @@ export type PositiveResourceMaximum = Brand<
 >;
 export type PositiveInteger = Brand<number, 'PositiveInteger'>;
 
-export interface ClassResourceFormulaStep {
-  readonly minimum_class_level: ClassLevel;
-  readonly count: PositiveResourceMaximum;
+/** One step of a stepped count: from this class level on, this many uses. */
+export interface ClassResourceFormulaStepOf<
+  Level extends number,
+  Count extends number,
+> {
+  readonly minimum_class_level: Level;
+  readonly count: Count;
 }
 
 /**
- * The complete D120 expression vocabulary. There is deliberately no generic
- * expression string or fallback arm: unsupported source text is absence.
+ * THE COMPLETE D120 EXPRESSION VOCABULARY, ONCE, over the types a level, a
+ * count and a multiplier take. There is deliberately no generic expression
+ * string or fallback arm: unsupported source text is absence.
+ *
+ * Each arm carries exactly its own payload, so a contradictory state (a fixed
+ * count with an ability, a stepped count with no steps, steps as text) is not
+ * a value of the type. Two instantiations exist: the runtime's
+ * {@link ClassResourceFormula}, whose levels and counts are brands minted by
+ * a validating constructor, and the build's {@link ClassResourceFormulaRecord},
+ * whose bare literals a generated artifact can carry `as const`.
  */
-export type ClassResourceFormula =
+export type ClassResourceFormulaOf<
+  Level extends number,
+  Count extends number,
+  Multiplier extends number,
+> =
   | {
       readonly kind: 'fixed_count';
-      readonly minimum_class_level: ClassLevel;
-      readonly count: PositiveResourceMaximum;
+      readonly minimum_class_level: Level;
+      readonly count: Count;
     }
   | {
       readonly kind: 'fixed_count_by_class_level';
       readonly steps: readonly [
-        ClassResourceFormulaStep,
-        ...ClassResourceFormulaStep[],
+        ClassResourceFormulaStepOf<Level, Count>,
+        ...ClassResourceFormulaStepOf<Level, Count>[],
       ];
     }
   | {
       readonly kind: 'ability_modifier_minimum_one';
-      readonly minimum_class_level: ClassLevel;
+      readonly minimum_class_level: Level;
       readonly ability: ResourceFormulaAbility;
     }
   | {
       readonly kind: 'class_level_multiple';
-      readonly minimum_class_level: ClassLevel;
-      readonly multiplier: PositiveInteger;
+      readonly minimum_class_level: Level;
+      readonly multiplier: Multiplier;
     };
+
+export type ClassResourceFormulaStep = ClassResourceFormulaStepOf<
+  ClassLevel,
+  PositiveResourceMaximum
+>;
+
+/** A formula as the runtime holds it: every level and count a checked brand. */
+export type ClassResourceFormula = ClassResourceFormulaOf<
+  ClassLevel,
+  PositiveResourceMaximum,
+  PositiveInteger
+>;
+
+/**
+ * A formula as the build records it in `generated/class-resources-srd.ts`: the
+ * same union with literal levels (1..20) and counts, so the artifact carries
+ * the discriminated structure itself, never storage columns or JSON text.
+ * {@link classResourceFormula} mints it into a {@link ClassResourceFormula}.
+ */
+export type ClassResourceFormulaRecord = ClassResourceFormulaOf<
+  CharacterLevel,
+  number,
+  number
+>;
 
 export function classResourceLabel(kind: ClassResourceKind): string {
   switch (kind) {
@@ -150,6 +191,11 @@ export function classFormulaResourceLabel(
   }
 }
 
+/**
+ * A formula's `class_resource_formulas` row AS READ: every column unknown until
+ * {@link decodeClassResourceFormula} has checked it. The columns are storage
+ * only: the formula itself is the discriminated {@link ClassResourceFormula}.
+ */
 export interface StoredClassResourceFormula {
   readonly formula_kind: unknown;
   readonly minimum_class_level: unknown;
@@ -157,6 +203,21 @@ export interface StoredClassResourceFormula {
   readonly ability: unknown;
   readonly multiplier: unknown;
   readonly later_fixed_count_steps: unknown;
+}
+
+/**
+ * A formula's `class_resource_formulas` row AS WRITTEN, by
+ * {@link classResourceFormulaColumns} at the database boundary and nowhere
+ * else. The table keeps one nullable column per payload and the later steps
+ * of a stepped count as JSON text; no artifact or domain value carries them.
+ */
+export interface ClassResourceFormulaColumns extends StoredClassResourceFormula {
+  readonly formula_kind: ClassResourceFormulaKind;
+  readonly minimum_class_level: ClassLevel;
+  readonly fixed_count: PositiveResourceMaximum | null;
+  readonly ability: ResourceFormulaAbility | null;
+  readonly multiplier: PositiveInteger | null;
+  readonly later_fixed_count_steps: string | null;
 }
 
 export class ClassResourceFormulaDecodeError extends Error {
@@ -187,10 +248,37 @@ function positiveInteger(value: unknown, field: string): PositiveInteger {
   return value as PositiveInteger;
 }
 
+function formulaAbility(value: unknown): ResourceFormulaAbility {
+  if (value !== 'charisma' && value !== 'wisdom') {
+    throw new ClassResourceFormulaDecodeError('ability must be charisma or wisdom.');
+  }
+  return value;
+}
+
 function nullPayload(value: unknown, field: string): void {
   if (value !== null) {
     throw new ClassResourceFormulaDecodeError(`${field} must be null for this formula kind.`);
   }
+}
+
+type SteppedCount = Extract<
+  ClassResourceFormula,
+  { readonly kind: 'fixed_count_by_class_level' }
+>['steps'];
+
+/** A stepped count's joint rule: each step starts later and changes the count. */
+function steppedCount(steps: SteppedCount): SteppedCount {
+  for (let index = 1; index < steps.length; index += 1) {
+    const previous = steps[index - 1] as ClassResourceFormulaStep;
+    const current = steps[index] as ClassResourceFormulaStep;
+    if (current.minimum_class_level <= previous.minimum_class_level) {
+      throw new ClassResourceFormulaDecodeError('step levels must be strictly increasing.');
+    }
+    if (current.count === previous.count) {
+      throw new ClassResourceFormulaDecodeError('each step must change the count.');
+    }
+  }
+  return steps;
 }
 
 function parseLaterSteps(value: unknown): readonly ClassResourceFormulaStep[] {
@@ -226,7 +314,84 @@ function parseLaterSteps(value: unknown): readonly ClassResourceFormulaStep[] {
   });
 }
 
-/** Decode and jointly validate the formula discriminator and every payload. */
+/**
+ * THE ONE WAY A RECORDED FORMULA BECOMES A RUNTIME ONE: every level and count
+ * is checked (a level 1..20, a positive count and multiplier, a stepped count
+ * whose steps start later and change the count) before it earns its brand.
+ * The artifact's type already refuses a contradictory shape; this refuses a
+ * well-shaped wrong number.
+ */
+export function classResourceFormula(
+  record: ClassResourceFormulaRecord,
+): ClassResourceFormula {
+  switch (record.kind) {
+    case 'fixed_count':
+      return {
+        kind: 'fixed_count',
+        minimum_class_level: classLevel(record.minimum_class_level, 'minimum_class_level'),
+        count: positive(record.count, 'fixed_count'),
+      };
+    case 'fixed_count_by_class_level': {
+      const [first, ...later] = record.steps;
+      return {
+        kind: 'fixed_count_by_class_level',
+        steps: steppedCount([
+          {
+            minimum_class_level: classLevel(first.minimum_class_level, 'minimum_class_level'),
+            count: positive(first.count, 'fixed_count'),
+          },
+          ...later.map((step, index) => ({
+            minimum_class_level: classLevel(
+              step.minimum_class_level,
+              `later step ${String(index + 1)} minimum_class_level`,
+            ),
+            count: positive(step.count, `later step ${String(index + 1)} count`),
+          })),
+        ]),
+      };
+    }
+    case 'ability_modifier_minimum_one':
+      return {
+        kind: 'ability_modifier_minimum_one',
+        minimum_class_level: classLevel(record.minimum_class_level, 'minimum_class_level'),
+        ability: formulaAbility(record.ability),
+      };
+    case 'class_level_multiple':
+      return {
+        kind: 'class_level_multiple',
+        minimum_class_level: classLevel(record.minimum_class_level, 'minimum_class_level'),
+        multiplier: positiveInteger(record.multiplier, 'multiplier'),
+      };
+  }
+}
+
+/**
+ * THE DATABASE BOUNDARY, WRITING: a formula in its stored columns. The first
+ * step of a stepped count goes in the scalar columns and the later steps in
+ * `later_fixed_count_steps` as JSON text; every column another kind does not
+ * use is null. {@link decodeClassResourceFormula} is its inverse.
+ */
+export function classResourceFormulaColumns(
+  formula: ClassResourceFormula,
+): ClassResourceFormulaColumns {
+  switch (formula.kind) {
+    case 'fixed_count':
+      return { formula_kind: formula.kind, minimum_class_level: formula.minimum_class_level, fixed_count: formula.count, ability: null, multiplier: null, later_fixed_count_steps: null };
+    case 'fixed_count_by_class_level': {
+      const [first, ...later] = formula.steps;
+      return { formula_kind: formula.kind, minimum_class_level: first.minimum_class_level, fixed_count: first.count, ability: null, multiplier: null, later_fixed_count_steps: JSON.stringify(later) };
+    }
+    case 'ability_modifier_minimum_one':
+      return { formula_kind: formula.kind, minimum_class_level: formula.minimum_class_level, fixed_count: null, ability: formula.ability, multiplier: null, later_fixed_count_steps: null };
+    case 'class_level_multiple':
+      return { formula_kind: formula.kind, minimum_class_level: formula.minimum_class_level, fixed_count: null, ability: null, multiplier: formula.multiplier, later_fixed_count_steps: null };
+  }
+}
+
+/**
+ * THE DATABASE BOUNDARY, READING: decode and jointly validate the formula
+ * discriminator and every payload column.
+ */
 export function decodeClassResourceFormula(
   row: StoredClassResourceFormula,
 ): ClassResourceFormula {
@@ -246,31 +411,21 @@ export function decodeClassResourceFormula(
       };
       nullPayload(row.ability, 'ability');
       nullPayload(row.multiplier, 'multiplier');
-      const steps = [first, ...parseLaterSteps(row.later_fixed_count_steps)] as const;
-      for (let index = 1; index < steps.length; index += 1) {
-        const previous = steps[index - 1] as ClassResourceFormulaStep;
-        const current = steps[index] as ClassResourceFormulaStep;
-        if (current.minimum_class_level <= previous.minimum_class_level) {
-          throw new ClassResourceFormulaDecodeError('step levels must be strictly increasing.');
-        }
-        if (current.count === previous.count) {
-          throw new ClassResourceFormulaDecodeError('each step must change the count.');
-        }
-      }
-      return { kind: 'fixed_count_by_class_level', steps };
+      return {
+        kind: 'fixed_count_by_class_level',
+        steps: steppedCount([first, ...parseLaterSteps(row.later_fixed_count_steps)]),
+      };
     }
     case 'ability_modifier_minimum_one': {
       const minimum = classLevel(row.minimum_class_level, 'minimum_class_level');
       nullPayload(row.fixed_count, 'fixed_count');
-      if (row.ability !== 'charisma' && row.ability !== 'wisdom') {
-        throw new ClassResourceFormulaDecodeError('ability must be charisma or wisdom.');
-      }
+      const ability = formulaAbility(row.ability);
       nullPayload(row.multiplier, 'multiplier');
       nullPayload(row.later_fixed_count_steps, 'later_fixed_count_steps');
       return {
         kind: 'ability_modifier_minimum_one',
         minimum_class_level: minimum,
-        ability: row.ability,
+        ability,
       };
     }
     case 'class_level_multiple': {

@@ -19,6 +19,7 @@
 import type {
   ClassFormulaResourceKind,
   ClassResourceFormula,
+  ClassResourceFormulaRecord,
   ClassResourceKind,
   PositiveInteger,
   PositiveResourceMaximum,
@@ -748,40 +749,10 @@ export function parseSrdClassResourceFormulaManifest(
 }
 
 /**
- * A formula in its stored `class_resource_formulas` columns: what the seeder
- * writes, what `decodeClassResourceFormula` reads back, and what the build
- * records in the generated artifact.
- */
-export interface ClassResourceFormulaColumns {
-  readonly formula_kind: ClassResourceFormula['kind'];
-  readonly minimum_class_level: CharacterLevel;
-  readonly fixed_count: number | null;
-  readonly ability: ResourceFormulaAbility | null;
-  readonly multiplier: number | null;
-  readonly later_fixed_count_steps: string | null;
-}
-
-export function formulaColumns(
-  formula: ClassResourceFormula,
-): ClassResourceFormulaColumns {
-  switch (formula.kind) {
-    case 'fixed_count':
-      return { formula_kind: formula.kind, minimum_class_level: formula.minimum_class_level, fixed_count: formula.count, ability: null, multiplier: null, later_fixed_count_steps: null };
-    case 'fixed_count_by_class_level': {
-      const [first, ...later] = formula.steps;
-      return { formula_kind: formula.kind, minimum_class_level: first.minimum_class_level, fixed_count: first.count, ability: null, multiplier: null, later_fixed_count_steps: JSON.stringify(later) };
-    }
-    case 'ability_modifier_minimum_one':
-      return { formula_kind: formula.kind, minimum_class_level: formula.minimum_class_level, fixed_count: null, ability: formula.ability, multiplier: null, later_fixed_count_steps: null };
-    case 'class_level_multiple':
-      return { formula_kind: formula.kind, minimum_class_level: formula.minimum_class_level, fixed_count: null, ability: null, multiplier: formula.multiplier, later_fixed_count_steps: null };
-  }
-}
-
-/**
  * WHAT THE BUILD RECORDS. The same manifests with each content key as text
- * and each formula in its stored columns; `class-resources-srd.ts` mints them
- * back through `bundledClassContentKey` and `decodeClassResourceFormula`.
+ * and each formula as the discriminated {@link ClassResourceFormulaRecord}
+ * (never its storage columns); `class-resources-srd.ts` mints them back
+ * through `bundledClassContentKey` and `classResourceFormula`.
  */
 export interface SrdClassResourceLadderRecord {
   readonly content_key: BundledClassContentKeyText;
@@ -801,7 +772,7 @@ export interface SrdClassResourceFormulaRecord {
   readonly content_key: BundledClassContentKeyText;
   readonly class_name: BundledClassName;
   readonly resource_kind: ClassFormulaResourceKind;
-  readonly formula: ClassResourceFormulaColumns;
+  readonly formula: ClassResourceFormulaRecord;
   readonly citation: string;
 }
 
@@ -847,7 +818,7 @@ export function deriveSrdClassResourceArtifact(
         content_key: bundledClassContentKeyText(entry.class_name),
         class_name: entry.class_name,
         resource_kind: entry.resource_kind,
-        formula: formulaColumns(entry.formula),
+        formula: entry.formula,
         citation: entry.citation,
       })),
       unmodelled: formulaManifest.unmodelled.map((entry) => ({

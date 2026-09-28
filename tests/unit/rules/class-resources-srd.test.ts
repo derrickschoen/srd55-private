@@ -2,10 +2,14 @@ import { describe, expect, it } from 'vitest';
 import classLevelTables from '../../../docs/srd/source/class-level-tables.txt?raw';
 import srdFullText from '../../../docs/srd/full/srd-5.2.1.txt?raw';
 import {
+  classResourceFormula,
+  classResourceFormulaColumns,
   decodeClassResourceFormula,
   classFormulaResourceLabel,
   classResourceLabel,
 } from '../../../src/domain/class-resources';
+import { bundledSrdClassResourceFormulaManifest } from '../../../src/rules/class-resources-srd';
+import { BUNDLED_SRD_CLASS_RESOURCES } from '../../../src/rules/generated/class-resources-srd';
 import {
   parseSrdClassResourceFormulaManifest,
   parseSrdClassResourceManifest,
@@ -242,5 +246,110 @@ describe('SRD class resource source parsers', () => {
 
   it('uses a dedicated parser error type', () => {
     expect(() => parseSrdClassResourceManifest('')).toThrow(SrdClassResourcesError);
+  });
+});
+
+/**
+ * A FORMULA IS RECORDED AND HELD AS A DISCRIMINATED UNION; ITS STORAGE COLUMNS
+ * EXIST ONLY AT THE DATABASE BOUNDARY (fix round 2, P1). Every expectation was
+ * read off the SRD text by hand: `class-level-tables.txt` 120 and 135 (Action
+ * Surge one use at 2, two uses at 17), 127, 131 and 135 (Indomitable one, two
+ * and three uses at 9, 13 and 17), `srd-5.2.1.txt` 3206-3211 (Lay On Hands:
+ * five times your Paladin level) and 1949-2002 (Bardic Inspiration: your
+ * Charisma modifier, minimum of once).
+ */
+describe('class-resource formulas as a discriminated union', () => {
+  const INDOMITABLE = {
+    kind: 'fixed_count_by_class_level',
+    steps: [
+      { minimum_class_level: 9, count: 1 },
+      { minimum_class_level: 13, count: 2 },
+      { minimum_class_level: 17, count: 3 },
+    ],
+  };
+
+  function runtimeFormula(kind: string): unknown {
+    return bundledSrdClassResourceFormulaManifest().formulas.find(
+      (entry) => entry.resource_kind === kind,
+    )?.formula;
+  }
+
+  it('the runtime holds each stepped count as its printed steps, and each other kind with only its payload', () => {
+    expect(runtimeFormula('indomitable')).toStrictEqual(INDOMITABLE);
+    expect(runtimeFormula('action_surge')).toStrictEqual({
+      kind: 'fixed_count_by_class_level',
+      steps: [
+        { minimum_class_level: 2, count: 1 },
+        { minimum_class_level: 17, count: 2 },
+      ],
+    });
+    expect(runtimeFormula('lay_on_hands')).toStrictEqual({
+      kind: 'class_level_multiple',
+      minimum_class_level: 1,
+      multiplier: 5,
+    });
+    expect(runtimeFormula('bardic_inspiration')).toStrictEqual({
+      kind: 'ability_modifier_minimum_one',
+      minimum_class_level: 1,
+      ability: 'charisma',
+    });
+  });
+
+  it('the artifact records every formula with exactly its own kind\'s fields, never a storage column', () => {
+    const fields: Readonly<Record<string, string>> = {
+      fixed_count: 'count,kind,minimum_class_level',
+      fixed_count_by_class_level: 'kind,steps',
+      ability_modifier_minimum_one: 'ability,kind,minimum_class_level',
+      class_level_multiple: 'kind,minimum_class_level,multiplier',
+    };
+    const recorded = BUNDLED_SRD_CLASS_RESOURCES.formula_manifest.formulas;
+    expect(recorded).toHaveLength(18);
+    for (const entry of recorded) {
+      expect(Object.keys(entry.formula).sort().join(','), entry.resource_kind)
+        .toBe(fields[entry.formula.kind]);
+    }
+    const stepped = recorded.filter((entry) => entry.formula.kind === 'fixed_count_by_class_level');
+    expect(stepped.map((entry) => entry.resource_kind)).toEqual(['action_surge', 'indomitable']);
+  });
+
+  it('writes a stepped count to its columns at the database boundary, and reads it back', () => {
+    const indomitable = bundledSrdClassResourceFormulaManifest().formulas.find(
+      (entry) => entry.resource_kind === 'indomitable',
+    );
+    expect(indomitable).toBeDefined();
+    const columns = classResourceFormulaColumns(indomitable!.formula);
+    expect(columns).toStrictEqual({
+      formula_kind: 'fixed_count_by_class_level',
+      minimum_class_level: 9,
+      fixed_count: 1,
+      ability: null,
+      multiplier: null,
+      later_fixed_count_steps: '[{"minimum_class_level":13,"count":2},{"minimum_class_level":17,"count":3}]',
+    });
+    expect(decodeClassResourceFormula(columns)).toStrictEqual(INDOMITABLE);
+  });
+
+  it('mints a recorded formula only when its numbers are well formed', () => {
+    expect(classResourceFormula({
+      kind: 'fixed_count_by_class_level',
+      steps: [{ minimum_class_level: 9, count: 1 }, { minimum_class_level: 13, count: 2 }],
+    })).toStrictEqual({
+      kind: 'fixed_count_by_class_level',
+      steps: [{ minimum_class_level: 9, count: 1 }, { minimum_class_level: 13, count: 2 }],
+    });
+    expect(() => classResourceFormula({
+      kind: 'fixed_count_by_class_level',
+      steps: [{ minimum_class_level: 13, count: 1 }, { minimum_class_level: 9, count: 2 }],
+    })).toThrow('step levels must be strictly increasing');
+    expect(() => classResourceFormula({
+      kind: 'fixed_count_by_class_level',
+      steps: [{ minimum_class_level: 9, count: 1 }, { minimum_class_level: 13, count: 1 }],
+    })).toThrow('each step must change the count');
+    expect(() => classResourceFormula({
+      kind: 'fixed_count', minimum_class_level: 2, count: 0,
+    })).toThrow('fixed_count must be a positive integer.');
+    expect(() => classResourceFormula({
+      kind: 'class_level_multiple', minimum_class_level: 1, multiplier: 2.5,
+    })).toThrow('multiplier must be a positive integer.');
   });
 });

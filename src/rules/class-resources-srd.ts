@@ -11,10 +11,15 @@
  * TIME. This module reads the generated artifact
  * (`generated/class-resources-srd.ts`, written by `npm run srd:artifacts` from
  * `class-resources-srd-reader.ts`) and mints its brands back through the
- * validating constructors; it imports no SRD text.
+ * validating constructors: each content key through `bundledClassContentKey`,
+ * each recorded formula union through `classResourceFormula`. Storage columns
+ * appear only at the database boundary (`classResourceFormulaColumns` writing,
+ * `decodeClassResourceFormula` reading). It imports no SRD text.
  */
 import type { DatabaseContext } from '../db/database';
 import {
+  classResourceFormula,
+  classResourceFormulaColumns,
   decodeClassResourceFormula,
   type ClassResourceFormula,
   type ClassResourceKind,
@@ -25,7 +30,6 @@ import { deepFreeze } from '../domain/deep-freeze';
 import {
   BUNDLED_CONTENT_KEYS,
   bundledClassContentKey,
-  formulaColumns,
   level,
   SrdClassResourcesError,
   type SrdClassResourceFormulaManifest,
@@ -53,7 +57,7 @@ const BUNDLED_FORMULA_MANIFEST: SrdClassResourceFormulaManifest = deepFreeze({
       content_key: bundledClassContentKey(entry.content_key),
       class_name: entry.class_name,
       resource_kind: entry.resource_kind,
-      formula: decodeClassResourceFormula(entry.formula),
+      formula: classResourceFormula(entry.formula),
       citation: entry.citation,
     }),
   ),
@@ -313,7 +317,7 @@ function seedExpectedClassResources(
       if (classDefinitionId === undefined) {
         continue;
       }
-      const columns = formulaColumns(entry.formula);
+      const columns = classResourceFormulaColumns(entry.formula);
       const stored = {
         id: 1,
         class_definition_id: classDefinitionId,

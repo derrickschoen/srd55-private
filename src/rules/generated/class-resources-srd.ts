@@ -335,12 +335,9 @@ export const BUNDLED_SRD_CLASS_RESOURCES = {
         "class_name": "Barbarian",
         "resource_kind": "persistent_rage_recovery",
         "formula": {
-          "formula_kind": "fixed_count",
+          "kind": "fixed_count",
           "minimum_class_level": 15,
-          "fixed_count": 1,
-          "ability": null,
-          "multiplier": null,
-          "later_fixed_count_steps": null
+          "count": 1
         },
         "citation": "srd-5.2.1.txt:1897-1901"
       },
@@ -349,12 +346,9 @@ export const BUNDLED_SRD_CLASS_RESOURCES = {
         "class_name": "Cleric",
         "resource_kind": "divine_intervention",
         "formula": {
-          "formula_kind": "fixed_count",
+          "kind": "fixed_count",
           "minimum_class_level": 10,
-          "fixed_count": 1,
-          "ability": null,
-          "multiplier": null,
-          "later_fixed_count_steps": null
+          "count": 1
         },
         "citation": "srd-5.2.1.txt:2339-2348"
       },
@@ -363,12 +357,9 @@ export const BUNDLED_SRD_CLASS_RESOURCES = {
         "class_name": "Druid",
         "resource_kind": "wild_resurgence_conversion",
         "formula": {
-          "formula_kind": "fixed_count",
+          "kind": "fixed_count",
           "minimum_class_level": 5,
-          "fixed_count": 1,
-          "ability": null,
-          "multiplier": null,
-          "later_fixed_count_steps": null
+          "count": 1
         },
         "citation": "srd-5.2.1.txt:2618-2625"
       },
@@ -377,12 +368,9 @@ export const BUNDLED_SRD_CLASS_RESOURCES = {
         "class_name": "Druid",
         "resource_kind": "nature_magician_conversion",
         "formula": {
-          "formula_kind": "fixed_count",
+          "kind": "fixed_count",
           "minimum_class_level": 20,
-          "fixed_count": 1,
-          "ability": null,
-          "multiplier": null,
-          "later_fixed_count_steps": null
+          "count": 1
         },
         "citation": "srd-5.2.1.txt:2657-2670"
       },
@@ -391,12 +379,9 @@ export const BUNDLED_SRD_CLASS_RESOURCES = {
         "class_name": "Monk",
         "resource_kind": "uncanny_metabolism",
         "formula": {
-          "formula_kind": "fixed_count",
+          "kind": "fixed_count",
           "minimum_class_level": 2,
-          "fixed_count": 1,
-          "ability": null,
-          "multiplier": null,
-          "later_fixed_count_steps": null
+          "count": 1
         },
         "citation": "srd-5.2.1.txt:3089-3095"
       },
@@ -405,12 +390,9 @@ export const BUNDLED_SRD_CLASS_RESOURCES = {
         "class_name": "Paladin",
         "resource_kind": "paladins_smite",
         "formula": {
-          "formula_kind": "fixed_count",
+          "kind": "fixed_count",
           "minimum_class_level": 2,
-          "fixed_count": 1,
-          "ability": null,
-          "multiplier": null,
-          "later_fixed_count_steps": null
+          "count": 1
         },
         "citation": "srd-5.2.1.txt:3262-3266"
       },
@@ -419,12 +401,9 @@ export const BUNDLED_SRD_CLASS_RESOURCES = {
         "class_name": "Paladin",
         "resource_kind": "faithful_steed",
         "formula": {
-          "formula_kind": "fixed_count",
+          "kind": "fixed_count",
           "minimum_class_level": 5,
-          "fixed_count": 1,
-          "ability": null,
-          "multiplier": null,
-          "later_fixed_count_steps": null
+          "count": 1
         },
         "citation": "srd-5.2.1.txt:3334-3339"
       },
@@ -433,12 +412,9 @@ export const BUNDLED_SRD_CLASS_RESOURCES = {
         "class_name": "Rogue",
         "resource_kind": "stroke_of_luck",
         "formula": {
-          "formula_kind": "fixed_count",
+          "kind": "fixed_count",
           "minimum_class_level": 20,
-          "fixed_count": 1,
-          "ability": null,
-          "multiplier": null,
-          "later_fixed_count_steps": null
+          "count": 1
         },
         "citation": "srd-5.2.1.txt:3816-3821"
       },
@@ -447,12 +423,9 @@ export const BUNDLED_SRD_CLASS_RESOURCES = {
         "class_name": "Sorcerer",
         "resource_kind": "innate_sorcery",
         "formula": {
-          "formula_kind": "fixed_count",
+          "kind": "fixed_count",
           "minimum_class_level": 1,
-          "fixed_count": 2,
-          "ability": null,
-          "multiplier": null,
-          "later_fixed_count_steps": null
+          "count": 2
         },
         "citation": "srd-5.2.1.txt:3936-3951"
       },
@@ -461,12 +434,9 @@ export const BUNDLED_SRD_CLASS_RESOURCES = {
         "class_name": "Sorcerer",
         "resource_kind": "sorcerous_restoration",
         "formula": {
-          "formula_kind": "fixed_count",
+          "kind": "fixed_count",
           "minimum_class_level": 5,
-          "fixed_count": 1,
-          "ability": null,
-          "multiplier": null,
-          "later_fixed_count_steps": null
+          "count": 1
         },
         "citation": "srd-5.2.1.txt:3969-3974"
       },
@@ -475,12 +445,9 @@ export const BUNDLED_SRD_CLASS_RESOURCES = {
         "class_name": "Warlock",
         "resource_kind": "magical_cunning",
         "formula": {
-          "formula_kind": "fixed_count",
+          "kind": "fixed_count",
           "minimum_class_level": 2,
-          "fixed_count": 1,
-          "ability": null,
-          "multiplier": null,
-          "later_fixed_count_steps": null
+          "count": 1
         },
         "citation": "srd-5.2.1.txt:4330-4335"
       },
@@ -489,12 +456,9 @@ export const BUNDLED_SRD_CLASS_RESOURCES = {
         "class_name": "Warlock",
         "resource_kind": "contact_patron",
         "formula": {
-          "formula_kind": "fixed_count",
+          "kind": "fixed_count",
           "minimum_class_level": 9,
-          "fixed_count": 1,
-          "ability": null,
-          "multiplier": null,
-          "later_fixed_count_steps": null
+          "count": 1
         },
         "citation": "srd-5.2.1.txt:4351-4360"
       },
@@ -503,12 +467,9 @@ export const BUNDLED_SRD_CLASS_RESOURCES = {
         "class_name": "Bard",
         "resource_kind": "bardic_inspiration",
         "formula": {
-          "formula_kind": "ability_modifier_minimum_one",
+          "kind": "ability_modifier_minimum_one",
           "minimum_class_level": 1,
-          "fixed_count": null,
-          "ability": "charisma",
-          "multiplier": null,
-          "later_fixed_count_steps": null
+          "ability": "charisma"
         },
         "citation": "srd-5.2.1.txt:1949-2002"
       },
@@ -517,12 +478,9 @@ export const BUNDLED_SRD_CLASS_RESOURCES = {
         "class_name": "Ranger",
         "resource_kind": "tireless",
         "formula": {
-          "formula_kind": "ability_modifier_minimum_one",
+          "kind": "ability_modifier_minimum_one",
           "minimum_class_level": 10,
-          "fixed_count": null,
-          "ability": "wisdom",
-          "multiplier": null,
-          "later_fixed_count_steps": null
+          "ability": "wisdom"
         },
         "citation": "srd-5.2.1.txt:3544-3553"
       },
@@ -531,12 +489,9 @@ export const BUNDLED_SRD_CLASS_RESOURCES = {
         "class_name": "Ranger",
         "resource_kind": "natures_veil",
         "formula": {
-          "formula_kind": "ability_modifier_minimum_one",
+          "kind": "ability_modifier_minimum_one",
           "minimum_class_level": 14,
-          "fixed_count": null,
-          "ability": "wisdom",
-          "multiplier": null,
-          "later_fixed_count_steps": null
+          "ability": "wisdom"
         },
         "citation": "srd-5.2.1.txt:3563-3570"
       },
@@ -545,12 +500,9 @@ export const BUNDLED_SRD_CLASS_RESOURCES = {
         "class_name": "Paladin",
         "resource_kind": "lay_on_hands",
         "formula": {
-          "formula_kind": "class_level_multiple",
+          "kind": "class_level_multiple",
           "minimum_class_level": 1,
-          "fixed_count": null,
-          "ability": null,
-          "multiplier": 5,
-          "later_fixed_count_steps": null
+          "multiplier": 5
         },
         "citation": "srd-5.2.1.txt:3206-3211"
       },
@@ -559,12 +511,17 @@ export const BUNDLED_SRD_CLASS_RESOURCES = {
         "class_name": "Fighter",
         "resource_kind": "action_surge",
         "formula": {
-          "formula_kind": "fixed_count_by_class_level",
-          "minimum_class_level": 2,
-          "fixed_count": 1,
-          "ability": null,
-          "multiplier": null,
-          "later_fixed_count_steps": "[{\"minimum_class_level\":17,\"count\":2}]"
+          "kind": "fixed_count_by_class_level",
+          "steps": [
+            {
+              "minimum_class_level": 2,
+              "count": 1
+            },
+            {
+              "minimum_class_level": 17,
+              "count": 2
+            }
+          ]
         },
         "citation": "class-level-tables.txt:120-135; srd-5.2.1.txt:2938-2945"
       },
@@ -573,12 +530,21 @@ export const BUNDLED_SRD_CLASS_RESOURCES = {
         "class_name": "Fighter",
         "resource_kind": "indomitable",
         "formula": {
-          "formula_kind": "fixed_count_by_class_level",
-          "minimum_class_level": 9,
-          "fixed_count": 1,
-          "ability": null,
-          "multiplier": null,
-          "later_fixed_count_steps": "[{\"minimum_class_level\":13,\"count\":2},{\"minimum_class_level\":17,\"count\":3}]"
+          "kind": "fixed_count_by_class_level",
+          "steps": [
+            {
+              "minimum_class_level": 9,
+              "count": 1
+            },
+            {
+              "minimum_class_level": 13,
+              "count": 2
+            },
+            {
+              "minimum_class_level": 17,
+              "count": 3
+            }
+          ]
         },
         "citation": "class-level-tables.txt:127-135; srd-5.2.1.txt:2928-2935"
       }
