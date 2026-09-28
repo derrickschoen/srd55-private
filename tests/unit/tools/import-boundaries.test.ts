@@ -264,9 +264,21 @@ describe('the import-boundary guard', () => {
       expect(result.stdout).toMatch(new RegExp(`^${rule} green 0 finding\\(s\\)`, 'mu'));
       expect(result.stdout).toMatch(new RegExp(`^${rule} red {3}[1-9]\\d* finding\\(s\\)`, 'mu'));
     }
+    // D932: with SRD-BUILDTIME landed no production module reads the SRD text,
+    // and no entry can admit one. A planted production importer fails unlisted
+    // (1 finding: its reference) and listed as the runtime allowlist once
+    // admitted it, removedBy SRD-BUILDTIME (2 findings: the entry, and the
+    // reference it no longer admits).
+    expect(result.stdout).toContain(
+      'R2 red   1 finding(s): a planted production importer of an extract no entry lists (the r1 P1 case)',
+    );
+    expect(result.stdout).toContain(
+      'R2 red   2 finding(s): a planted production importer listed as the SRD-BUILDTIME allowlist once admitted it (D932)',
+    );
     // Review r2 P2: an src/ module that reads the SRD is production by its path,
-    // whatever its entry says; labelled tooling, it fails (1 finding).
-    expect(result.stdout).toContain('R2 red   1 finding(s): an src/ importer labelled tooling (the r2 P2 case)');
+    // whatever its entry says; labelled tooling, it fails (2 findings: the
+    // entry, and its reference, which no entry admits since D932).
+    expect(result.stdout).toContain('R2 red   2 finding(s): an src/ importer labelled tooling (the r2 P2 case)');
     // Review r3 P2: every production path is proven, not only src/. A computed
     // import in db/srd.ts and in vite.config.ts (2 findings); in the tools and
     // the test helper src/main.ts loads statically, through another tool,

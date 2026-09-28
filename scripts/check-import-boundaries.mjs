@@ -16,17 +16,17 @@
  *                         rewrites them.
  *   R2 SRD text           the SRD text is every file under docs/srd/ (the
  *      allowlist          full SRD and every extract), referenced in any form.
- *                         Tests may reference it. Any other module may only
- *                         if it is listed, with exactly what it references:
- *                         today's runtime importers (D917), each removed by
- *                         SRD-BUILDTIME, and SRD tooling. The path decides
- *                         which: tools/ and scripts/ are tooling, the rest is
- *                         production, whatever the entry says. A stale entry
- *                         fails, so the list only shrinks; with the runtime
- *                         entries gone the SRD is read by tests and tooling
- *                         only (D915). No production module may reach the
- *                         SRD through a test or a tool either, by import or
- *                         as a worker (asset URL). And every
+ *                         Tests may reference it; so may SRD tooling, listed
+ *                         with exactly what it references (a stale entry
+ *                         fails). Production code never does, and no entry
+ *                         can admit it: SRD-BUILDTIME turned every runtime
+ *                         derivation into generated typed data, so the SRD
+ *                         is read by tests and tooling only (D915, D932).
+ *                         The path decides which: tools/ and scripts/ are
+ *                         tooling, the rest is production, whatever an entry
+ *                         says. No production module may reach the SRD
+ *                         through a test or a tool either, by import or as a
+ *                         worker (asset URL). And every
  *                         production path must be provable (review r3 P2):
  *                         on a production module, or on any test or tool
  *                         one loads or ships, an unresolved reference that
@@ -133,27 +133,22 @@ function productionPaths(graph, srd) {
   return parents;
 }
 
-/** R2: the unit that removes every runtime entry below (D915, D917). */
-const SRD_BUILDTIME = 'SRD-BUILDTIME';
-
 /**
- * R2: every module outside tests/ that references the SRD text, with exactly
- * the files it references (the check fails on a file an entry does not list,
- * and on a listed file the module no longer references).
+ * R2: the tools (modules under tools/ or scripts/) that reference the SRD
+ * text, each `{ importer, tooling: '<why>', files }` with exactly the files it
+ * references (the check fails on a file an entry does not list, and on a
+ * listed file the module no longer references) and nothing else.
  *
- * What an entry is follows from its path (SRD_TOOLING_PREFIXES), and the
- * entry must say the same:
- *
- * a production module says `removedBy: 'SRD-BUILDTIME'` and nothing else:
- * TODAY's runtime importers, the D917 census (18 modules, 32 references to 28
- * extracts and the full SRD). Each parses the SRD text at runtime.
- * SRD-BUILDTIME turns each derivation into generated typed data and, because
- * a stale entry fails, deletes the file (and the entry, when it is the last)
- * in the commit that removes the import. When the last runtime entry goes, R2
- * means: tests, the generator and its drift tests only.
- *
- * a tool (under tools/ or scripts/) says `tooling: '<why>'` and nothing else.
- * The SRD-BUILDTIME generator, under scripts/, is listed here when it lands.
+ * There is no entry for production code, and none can be written: a
+ * production module that references the SRD text fails whether or not an
+ * entry names it, and an entry naming one fails too. Until landing batch 1
+ * this list also held the 18 runtime importers of the D917 census, each
+ * marked for SRD-BUILDTIME to remove; SRD-BUILDTIME turned every one into
+ * generated typed data (src/rules/generated/, src/simulation/generated/), so
+ * the list of runtime importers is empty and R2 no longer admits one (D915,
+ * D932). The SRD-BUILDTIME generator (scripts/generate-srd-artifacts.ts) and
+ * its drift tests read the corpora through the file system and tests, not by a
+ * module reference, so they need no entry.
  */
 const SRD_TEXT_IMPORTERS = [
   {
@@ -161,91 +156,13 @@ const SRD_TEXT_IMPORTERS = [
     tooling: 'reflows the spell-description extract in place (a maintenance CLI)',
     files: ['docs/srd/source/spell-descriptions.txt'],
   },
-  {
-    importer: 'src/rules/ability-score-generation-srd.ts',
-    removedBy: SRD_BUILDTIME,
-    files: ['docs/srd/source/ability-score-generation.txt'],
-  },
-  { importer: 'src/rules/armor-srd.ts', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/armor-table.txt'] },
-  {
-    importer: 'src/rules/class-choice-entitlements-srd.ts',
-    removedBy: SRD_BUILDTIME,
-    files: ['docs/srd/source/class-expertise.txt', 'docs/srd/source/class-spell-replacement.txt'],
-  },
-  {
-    importer: 'src/rules/class-equipment-srd.ts',
-    removedBy: SRD_BUILDTIME,
-    files: ['docs/srd/source/class-starting-equipment.txt'],
-  },
-  {
-    importer: 'src/rules/class-level-features-srd.ts',
-    removedBy: SRD_BUILDTIME,
-    files: ['docs/srd/source/class-level-tables.txt'],
-  },
-  {
-    importer: 'src/rules/class-resources-srd.ts',
-    removedBy: SRD_BUILDTIME,
-    files: ['docs/srd/full/srd-5.2.1.txt', 'docs/srd/source/class-level-tables.txt'],
-  },
-  {
-    importer: 'src/rules/class-traits-srd.ts',
-    removedBy: SRD_BUILDTIME,
-    files: ['docs/srd/source/attack-class-features.txt', 'docs/srd/source/class-core-traits.txt'],
-  },
-  {
-    importer: 'src/rules/draconic-resilience-srd.ts',
-    removedBy: SRD_BUILDTIME,
-    files: ['docs/srd/source/draconic-resilience.txt'],
-  },
-  {
-    importer: 'src/rules/extra-attack-srd.ts',
-    removedBy: SRD_BUILDTIME,
-    files: ['docs/srd/source/extra-attack-other-sources.txt'],
-  },
-  { importer: 'src/rules/feats-srd.ts', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/feats.txt'] },
-  {
-    importer: 'src/rules/multiclass-entry-srd.ts',
-    removedBy: SRD_BUILDTIME,
-    files: ['docs/srd/source/multiclass-entry-grants.txt'],
-  },
-  {
-    importer: 'src/rules/origins-srd.ts',
-    removedBy: SRD_BUILDTIME,
-    files: ['docs/srd/source/backgrounds.txt', 'docs/srd/source/species-descriptions.txt'],
-  },
-  { importer: 'src/rules/skills.ts', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/skills-table.txt'] },
-  {
-    importer: 'src/rules/spells-srd.ts',
-    removedBy: SRD_BUILDTIME,
-    files: [
-      'docs/srd/source/bard-spell-list.txt',
-      'docs/srd/source/cleric-spell-list.txt',
-      'docs/srd/source/druid-spell-list.txt',
-      'docs/srd/source/paladin-spell-list.txt',
-      'docs/srd/source/ranger-spell-list.txt',
-      'docs/srd/source/sorcerer-spell-list.txt',
-      'docs/srd/source/spell-descriptions.txt',
-      'docs/srd/source/warlock-spell-list.txt',
-      'docs/srd/source/wizard-spell-list.txt',
-    ],
-  },
-  { importer: 'src/rules/srd-subclasses.ts', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/subclasses.txt'] },
-  {
-    importer: 'src/rules/unarmored-defense-srd.ts',
-    removedBy: SRD_BUILDTIME,
-    files: ['docs/srd/source/unarmored-defense.txt'],
-  },
-  {
-    importer: 'src/rules/weapons-srd.ts',
-    removedBy: SRD_BUILDTIME,
-    files: ['docs/srd/source/weapon-mastery-progression.txt', 'docs/srd/source/weapons-table.txt'],
-  },
-  {
-    importer: 'src/simulation/coverage.ts',
-    removedBy: SRD_BUILDTIME,
-    files: ['docs/srd/full/srd-5.2.1.txt', 'docs/srd/source/spell-descriptions.txt'],
-  },
 ];
+
+/** R2: the keys a tooling entry has, and no other. */
+const SRD_TOOLING_ENTRY_KEYS = Object.freeze(['importer', 'tooling', 'files']);
+
+/** R2: the unit that made every runtime SRD derivation generated data (D915), named in R2's findings. */
+const SRD_BUILDTIME = 'SRD-BUILDTIME';
 
 /**
  * R2: the files on a production path whose unresolved references R2 accepts
@@ -273,29 +190,30 @@ const FORBIDDEN_REACHABILITY = [
     via: 'runtime',
     why: 'a schema-only test database must not load the seed (OPENDB, D915); seeded openers are in open-seeded-db.ts',
   },
+  // The next four hold since SRD-BUILDTIME (landing batch 1, D932).
   {
-    status: 'pending',
+    status: 'active',
     from: 'tools/engine-mcp-server.ts',
     to: 'src/simulation/coverage.ts',
     via: 'runtime',
     why: 'the engine child must not parse the SRD (SRD-BUILDTIME P1, D915)',
   },
   {
-    status: 'pending',
+    status: 'active',
     from: 'tools/engine-mcp-server.ts',
     to: SRD_TEXT,
     via: 'runtime',
     why: 'the engine child must not carry the SRD text, any of it (SRD-BUILDTIME, D915)',
   },
   {
-    status: 'pending',
+    status: 'active',
     from: 'src/combat/',
     to: 'src/simulation/coverage.ts',
     via: 'runtime',
-    why: 'combat code reaches coverage.ts only through the d20 folds (SRD-BUILDTIME P1, D915)',
+    why: 'combat code does not reach coverage.ts; the d20 folds are in d20-probability.ts (SRD-BUILDTIME P1, D915)',
   },
   {
-    status: 'pending',
+    status: 'active',
     from: 'src/main.ts',
     to: SRD_TEXT,
     via: 'static',
@@ -374,11 +292,11 @@ function ruleR2(graph, srd) {
     const kind = moduleKind(entry.importer, srd);
     if (kind === 'test') problems.push('is a test, and tests need no entry');
     if (entries.has(entry.importer)) problems.push('is listed twice');
-    if (kind === 'production' && (entry.removedBy !== SRD_BUILDTIME || entry.tooling !== undefined)) {
-      problems.push(`is production code (not under ${tooling}), a runtime importer, so it says ` +
-        `removedBy: '${SRD_BUILDTIME}' and nothing else; a label cannot make it tooling`);
+    if (kind === 'production') {
+      problems.push(`is production code (not under ${tooling}), which never references the SRD text ` +
+        `(${SRD_BUILDTIME}, D915, D932), so no entry can list it, whatever the entry says`);
     }
-    if (kind === 'tooling' && (!why || entry.removedBy !== undefined)) {
+    if (kind === 'tooling' && (!why || Object.keys(entry).some((key) => !SRD_TOOLING_ENTRY_KEYS.includes(key)))) {
       problems.push(`is tooling (under ${tooling}), so it says tooling: '<why>' and nothing else`);
     }
     if (!Array.isArray(entry.files) || entry.files.length === 0 || entry.files.some((file) => !file.startsWith(srd.text))) {
@@ -399,13 +317,19 @@ function ruleR2(graph, srd) {
       referenced.set(importer, files);
     }
   }
+  // A production reference fails whether or not an entry names it (an entry
+  // that does has failed above): no allowlist admits one.
   for (const [importer, files] of referenced) {
     if (isTest(importer)) continue;
+    const production = !isTooling(importer);
     const entry = entries.get(importer);
     for (const [file, edge] of files) {
-      if (entry === undefined) {
+      if (production) {
+        diagnostics.push(`R2 ${importer}:${String(edge.line)}: references the SRD text (${edge.to}) from production ` +
+          `code, which never reads it; derive the data at build time into generated typed data (${SRD_BUILDTIME}, D915)`);
+      } else if (entry === undefined) {
         diagnostics.push(`R2 ${importer}:${String(edge.line)}: references the SRD text (${edge.to}) but is not on the ` +
-          `SRD text allowlist; only tests and listed tooling read the SRD, so derive the data at build time (${SRD_BUILDTIME}, D915)`);
+          "SRD text allowlist; a tool that reads it is listed with tooling: '<why>' and the files it references");
       } else if (!(entry.files ?? []).includes(file)) {
         diagnostics.push(`R2 ${importer}:${String(edge.line)}: references ${edge.to}, which its allowlist entry does not ` +
           'list; an entry only ever shrinks');
@@ -423,8 +347,8 @@ function ruleR2(graph, srd) {
 
   // Carriers: tests and tools that reach the SRD text. A module that is
   // neither may not load or ship one: an asset URL starts it as a worker, in
-  // production (it may load a listed runtime importer, which is accounted for
-  // above and removed by SRD-BUILDTIME).
+  // production. (A production module that references the SRD text itself has
+  // failed above.)
   const importersOf = new Map();
   for (const [importer, edges] of graph.edges) {
     for (const edge of edges) {
@@ -450,7 +374,7 @@ function ruleR2(graph, srd) {
         continue;
       }
       crossings.add(`R2 ${importer}:${String(line)}: reaches the SRD text (${carries.get(carrier)}) through ${carrier}, ` +
-        'a test or a tool; outside tests and tooling the SRD is reached only through a listed runtime importer');
+        'a test or a tool; outside tests and tooling the SRD text is never reached');
     }
   }
   diagnostics.push(...crossings);
@@ -510,13 +434,13 @@ function ruleR2(graph, srd) {
     }
   }
 
-  const runtimeEntries = srd.importers.filter((entry) => moduleKind(entry.importer, srd) === 'production');
-  const runtimeFiles = runtimeEntries.reduce((sum, entry) => sum + (entry.files?.length ?? 0), 0);
+  const productionImporters = [...referenced.keys()].filter((importer) => moduleKind(importer, srd) === 'production');
+  const toolEntries = srd.importers.filter((entry) => moduleKind(entry.importer, srd) === 'tooling');
   const pathModules = [...onProductionPath.keys()].filter((id) => graph.edges.has(id));
   const reachedOthers = pathModules.filter((file) => moduleKind(file, srd) !== 'production');
   const notes = [
-    `R2 ${String(runtimeEntries.length)} runtime importer(s) of the SRD text, ${String(runtimeFiles)} ` +
-      `file reference(s), left for ${SRD_BUILDTIME} to remove`,
+    `R2 ${String(productionImporters.length)} production importer(s) of the SRD text; ` +
+      `${String(toolEntries.length)} tool(s) listed`,
     `R2 ${String(pathModules.length)} module(s) on production paths, ${String(reachedOthers.length)} of them tests or ` +
       `tools that production loads or ships; ${String(acceptedReferences)} unresolved reference(s) there accepted unproven`,
   ];
@@ -871,18 +795,16 @@ const SELF_TESTS = [
   },
   {
     rule: 'R2',
-    name: 'a listed runtime importer and its importer, a listed tool and an unlisted tool importing it, tests in every form, ' +
-      'a non-SRD raw import',
+    name: 'a production module that imports generated data (the SRD-BUILDTIME shape), a listed tool and an unlisted tool ' +
+      'importing it, tests in every form, a non-SRD raw import',
     expect: 0,
-    noteMentions: ['R2 1 runtime importer(s) of the SRD text, 1 file reference(s)'],
+    noteMentions: ['R2 0 production importer(s) of the SRD text; 1 tool(s) listed'],
     policy: {
-      srdImporters: [
-        { importer: 'src/rules/armor-srd.ts', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/armor-table.txt'] },
-        { importer: 'scripts/srd/tool.mjs', tooling: 'a maintenance CLI', files: ['docs/srd/full/srd.txt'] },
-      ],
+      srdImporters: [{ importer: 'scripts/srd/tool.mjs', tooling: 'a maintenance CLI', files: ['docs/srd/full/srd.txt'] }],
     },
     files: {
-      'src/rules/armor-srd.ts': "import table from '../../docs/srd/source/armor-table.txt?raw';\nexport const armor = table;\n",
+      'src/rules/armor-srd.ts': "import { ARMOR } from './generated/armor-srd';\nexport const armor = ARMOR;\n",
+      'src/rules/generated/armor-srd.ts': "export const ARMOR = ['padded'] as const;\n",
       'src/sheet.ts': "import { armor } from './rules/armor-srd';\nimport notes from '../docs/other.txt?raw';\n",
       'scripts/srd/tool.mjs': "export const text = new URL('../../docs/srd/full/srd.txt', import.meta.url);\n",
       'tools/srd-report.ts': "import { text } from '../scripts/srd/tool.mjs';\nexport const report = () => text;\n",
@@ -900,17 +822,58 @@ const SELF_TESTS = [
   },
   {
     rule: 'R2',
-    name: 'a planted new importer of an extract no entry lists (the r1 P1 case)',
+    name: 'a planted production importer of an extract no entry lists (the r1 P1 case)',
     expect: 1,
-    mentions: ['R2 src/rules/sheet-math-srd.ts:1: references the SRD text (docs/srd/source/sheet-math.txt?raw)'],
+    mentions: ['R2 src/rules/sheet-math-srd.ts:1: references the SRD text (docs/srd/source/sheet-math.txt?raw) from production code'],
+    files: {
+      'src/rules/sheet-math-srd.ts': "import sheetMath from '../../docs/srd/source/sheet-math.txt?raw';\n",
+      'docs/srd/source/sheet-math.txt': 'sheet math',
+    },
+  },
+  {
+    // D932: the allowlist of runtime importers is empty, and no entry can
+    // refill it. Before landing batch 1 this entry admitted this importer.
+    rule: 'R2',
+    name: 'a planted production importer listed as the SRD-BUILDTIME allowlist once admitted it (D932)',
+    expect: 2,
+    mentions: [
+      'R2 allowlist entry src/rules/armor-srd.ts is production code',
+      'R2 src/rules/armor-srd.ts:1: references the SRD text (docs/srd/source/armor-table.txt?raw) from production code',
+    ],
+    noteMentions: ['R2 1 production importer(s) of the SRD text; 0 tool(s) listed'],
     policy: {
       srdImporters: [{ importer: 'src/rules/armor-srd.ts', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/armor-table.txt'] }],
     },
     files: {
-      'src/rules/armor-srd.ts': "import table from '../../docs/srd/source/armor-table.txt?raw';\n",
-      'src/rules/sheet-math-srd.ts': "import sheetMath from '../../docs/srd/source/sheet-math.txt?raw';\n",
+      'src/rules/armor-srd.ts': "import table from '../../docs/srd/source/armor-table.txt?raw';\nexport const armor = table;\n",
+      'src/sheet.ts': "import { armor } from './rules/armor-srd';\n",
       'docs/srd/source/armor-table.txt': 'armor',
-      'docs/srd/source/sheet-math.txt': 'sheet math',
+    },
+  },
+  {
+    rule: 'R2',
+    name: 'every other entry shape for a production importer is refused too, and none admits its reference',
+    expect: 6,
+    mentions: [
+      'R2 allowlist entry src/neither.ts is production code',
+      'R2 allowlist entry src/someday.ts is production code',
+      'R2 allowlist entry src/both.ts is production code',
+      'R2 src/neither.ts:1: references the SRD text',
+      'R2 src/someday.ts:1: references the SRD text',
+      'R2 src/both.ts:1: references the SRD text',
+    ],
+    policy: {
+      srdImporters: [
+        { importer: 'src/neither.ts', files: ['docs/srd/source/feats.txt'] },
+        { importer: 'src/someday.ts', removedBy: 'a later unit', files: ['docs/srd/source/feats.txt'] },
+        { importer: 'src/both.ts', removedBy: SRD_BUILDTIME, tooling: 'a tool', files: ['docs/srd/source/feats.txt'] },
+      ],
+    },
+    files: {
+      'src/neither.ts': "import feats from '../docs/srd/source/feats.txt?raw';\n",
+      'src/someday.ts': "import feats from '../docs/srd/source/feats.txt?raw';\n",
+      'src/both.ts': "import feats from '../docs/srd/source/feats.txt?raw';\n",
+      'docs/srd/source/feats.txt': 'feats',
     },
   },
   {
@@ -929,28 +892,28 @@ const SELF_TESTS = [
   },
   {
     rule: 'R2',
-    name: 'a listed importer that takes a new extract, and entries gone stale',
+    name: 'a listed tool that takes a new extract, and entries gone stale',
     expect: 3,
     mentions: [
-      'R2 src/rules/armor-srd.ts:2: references docs/srd/source/feats.txt?raw, which its allowlist entry does not list',
-      'stale allowlist entry: src/rules/armor-srd.ts no longer references docs/srd/source/weapons-table.txt',
-      'stale allowlist entry: src/rules/skills.ts no longer references docs/srd/source/skills-table.txt',
+      'R2 scripts/srd/armor.mjs:2: references docs/srd/source/feats.txt?raw, which its allowlist entry does not list',
+      'stale allowlist entry: scripts/srd/armor.mjs no longer references docs/srd/source/weapons-table.txt',
+      'stale allowlist entry: tools/skills-report.ts no longer references docs/srd/source/skills-table.txt',
     ],
     policy: {
       srdImporters: [
         {
-          importer: 'src/rules/armor-srd.ts',
-          removedBy: SRD_BUILDTIME,
+          importer: 'scripts/srd/armor.mjs',
+          tooling: 'an armor table report',
           files: ['docs/srd/source/armor-table.txt', 'docs/srd/source/weapons-table.txt'],
         },
-        { importer: 'src/rules/skills.ts', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/skills-table.txt'] },
+        { importer: 'tools/skills-report.ts', tooling: 'a skills report', files: ['docs/srd/source/skills-table.txt'] },
       ],
     },
     files: {
-      'src/rules/armor-srd.ts': "import table from '../../docs/srd/source/armor-table.txt?raw';\n" +
+      'scripts/srd/armor.mjs': "import table from '../../docs/srd/source/armor-table.txt?raw';\n" +
         "import feats from '../../docs/srd/source/feats.txt?raw';\n",
-      'src/rules/skills.ts': "import { SKILLS } from './skills.generated';\n",
-      'src/rules/skills.generated.ts': 'export const SKILLS = [] as const;\n',
+      'tools/skills-report.ts': "import { SKILLS } from '../src/rules/generated/skills';\n",
+      'src/rules/generated/skills.ts': 'export const SKILLS = [] as const;\n',
       'docs/srd/source/armor-table.txt': 'armor',
       'docs/srd/source/feats.txt': 'feats',
     },
@@ -994,39 +957,37 @@ const SELF_TESTS = [
   {
     rule: 'R2',
     name: 'allowlist entries that are wrong in themselves',
-    expect: 5,
+    expect: 4,
     mentions: [
       'R2 allowlist entry tests/unit/extract.test.ts is a test',
-      'R2 allowlist entry src/neither.ts is production code',
-      'R2 allowlist entry src/someday.ts is production code',
-      'R2 allowlist entry src/both.ts is production code',
-      'R2 allowlist entry src/twice.ts is listed twice',
+      'R2 allowlist entry scripts/srd/twice.mjs is listed twice',
+      'R2 allowlist entry tools/no-files.ts must list the docs/srd/ files it references',
+      'R2 tools/no-files.ts:1: references docs/srd/source/feats.txt?raw, which its allowlist entry does not list',
     ],
     policy: {
       srdImporters: [
-        { importer: 'tests/unit/extract.test.ts', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/feats.txt'] },
-        { importer: 'src/neither.ts', files: ['docs/srd/source/feats.txt'] },
-        { importer: 'src/someday.ts', removedBy: 'a later unit', files: ['docs/srd/source/feats.txt'] },
-        { importer: 'src/both.ts', removedBy: SRD_BUILDTIME, tooling: 'a tool', files: ['docs/srd/source/feats.txt'] },
-        { importer: 'src/twice.ts', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/feats.txt'] },
-        { importer: 'src/twice.ts', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/feats.txt'] },
+        { importer: 'tests/unit/extract.test.ts', tooling: 'a drift test', files: ['docs/srd/source/feats.txt'] },
+        { importer: 'scripts/srd/twice.mjs', tooling: 'a report', files: ['docs/srd/source/feats.txt'] },
+        { importer: 'scripts/srd/twice.mjs', tooling: 'a report', files: ['docs/srd/source/feats.txt'] },
+        { importer: 'tools/no-files.ts', tooling: 'a report', files: [] },
       ],
     },
     files: {
       'tests/unit/extract.test.ts': "import feats from '../../docs/srd/source/feats.txt?raw';\n",
-      'src/neither.ts': "import feats from '../docs/srd/source/feats.txt?raw';\n",
-      'src/someday.ts': "import feats from '../docs/srd/source/feats.txt?raw';\n",
-      'src/both.ts': "import feats from '../docs/srd/source/feats.txt?raw';\n",
-      'src/twice.ts': "import feats from '../docs/srd/source/feats.txt?raw';\n",
+      'scripts/srd/twice.mjs': "import feats from '../../docs/srd/source/feats.txt?raw';\n",
+      'tools/no-files.ts': "import feats from '../docs/srd/source/feats.txt?raw';\n",
       'docs/srd/source/feats.txt': 'feats',
     },
   },
   {
     rule: 'R2',
-    name: 'an src/ importer labelled tooling (the r2 P2 case): its path makes it production, and a runtime importer',
-    expect: 1,
-    mentions: ['R2 allowlist entry src/rules/x.ts is production code'],
-    noteMentions: ['R2 1 runtime importer(s) of the SRD text, 1 file reference(s)'],
+    name: 'an src/ importer labelled tooling (the r2 P2 case): its path makes it production, and its reference fails',
+    expect: 2,
+    mentions: [
+      'R2 allowlist entry src/rules/x.ts is production code',
+      'R2 src/rules/x.ts:1: references the SRD text (docs/srd/source/feats.txt?raw) from production code',
+    ],
+    noteMentions: ['R2 1 production importer(s) of the SRD text; 0 tool(s) listed'],
     policy: {
       srdImporters: [{ importer: 'src/rules/x.ts', tooling: 'claimed generator', files: ['docs/srd/source/feats.txt'] }],
     },
@@ -1038,14 +999,16 @@ const SELF_TESTS = [
   {
     rule: 'R2',
     name: 'a tool entry that also says removedBy, one with no why; db/ and a root config file labelled tooling (fail closed)',
-    expect: 4,
+    expect: 6,
     mentions: [
       'R2 allowlist entry scripts/srd/removed.mjs is tooling',
       'R2 allowlist entry tools/no-why.ts is tooling',
       'R2 allowlist entry db/schema/srd.ts is production code',
       'R2 allowlist entry vite.config.ts is production code',
+      'R2 db/schema/srd.ts:1: references the SRD text (docs/srd/source/feats.txt?raw) from production code',
+      'R2 vite.config.ts:1: references the SRD text (docs/srd/source/feats.txt?raw) from production code',
     ],
-    noteMentions: ['R2 2 runtime importer(s) of the SRD text, 2 file reference(s)'],
+    noteMentions: ['R2 2 production importer(s) of the SRD text; 2 tool(s) listed'],
     policy: {
       srdImporters: [
         { importer: 'scripts/srd/removed.mjs', tooling: 'a generator', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/feats.txt'] },
