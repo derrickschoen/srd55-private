@@ -200,23 +200,24 @@ describe('the runtime reads back exactly what the readers parse', () => {
   });
 
   it('hands out one shared, deeply frozen copy, so no caller can change the catalog for the next one', () => {
-    for (const shared of [
-      STANDARD_ARRAY,
-      bundledArmorTemplates()[0],
-      bundledSrdExpertiseEntitlements()[0]?.pool,
-      bundledSrdClassEquipment()[0]?.items[0],
-      bundledSrdClassTraits()[0]?.saving_throws,
-      bundledSrdDraconicResilience().effects[1],
-      bundledFeatDefinitions()[0]?.grant_rules,
-      bundledSrdMulticlassEntryGrants()[0]?.skill_choice,
-      bundledSpeciesTemplates()[0]?.traits[0],
-      bundledBackgroundTemplates()[0]?.equipment_items[0],
-      bundledSrdSubclassManifest().by_class.Cleric.features[0],
-      bundledSrdUnarmoredDefenseFeatures()[1],
-      bundledWeaponTemplates()[0]?.range,
-    ]) {
-      expect(shared).toBeDefined();
-      expect(Object.isFrozen(shared)).toBe(true);
+    const shared: readonly (readonly [string, unknown])[] = [
+      ['the Standard Array', STANDARD_ARRAY],
+      ['an armour row', bundledArmorTemplates()[0]],
+      ['an Expertise pool', bundledSrdExpertiseEntitlements()[0]?.pool],
+      ['a starting-equipment item', bundledSrdClassEquipment()[0]?.items[0]],
+      ['a class\'s saving throws', bundledSrdClassTraits()[0]?.saving_throws],
+      ['a Draconic Resilience effect', bundledSrdDraconicResilience().effects[1]],
+      ['a feat\'s grant rules', bundledFeatDefinitions()[0]?.grant_rules],
+      ['a multiclass skill choice', bundledSrdMulticlassEntryGrants()[0]?.skill_choice],
+      ['a species trait', bundledSpeciesTemplates()[0]?.traits[0]],
+      ['a background equipment item', bundledBackgroundTemplates()[0]?.equipment_items[0]],
+      ['a subclass feature', bundledSrdSubclassManifest().by_class.Cleric.features[0]],
+      ['an Unarmored Defense row', bundledSrdUnarmoredDefenseFeatures()[1]],
+      ['a weapon range', bundledWeaponTemplates()[0]?.range],
+    ];
+    for (const [label, value] of shared) {
+      expect(value, label).toBeDefined();
+      expect(Object.isFrozen(value), label).toBe(true);
     }
     expect(bundledArmorTemplates()).toBe(bundledArmorTemplates());
     expect(bundledFeatDefinitions()).toBe(bundledFeatDefinitions());
