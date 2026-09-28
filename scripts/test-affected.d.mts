@@ -31,7 +31,13 @@ export interface VerdictEntry {
 }
 
 export function buildClosure(testFile: string): ClosureGraph;
-export function globalSalt(): string;
+/**
+ * The salt that keys every verdict. It hashes the bytes of `walker` (the
+ * runner by default; a test passes a stand-in) and of every module it loads.
+ */
+export function globalSalt(walker?: string): string;
+/** The repository paths of `walker` (the runner by default) and of every module it loads. */
+export function walkerSources(walker?: string): readonly string[];
 /** The hash of every non-directory entry below `directories` (a link with its target) that keys the global salt. */
 export function moduleInventory(directories: readonly string[]): string;
 export function observationRecord(record: unknown): ObservationRecord | undefined;

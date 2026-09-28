@@ -7,6 +7,7 @@ import {
   globalSalt,
   moduleInventory,
   storeVerdict,
+  walkerSources,
   type ObservationRecord,
 } from '../../scripts/test-affected.mjs';
 import {
@@ -27,7 +28,9 @@ import {
  * a reused green. Every form the transform loads is in the closure; a form the
  * walker cannot follow fails the file closed (an unresolved reason). A reused
  * green's closure is not rebuilt, so a path added later (a file or a symbolic
- * link) must change the module inventory, which keys every verdict. A Node
+ * link) must change the module inventory, which keys every verdict, and so
+ * must a change to the walker's own sources (the runner and the shared
+ * classifier it reads module references through) change the salt. A Node
  * built-in is the same module bare or node:, and one that runs code where the
  * recorder records nothing (a child process, a worker thread) fails closed.
  *
@@ -185,6 +188,12 @@ const FIXTURES: Readonly<Record<string, readonly string[]>> = {
   'witness-link/entry.ts': ["export const modules = import.meta.glob('./handlers/*.ts', { eager: true });"],
   'witness-link/handlers/move.ts': ["export const move = 'move';"],
   'witness-link/extra.ts': ["export const extra = 'extra';"],
+  // The salt witness: a walker that imports its classifier, as the runner
+  // (scripts/test-affected.mjs) imports scripts/runtime-import-edges.mjs, and
+  // a test file whose green it stores. It changes the classifier's bytes.
+  'salt-walker/walker.mjs': ["import { classify } from './classifier.mjs';", 'export const walk = classify;'],
+  'salt-walker/classifier.mjs': ["export const classify = () => 'static';"],
+  'witness-salt/entry.ts': ["export const entry = 'entry';"],
   // The inventory tests add and retarget inventory/alias.ts.
   'inventory/one.ts': ["export const one = 'one';"],
   'inventory/two.ts': ["export const two = 'two';"],
@@ -517,6 +526,17 @@ describe('the closure walker agrees with the transform Vitest runs', () => {
   });
 });
 
+/** Runs `change` while the fixture `name` has one more line, then restores its bytes. */
+function changeBytes(name: string, change: () => void): void {
+  const original = readFileSync(probePath(name), 'utf8');
+  writeFileSync(probePath(name), `${original}// changed\n`, 'utf8');
+  try {
+    change();
+  } finally {
+    writeFileSync(probePath(name), original, 'utf8');
+  }
+}
+
 describe('a stored green is not reused once a module the test loads changes', () => {
   function storeGreen(entry: string): void {
     const graph = closureOf(entry);
@@ -524,16 +544,6 @@ describe('a stored green is not reused once a module the test loads changes', ()
     expect(storeVerdict({ testFile: probePath(entry), graph, record: NOTHING_OBSERVED, testCount: 1, salt: SALT, cacheRoot }))
       .toBeTypeOf('string');
     expect(cachedVerdict(probePath(entry), SALT, cacheRoot)?.testCount).toBe(1);
-  }
-
-  function changeBytes(name: string, change: () => void): void {
-    const original = readFileSync(probePath(name), 'utf8');
-    writeFileSync(probePath(name), `${original}// changed\n`, 'utf8');
-    try {
-      change();
-    } finally {
-      writeFileSync(probePath(name), original, 'utf8');
-    }
   }
 
   it('glob: a file an eager import.meta.glob loads', () => {
@@ -588,6 +598,37 @@ describe('a stored green is not reused once a module the test loads changes', ()
     } finally {
       rmSync(link);
     }
+  });
+});
+
+/*
+ * Landing batch 1 review r1 P2. The walker reads every module reference
+ * through the shared classifier (scripts/runtime-import-edges.mjs), and a
+ * reused green's closure is not rebuilt, so a change to the classifier alone
+ * must change the global salt: otherwise a classifier fix that finds a runtime
+ * input it used to miss leaves every green recorded without that input reused.
+ */
+describe('the global salt keys the bytes of the walker and of every module it loads', () => {
+  // Keyed on the real global salt, with a fixture walker in place of the
+  // runner. As in the link witness, paths other test files add or remove
+  // meanwhile can only make the two salts differ more.
+  it('a stored green is not reused once the classifier the walker imports changes', () => {
+    const walker = probePath('salt-walker/walker.mjs');
+    const entry = probePath('witness-salt/entry.ts');
+    const graph = buildClosure(entry);
+    expect(graph).toEqual({ closure: [], unresolved: [] });
+    const salt = globalSalt(walker);
+    expect(storeVerdict({ testFile: entry, graph, record: NOTHING_OBSERVED, testCount: 1, salt, cacheRoot }))
+      .toBeTypeOf('string');
+    expect(cachedVerdict(entry, salt, cacheRoot)?.testCount).toBe(1);
+
+    changeBytes('salt-walker/classifier.mjs', () => {
+      expect(cachedVerdict(entry, globalSalt(walker), cacheRoot)).toBeUndefined();
+    });
+  });
+
+  it('the runner\'s sources are itself and the shared classifier, which it imports', () => {
+    expect(walkerSources()).toEqual(['scripts/test-affected.mjs', 'scripts/runtime-import-edges.mjs']);
   });
 });
 

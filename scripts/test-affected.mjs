@@ -665,7 +665,25 @@ function inventoryEntry(entry, path) {
   return [entry.isFile() ? 'file' : 'special', name];
 }
 
-export function globalSalt() {
+/**
+ * The walker's own sources, as repository paths: `walker` (this runner unless
+ * a test passes a stand-in) and every module it loads, found by the walker
+ * itself. For the runner that is the shared classifier,
+ * scripts/runtime-import-edges.mjs, through which it reads every module
+ * reference, and any module either one imports later. Their bytes key the
+ * global salt (landing batch 1 review r1 P2): a reused green's closure is not
+ * rebuilt (cachedVerdict), so a change to how the walker reads a module, such
+ * as a classifier fix that finds a runtime input it used to miss, must
+ * invalidate every stored verdict. A reference in them that the walker cannot
+ * follow keys nothing; today there is one, node:child_process, the process
+ * this runner starts Vitest in, which is no source.
+ */
+export function walkerSources(walker = runnerPath) {
+  return [repositoryPath(walker), ...buildClosure(walker).closure];
+}
+
+/** The salt that keys every verdict; `walker`: as for walkerSources. */
+export function globalSalt(walker = runnerPath) {
   const inventory = moduleInventory(
     MODULE_INVENTORY_ROOTS.map((directory) => resolve(root, directory)),
   );
@@ -673,7 +691,7 @@ export function globalSalt() {
     `cache-version=${CACHE_VERSION}`,
     `node=${process.version}`,
     `platform=${process.platform}-${process.arch}`,
-    `runner=${sha256(readFileSync(runnerPath))}`,
+    ...walkerSources(walker).map((name) => `walker-source=${name}:${sha256(readFileSync(resolve(root, name)))}`),
     `recorder=${sha256(readFileSync(resolve(root, 'tests/helpers/verdict-fs-recorder-setup.mjs')))}`,
     `vitest.config.ts=${sha256(readFileSync(resolve(root, 'vitest.config.ts')))}`,
     `package.json=${sha256(readFileSync(resolve(root, 'package.json')))}`,
@@ -830,7 +848,8 @@ export function cachedVerdict(testFile, salt, cacheRoot) {
   // Self-healing invariant: reading a different path requires either a code
   // change in the saved closure or changed data content in observedInputs. The
   // former forces a recording run; the latter is hashed directly here. The
-  // module-path inventory separately covers a newly resolvable path or glob.
+  // module-path inventory separately covers a newly resolvable path or glob,
+  // and the walker's own sources (walkerSources) a change to how it reads one.
   const currentDigest = verdictDigest(
     testFile,
     entry.closure,
