@@ -1158,6 +1158,9 @@ const SELF_TESTS = [
       'R2 stale unresolved-reference allowlist entry: db/fixed.ts has no unresolved reference on a production path',
       'R2 stale unresolved-reference allowlist entry: tools/unreached.ts has no unresolved reference on a production path',
     ],
+    // A wrong entry accepts nothing: db/no-why.ts and db/twice.ts have one
+    // reference each and entries that count it, yet none is accepted.
+    noteMentions: ['; 0 unresolved reference(s) there accepted unproven'],
     policy: {
       srdUnproven: [
         { file: 'db/no-why.ts', references: 1, why: ' ' },
