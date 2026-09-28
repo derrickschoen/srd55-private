@@ -3676,5 +3676,16 @@ SUPERVISOR RULINGS (codex r1 showed these are not owner questions):
 - Q3 and Q6–Q10: supervisor-settled in the plan revision, within the cited rulings.
 CONDITION-D20: no owner question now. Q-E waits for measured before and after results. Q-C reaches the owner only if it becomes an auto-stand house rule.
 
-Next free id: D943.
+## D943 — 2026-09-28 15:47 — supervisor: SAVE-COMPAT is its own unit, landing before MOVE-COST and CONDITION-D20; wave 11 launched
+
+- SAVE-COMPAT is a new unit. It builds the D939 typed refusal, the D940 typed migration-step chain (generalising D919's v12→v13 machinery), and the D941 trust-recorded-history test mode, with a per-rule toggle registry that starts empty. It also enforces the guard that pinned rule-output tests refuse both by type. It lands BEFORE MOVE-COST and CONDITION-D20, which only consume it.
+- The classification must keep integrity failures (hash chain, schema, a mismatch under the same build) as integrity errors. This answers codex MOVE-COST r1 P1 (a generic "replay disagrees ⇒ rules changed" rule could hide corruption).
+- Wave 11 (workflow wf_b7b9e94d-1f4, 4 Opus xhigh agents):
+  - ENV-TRACE flake fix1 (codex r1: P1 fail closed on references into tests/transient-probes; P2 keep orphaned probes out of suite discovery);
+  - MOVE-COST plan r2;
+  - CONDITION-D20 plan r1;
+  - SAVE-COMPAT plan (clone dnd-probe-savecompat-8fba).
+  - The codex final findings for each r1 review are extracted beside each log as review-r1.final.md.
+
+Next free id: D944.
 
