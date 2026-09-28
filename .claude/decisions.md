@@ -3727,5 +3727,41 @@ SUPERVISOR RULINGS (recommendations adopted unless stated):
 - Empty legacy directory tests/test-input-boundary-probes/ is removed from main after the flake fix lands.
 NEXT: codex reviews (gpt-6-sol xhigh, fresh read-only): flake fix r2; MOVE-COST plan r2; CONDITION-D20 plan r2; SAVE-COMPAT plan r1.
 
-Next free id: D945.
+## D945 — 2026-09-28 17:34 — flake fix verified by me; wave 12 harvested; supervisor rulings; final plan reviews launched
+
+ENV-TRACE flake fix (claude/envflake 49091ce0). Codex r2 APPROVE: both round-1 findings are resolved, with no new findings.
+VERIFIED BY ME, on a clean checkout:
+- tsc -b --force exit 0, and check-command-outcomes exit 0.
+- The 6-file spec set is 131/131.
+- My own mutant: the new check made conditional on an index.ts existing inside the probe folder. It compiles, and 3 verdict-closure-walker tests fail by assertion with 0 timeouts. After the restore (sha256 matched) the file is 82/82 and the clone is clean.
+- FINDING AGAINST MY OWN WORK: my first spec run gave wrong paths for 2 of the 6 files (tests/unit/ instead of tests/unit/tools/). Vitest ran 4 files and 98 tests, and I did not count that run. This repeats D933: when a file-count shortfall shows, the run is void.
+- The timed pair runs after the plan reviews, which need the machine; codex processes void a timed run.
+
+WAVE 12 (agent-reported). All plans saved; previous versions kept as *.prev.md.
+- SAVE-COMPAT r1 (754 lines): 11/11 codex r1 findings FIXED; 23 red witnesses run on main.
+  - New defects on main:
+    - refusal_handling_changed has no replay case, so a rehashed edit of it loads;
+    - preload and restore rewrite or delete stored bytes before any strict replay.
+  - Persist-after-verify now lives in SAVE-COMPAT for every step (supersedes D944's SAVE-COMPAT Q5 assignment to MOVE-COST).
+  - The grant is a key that exists only in tests/helpers, guarded by R3 entries, an ast-grep rule and a runtime sha256 check.
+- MOVE-COST r3 (1120 lines): 4/4 codex r2 findings FIXED. The area tag now comes only from the area's own evidence. The survival oracle reproduced all 26,367 of 26,367 movement charges on main.
+- CONDITION-D20 r2 (1262 lines): 6/6 FIXED. D944's movement work is planned as C18–C21, and the pin fallback without independent derivation is removed.
+SUPERVISOR RULINGS (recommendations adopted):
+- SAVE-COMPAT:
+  - SQ1: the trust-mode skip set is 9 derived kinds (the census completes D944's "every rules-derived check").
+  - SQ2: persist-after-verify is implemented in SAVE-COMPAT.
+  - SQ3: 12 named R3 tool entries, plus the ast-grep rule and the runtime key.
+  - SQ4: the 32 structural throws stay load_failed.
+  - SQ5: two uncommitted builds relate as 'unrecorded'.
+  - Its OQ1 (truthful cross-build wording) goes to the OWNER.
+- CONDITION-D20:
+  - Q-W: SAVE-COMPAT adds a typed 'not migratable' step outcome surfacing as a SessionLoadRefusal; the r2 review checks it.
+  - Q-X: glossary.grappling goes to ACTIONS-COMPLETE.
+  - Q-T/U/V/Y readings are adopted as planned.
+- MOVE-COST:
+  - The migration-report surface is accepted.
+  - V-OFFLINE is a SAVE-COMPAT tool follow-up if needed.
+REVIEWS LAUNCHED (gpt-6-sol xhigh, fresh read-only): MOVE-COST r3 (FINAL), CONDITION-D20 r3 (FINAL), SAVE-COMPAT r2.
+
+Next free id: D946.
 
