@@ -3763,5 +3763,27 @@ SUPERVISOR RULINGS (recommendations adopted):
   - V-OFFLINE is a SAVE-COMPAT tool follow-up if needed.
 REVIEWS LAUNCHED (gpt-6-sol xhigh, fresh read-only): MOVE-COST r3 (FINAL), CONDITION-D20 r3 (FINAL), SAVE-COMPAT r2.
 
-Next free id: D946.
+## D946 — 2026-09-28 18:19 — owner: truthful cross-build refusal wording; final plan reviews returned; flake fix timed pair running
+
+QUESTION (SAVE-COMPAT OQ1, AskUserQuestion, recommendation "Truthful: either reason"). OWNER chose: "Truthful: either reason (Recommended)".
+- The cross-build refusal says that the save was recorded by build X and cannot be verified by build Y. Either the rules changed between these builds or the save was altered after it was recorded, and this build cannot tell which. It points to the offline replay at the recording build (tools/session-archive-replay.ts --save).
+- This refines D939's wording ("the rules changed") and supersedes the provisional D944 SAVE-COMPAT Q1 text. It stays typed, names both builds, and never sounds like a bare tamper error.
+FINAL CODEX PLAN REVIEWS (gpt-6-sol xhigh):
+- MOVE-COST r3 (round 3 of 3): REVISE.
+  - P1: it adopts SAVE-COMPAT r0 API names, not r1.
+  - P2: the survival oracle checks the budgets of the 107 commanded moves circularly (remaining + spent from the event itself).
+- CONDITION-D20 r3 (round 3 of 3): REVISE.
+  - P1: the same API-name drift.
+  - P2: C17 needs the 'not migratable' step outcome.
+  - P2: the RULE_STATUS change in C22 has no mapped mutant.
+- SAVE-COMPAT r2 (round 2 of 3): REVISE.
+  - P1: the chain cannot express 'not migratable'.
+  - P1: importSavedSession and SQLite migration writes are outside persist-after-verify.
+  - P2: relaxed results can lose their stamp (only SessionResume is stamped).
+  - Codex agrees with 8 of the 11 r1 dispositions.
+- The round cap is reached for MOVE-COST and CONDITION-D20. By protocol, the supervisor verifies their final sync revision personally (API names adopted verbatim from the frozen SAVE-COMPAT API, and the P2 fixes). SAVE-COMPAT gets its r2 revision and a final codex r3.
+- ORDER: the SAVE-COMPAT revision first freezes the API. The MOVE-COST and CONDITION-D20 sync revisions follow it (a pipeline), after the flake-fix timed pair ends (a quiet box).
+ENV-TRACE flake fix: rebased onto a4b582e7 (records only) as e425e531 (branch claude/envflake-landing in the main repo). Timed pair label env-0928-e425e531 is running (A = main a4b582e7).
+
+Next free id: D947.
 
