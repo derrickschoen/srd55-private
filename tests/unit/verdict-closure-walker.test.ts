@@ -743,6 +743,25 @@ describe(`a module outside ${TRANSIENT_PROBES} that reaches into it fails closed
       .toEqual({ closure: [], unresolved: reaching('reach-import.ts', specifier) });
   });
 
+  /*
+   * An import of a directory with no index file resolves to nothing, and
+   * elsewhere it passes: an index file added there later changes the module
+   * inventory, and so the salt. The inventory leaves TRANSIENT_PROBES out, so
+   * an index file added in it would change no salt, and a stored green would
+   * be reused though the import now loads that file (review r1 P1).
+   */
+  it(`an import of ${TRANSIENT_PROBES} itself, a directory with no index file`, () => {
+    const specifier = fromOutside(join(repositoryRoot, TRANSIENT_PROBES));
+    expect(reachOf('reach-probes.ts', [`import '${specifier}';`]))
+      .toEqual({ closure: [], unresolved: reaching('reach-probes.ts', specifier) });
+  });
+
+  it('an import of a directory in it with no index file', () => {
+    const specifier = fromOutside(probePath('targets'));
+    expect(reachOf('reach-directory.ts', [`import '${specifier}';`]))
+      .toEqual({ closure: [], unresolved: reaching('reach-directory.ts', specifier) });
+  });
+
   it('a glob whose base lies in it', () => {
     const pattern = `${fromOutside(probePath('targets'))}/*.ts`;
     expect(reachOf('reach-glob.ts', [`export const modules = import.meta.glob('${pattern}');`]))

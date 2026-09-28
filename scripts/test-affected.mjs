@@ -631,16 +631,25 @@ function readModule(path) {
   // may not depend on what it holds (a glob into it fails in globTargets).
   const reachesProbes = (target) => !inTransientProbes(path) && inTransientProbes(target);
   for (const specifier of references.specifiers) {
-    const resolved = resolvedLocalReference(path, specifier);
-    if ((resolved.kind === 'module' || resolved.kind === 'resource') && reachesProbes(resolved.path)) {
+    // The path a relative specifier names. What it resolves to is that path,
+    // a file beside it (an extension added or .js read as .ts) or an index
+    // file in it, so none lies in TRANSIENT_PROBES unless the named path does.
+    const named = specifier.startsWith('.')
+      ? resolve(dirname(path), specifier.split(/[?#]/u, 1)[0])
+      : undefined;
+    // Checked before resolving, so a directory there with no index file fails
+    // closed too (review r1 P1): an index file added in it changes no salt.
+    if (named !== undefined && reachesProbes(named)) {
       record.unresolved.push(`${repositoryPath(path)} -> ${reachesTransientProbes(specifier)}`);
-    } else if (resolved.kind === 'module') record.dependencies.push(resolved.path);
+      continue;
+    }
+    const resolved = resolvedLocalReference(path, specifier);
+    if (resolved.kind === 'module') record.dependencies.push(resolved.path);
     else if (resolved.kind === 'resource') record.resources.push(resolved.path);
     else if (resolved.kind === 'unresolved') {
-      const candidate = specifier.startsWith('.')
-        ? resolve(dirname(path), specifier.split(/[?#]/u, 1)[0])
-        : undefined;
-      if (candidate === undefined || !existsSync(candidate) || !statSync(candidate).isDirectory()) {
+      // A directory with no index file loads nothing, and an index file
+      // added there later changes the module inventory, and so the salt.
+      if (named === undefined || !existsSync(named) || !statSync(named).isDirectory()) {
         record.unresolved.push(`${repositoryPath(path)} -> ${specifier}`);
       }
     }
