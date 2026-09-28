@@ -255,10 +255,13 @@ describe('an authored species states its senses (owner D923 Q10)', () => {
 
     const characterId = fighterOf(source, 'Travelling Elf', entry.content_key as ContentKey);
     const exported = attempt(() => exportCharacterBackup(source, characterId, '2042-06-08T00:00:00.000Z'));
-    if (!('ok' in exported)) throw new Error(`The backup did not export: ${exported.threw}`);
-    expect(carriedBy(exported.ok.content)).toEqual([
+    // Fix 3 (codex r3 P2): a refused export or read-back is folded into the
+    // compared value, so it fails the sense assertion itself rather than a
+    // thrown error before it — on the source side and at the destination.
+    expect('ok' in exported ? carriedBy(exported.ok.content) : exported).toEqual([
       [CONTENT_FINGERPRINT_SCHEME_V2, [{ kind: 'darkvision', range_feet: 120 }]],
     ]);
+    if (!('ok' in exported)) throw new Error(`The backup did not export: ${exported.threw}`);
 
     const target = await database();
     const imported = attempt(() => {
@@ -266,12 +269,13 @@ describe('an authored species states its senses (owner D923 Q10)', () => {
       return commitCharacterBackupImport(target, exported.ok, plan.token, {});
     });
     expect(imported).toMatchObject({ ok: { kind: 'committed' } });
-    // What the other library now stores, read back through its own export.
-    const reexported = attempt(() => exportWholeLibrary(target, '2042-06-09T00:00:00.000Z'));
-    if (!('ok' in reexported)) throw new Error(`The library did not export: ${reexported.threw}`);
-    expect(carriedBy(reexported.ok.content)).toEqual([
-      [CONTENT_FINGERPRINT_SCHEME_V2, [{ kind: 'darkvision', range_feet: 120 }]],
-    ]);
+    // What the other library now stores, read back through its own export. A
+    // stored statement that no longer matches the species' own fingerprint is
+    // refused by that export, and the refusal is what this assertion receives.
+    const destination = attempt(() => carriedBy(exportWholeLibrary(target, '2042-06-09T00:00:00.000Z').content));
+    expect(destination).toEqual({
+      ok: [[CONTENT_FINGERPRINT_SCHEME_V2, [{ kind: 'darkvision', range_feet: 120 }]]],
+    });
   });
 
   it('stated_senses_are_identity: normal sight only, a stated sense and unstated content are three identities', async () => {
