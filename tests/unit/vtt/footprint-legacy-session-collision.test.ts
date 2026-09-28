@@ -228,6 +228,9 @@ describe('FOOTPRINT fix3: a legacy localStorage session never writes over the se
     (await openStore(indexedDb, name, legacySession(SESSION, first))).close();
     const store = await openStore(indexedDb, name, legacySession(SESSION, second));
     expect(checksums(store.revisions(SESSION))).toEqual(checksums(stored));
+    const keptTexts = store.savedSessions().filter((save) => save.storageId.startsWith('legacy_session:'))
+      .map((save) => store.exportedStored(save.storageId, SESSION));
+    expect(keptTexts.sort()).toEqual([first, second].sort());
     expect(store.savedSessions().map((save) => save.storageId).sort()).toEqual([keptOf(first), keptOf(second), SESSION_ROW].sort());
     expect(store.exportedStored(keptOf(first), SESSION)).toBe(first);
     expect(store.exportedStored(keptOf(second), SESSION)).toBe(second);
