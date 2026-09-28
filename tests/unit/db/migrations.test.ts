@@ -4538,10 +4538,14 @@ describe('database migration chain', () => {
         INSERT INTO species_templates (content_key, name, creature_type, size, base_speed_feet)
         VALUES ('2024:species:dwarf', 'Dwarf', 'Humanoid', 'Medium', 30);
       `);
+      const speciesBefore = db.selectObjects('SELECT * FROM species_templates ORDER BY id');
+      expect(speciesBefore).toHaveLength(1);
 
       db.exec(SPECIES_TEMPLATE_SENSES_MIGRATION.sql);
 
-      // A pre-existing species is UNSTATED, not "normal sight": no row.
+      // The existing species survives byte for byte...
+      expect(db.selectObjects('SELECT * FROM species_templates ORDER BY id')).toEqual(speciesBefore);
+      // ...and is UNSTATED, not "normal sight": no row.
       expect(db.selectValue('SELECT count(*) FROM species_template_senses')).toBe(0);
       const templateId = Number(db.selectValue('SELECT id FROM species_templates'));
       // The CHECK holds the JSON shape: an object is not a sense list.
@@ -4549,16 +4553,17 @@ describe('database migration chain', () => {
         sql: `INSERT INTO species_template_senses (species_template_id, senses_json) VALUES (?, ?)`,
         bind: [templateId, '{"kind":"darkvision"}'],
       })).toThrow(/CHECK constraint failed/u);
-      db.exec({
+      expect(() => db.exec({
         sql: `INSERT INTO species_template_senses (species_template_id, senses_json) VALUES (?, ?)`,
         bind: [templateId, '[{"kind":"darkvision","range_feet":120}]'],
-      });
+      })).not.toThrow();
       // One statement per template.
       expect(() => db.exec({
         sql: `INSERT INTO species_template_senses (species_template_id, senses_json) VALUES (?, ?)`,
         bind: [templateId, '[]'],
       })).toThrow(/UNIQUE constraint failed/u);
-      db.exec('DELETE FROM species_templates');
+      // A statement belongs to its species: deleting the species deletes it.
+      expect(() => db.exec('DELETE FROM species_templates')).not.toThrow();
       expect(db.selectValue('SELECT count(*) FROM species_template_senses')).toBe(0);
       expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
         SPECIES_TEMPLATE_SENSES_MIGRATION.resultSchemaChecksum,

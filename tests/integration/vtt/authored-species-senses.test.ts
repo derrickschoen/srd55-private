@@ -189,15 +189,25 @@ describe('an authored species states its senses (owner D923 Q10)', () => {
     ]);
     expect(deep).toMatchObject({ ok: { outcome: 'created' } });
     if (!('ok' in deep)) throw new Error(`Publishing failed: ${deep.threw}`);
-    const document = exportCharacterBackup(
-      source,
-      fighterOf(source, 'Travelling Fighter', deep.ok.content_key),
-      '2042-06-08T00:00:00.000Z',
-    );
+    const characterId = fighterOf(source, 'Travelling Fighter', deep.ok.content_key);
+    const exported = attempt(() => exportCharacterBackup(source, characterId, '2042-06-08T00:00:00.000Z'));
+    expect(exported).toMatchObject({ ok: { source_character_id: characterId } });
+    if (!('ok' in exported)) throw new Error(`The backup did not export: ${exported.threw}`);
+    const document = exported.ok;
+    // The file itself carries the statement, in its portable wire form.
+    const carried = document.content.filter((entry) =>
+      entry.kind === 'species' && Reflect.get(entry.aggregate, 'name') === 'Travelling Folk');
+    expect(carried.map((entry) => Reflect.get(entry.aggregate, 'senses'))).toEqual([
+      [{ kind: 'blindsight', range_feet: 10 }],
+    ]);
     const target = await database();
-    const plan = planCharacterBackupImport(target, document);
-    const committed = commitCharacterBackupImport(target, document, plan.token, {});
-    if (committed.kind !== 'committed') throw new Error('The backup did not import.');
+    const imported = attempt(() => {
+      const plan = planCharacterBackupImport(target, document);
+      return commitCharacterBackupImport(target, document, plan.token, {});
+    });
+    expect(imported).toMatchObject({ ok: { kind: 'committed' } });
+    if (!('ok' in imported) || imported.ok.kind !== 'committed') throw new Error('The backup did not import.');
+    const committed = imported.ok;
     expect(exportedSenses(target, committed.result.characterId)).toEqual({
       senses: [{ kind: 'normal_sight' }, { kind: 'blindsight', rangeFeet: 10 }],
       senseFeatures: [],
