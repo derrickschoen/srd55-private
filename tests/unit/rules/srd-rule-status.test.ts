@@ -299,22 +299,85 @@ const MENTIONS: { readonly [E in OwnerExclusionId]: RegExp } = {
 };
 
 /**
- * Rules that print a MONSTER's XP, which is kept (its value, the encounter
- * budgets spent in it: MON-TABLES, D922 Q7), hand-listed with why: the
- * glossary's abbreviation list ("XP Experience"), the XP budgets of Combat
- * Encounters, Parts of a Stat Block (its value and the XP table; the award to
- * characters is excluded there as a clause), the glossary's description of a
- * stat block's XP entry, and every stat block, including the ones printed in
- * spells ("CR None (XP 0; …)").
+ * A passage of a rule's printed text: a quote, or the text from the first
+ * printing of `from` through the next printing of `through`.
  */
-function printsMonsterXp(id: SrdRuleId): boolean {
-  const monsterXp: readonly SrdRuleId[] = [
-    'rule_section.rules-glossary',
-    'rule_section.gameplay-toolbox.combat-encounters',
-    'rule_section.monsters.parts-of-a-stat-block',
-    'glossary.stat-block',
-  ];
-  return monsterXp.includes(id) || SRD_RULE_INDEX[id].kind === 'stat_block' || SRD_RULE_INDEX[id].kind === 'spell';
+type Passage = string | readonly [from: string, through: string];
+
+/**
+ * Where the SRD prints a MONSTER's XP, which is kept (its value, and the
+ * encounter budgets spent in it: MON-TABLES, D922 Q7). The passages are quoted
+ * by hand from the text, not found by a pattern. An XP mention inside one is a
+ * monster's XP. Every other mention is character XP (D923 Q8) and must lie
+ * inside an exclusion.
+ * - The glossary's abbreviation list. Its two columns print "XP Experience
+ *   … Point(s)".
+ * - Combat Encounters: the XP budget (Step 2), spending it (Step 3), the three
+ *   worked examples, and the troubleshooting note on 0 XP creatures.
+ * - Parts of a Stat Block: the sentence on a monster's value, the sentence on
+ *   a summoned monster's value, and the XP by CR table. It does NOT keep the
+ *   sentence between the first two, which awards XP to the characters: that
+ *   sentence is an excluded clause.
+ * - The glossary's Stat Block: the CR entry's sentence on the XP printed after
+ *   the CR, and its cross-reference to "Experience Points". A cross-reference
+ *   is no clause (`uncoveredText` drops it too).
+ * Every stat block's CR line is also monster XP (`CR_LINE`).
+ */
+const MONSTER_XP: { readonly [I in SrdRuleId]?: readonly Passage[] } = {
+  'rule_section.rules-glossary': ['XP Experience'],
+  'rule_section.gameplay-toolbox.combat-encounters': [
+    ['Step 2: Determine Your XP Budget', 'for 46,000 XP total'],
+    'Creatures that have a CR of 0, particularly ones that are worth 0 XP, should be used sparingly.',
+  ],
+  'rule_section.monsters.parts-of-a-stat-block': [
+    'Experience Points The number of Experience Points (XP) a monster is worth is based on its CR, as detailed in the Experience Points by Challenge Rating table.',
+    ['Unless a rule says otherwise, a monster summoned by a spell or another magical ability is worth the XP noted in its stat block.', '13 10,000 30 155,000'],
+  ],
+  'glossary.stat-block': [
+    'The Experience Points characters receive for defeating a monster and its Proficiency Bonus follow.',
+    'See also “Challenge Rating” and “Experience Points.”',
+  ],
+};
+
+/**
+ * A stat block's CR line, wherever it is printed (the Monsters chapter, a
+ * spell, a magic item). These are the five shapes the SRD prints:
+ * `CR 1/4 (XP 50; PB +2)`, `CR 10 (XP 5,900, or 7,200 in lair; PB +4)`,
+ * `CR 3 (700 XP; PB +2)`, `CR None (XP 0; PB equals your Proficiency Bonus)`
+ * and `CR None (XP 0; PB equals its summoner’s)`.
+ */
+const CR_LINE = /CR (?:\d+(?:\/\d+)?|None) \((?:XP [\d,]+(?:, or [\d,]+ in lair)?|[\d,]+ XP); PB (?:\+\d+|equals your Proficiency Bonus|equals its summoner’s)\)/g;
+
+type TextRange = readonly [start: number, end: number];
+
+/** Every printing of a quote in a text. */
+function printings(text: string, quote: string): TextRange[] {
+  const ranges: TextRange[] = [];
+  for (let at = text.indexOf(quote); at >= 0; at = text.indexOf(quote, at + 1)) {
+    ranges.push([at, at + quote.length]);
+  }
+  return ranges;
+}
+
+/** Where a passage is printed, or `null` when it is not. */
+function passageRange(text: string, passage: Passage): TextRange | null {
+  const [from, through] = typeof passage === 'string' ? [passage, passage] : passage;
+  const start = text.indexOf(from);
+  const end = start < 0 ? -1 : text.indexOf(through, start);
+  return end < 0 ? null : [start, end + through.length];
+}
+
+/** Where a rule's text prints a monster's XP: its quoted passages and its CR lines. */
+function monsterXpRanges(id: SrdRuleId, text: string): TextRange[] {
+  const passages = (MONSTER_XP[id] ?? []).flatMap((passage): TextRange[] => {
+    const range = passageRange(text, passage);
+    return range === null ? [] : [range];
+  });
+  return [...passages, ...[...text.matchAll(CR_LINE)].map((line): TextRange => [line.index, line.index + line[0].length])];
+}
+
+function inside([start, end]: TextRange, ranges: readonly TextRange[]): boolean {
+  return ranges.some(([from, to]) => start >= from && end <= to);
 }
 
 describe('the owner\'s exclusions (D923 Q8)', () => {
@@ -340,22 +403,20 @@ describe('the owner\'s exclusions (D923 Q8)', () => {
       const status = STATUS[id];
       const text = ruleText(id);
       const clauses = excludedClauses(status);
+      const monsterXp = monsterXpRanges(id, text);
       for (const exclusion of Object.keys(MENTIONS) as OwnerExclusionId[]) {
         const whole = status.status === 'excluded_by_owner' && status.exclusion === exclusion;
         const mine = clauses.filter((clause) => clause.exclusion === exclusion);
-        // Every mention lies inside the whole exclusion or one of its clauses.
-        if (!(exclusion === 'character_xp' && printsMonsterXp(id))) {
-          for (const mention of text.matchAll(MENTIONS[exclusion])) {
-            const covered = whole || mine.some(({ clause }) => {
-              for (let at = text.indexOf(clause); at >= 0; at = text.indexOf(clause, at + 1)) {
-                if (mention.index >= at && mention.index + mention[0].length <= at + clause.length) {
-                  return true;
-                }
-              }
-              return false;
-            });
-            expect({ id, exclusion, mention: mention[0], covered }).toEqual({ id, exclusion, mention: mention[0], covered: true });
+        const excluded = mine.flatMap(({ clause }) => printings(text, clause));
+        // Every mention lies inside the whole exclusion or one of its clauses;
+        // an XP mention inside a monster's XP is kept instead.
+        for (const mention of text.matchAll(MENTIONS[exclusion])) {
+          const at: TextRange = [mention.index, mention.index + mention[0].length];
+          if (exclusion === 'character_xp' && inside(at, monsterXp)) {
+            continue;
           }
+          const covered = whole || inside(at, excluded);
+          expect({ id, exclusion, mention: mention[0], at: mention.index, covered }).toEqual({ id, exclusion, mention: mention[0], at: mention.index, covered: true });
         }
         // And nothing is excluded that does not name the mechanic.
         if (whole) {
@@ -364,6 +425,39 @@ describe('the owner\'s exclusions (D923 Q8)', () => {
         for (const { clause } of mine) {
           expect({ id, clause, named: [...clause.matchAll(MENTIONS[exclusion])].length > 0 }).toEqual({ id, clause, named: true });
         }
+      }
+    }
+  });
+
+  it('keeps a monster\'s XP only where it is printed: never inside an excluded clause, and never in a rule excluded whole', () => {
+    // Each quoted passage is printed in its rule and names XP.
+    for (const [id, passages] of Object.entries(MONSTER_XP) as [SrdRuleId, readonly Passage[]][]) {
+      const text = ruleText(id);
+      for (const passage of passages) {
+        const range = passageRange(text, passage);
+        const namesXp = range !== null && [...text.slice(range[0], range[1]).matchAll(MENTIONS.character_xp)].length > 0;
+        expect({ id, passage, printed: range !== null, namesXp }).toEqual({ id, passage, printed: true, namesXp: true });
+      }
+    }
+    // Parts of a Stat Block prints the award to the characters between two
+    // kept passages, and inside neither.
+    const parts = ruleText('rule_section.monsters.parts-of-a-stat-block');
+    const award = parts.indexOf('XP is awarded for defeating the monster');
+    expect({ printed: award >= 0, kept: inside([award, award + 'XP'.length], monsterXpRanges('rule_section.monsters.parts-of-a-stat-block', parts)) })
+      .toEqual({ printed: true, kept: false });
+    for (const id of SRD_RULE_IDS) {
+      const status = STATUS[id];
+      const text = ruleText(id);
+      const monsterXp = monsterXpRanges(id, text);
+      // A rule that prints a monster's XP is not excluded whole as character XP,
+      if (monsterXp.length > 0) {
+        expect({ id, excludedWholeAsCharacterXp: status.status === 'excluded_by_owner' && status.exclusion === 'character_xp' })
+          .toEqual({ id, excludedWholeAsCharacterXp: false });
+      }
+      // and no clause it excludes overlaps what it keeps.
+      for (const { clause } of excludedClauses(status)) {
+        const overlaps = printings(text, clause).some(([start, end]) => monsterXp.some(([from, to]) => start < to && from < end));
+        expect({ id, clause, overlapsMonsterXp: overlaps }).toEqual({ id, clause, overlapsMonsterXp: false });
       }
     }
   });
