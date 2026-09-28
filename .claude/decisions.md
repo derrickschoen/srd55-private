@@ -3612,3 +3612,28 @@ FINDING AGAINST MY BATCH-1 LANDING (D936), full length:
 - It is on main now. A root-cause fix is dispatched: salt stability under concurrent test writes, plus a witness.
 
 Next free id: D939.
+
+## D939 — 2026-09-28 14:31 — owner: saves made under older rules just won't load (no RESUME-ACROSS-RULES); wave 10 harvested
+
+QUESTION (from the MOVE-COST planner's Q1, AskUserQuestion, my recommendation: "archive history, keep playing").
+- Resume re-reduces a v13 history with the running reducer (session-persistence.ts ~:1695-1716).
+- After any rules change (MOVE-COST, CONDITION-D20, SQUEEZE-*, MOVEMENT-MODES, COVER-EDGE …), a save whose history holds an affected move throws at resume.
+OWNER, verbatim choice: "Old saves just won't load".
+- NO RESUME-ACROSS-RULES unit. After a rules change, a save made before it refuses to load. The refusal must be CLEAR and TYPED: it names that the save was recorded under an earlier engine build and that the rules changed. Never a raw replay mismatch or a tamper-sounding message.
+- Where the save records its EngineBuild (v13, FOOTPRINT), the message should name both builds.
+- Each rules unit adds a witness that an earlier-build save with an affected move is refused with this message. The first unit to land (MOVE-COST or CONDITION-D20) introduces the typed refusal.
+- This narrows, and does not reverse, D919 (v12 → v13 migration with an archive stays): the rules units add no new migrations.
+
+WAVE 10 (agent-reported):
+- ENV-TRACE flake fix, claude/envflake 2083fca4:
+  - probe files move to one gitignored directory, tests/transient-probes, which the module inventory skips. Soundness is kept (a new developer test still changes the salt; imports, globs or reads into the directory fail closed).
+  - The witness was red first with the exact D938 message; 12/13 mutants killed (1 equivalent, replaced).
+  - Codex review r1 is running.
+- MOVE-COST plan r1: .tmp-plans/2026-09-28-move-cost-stacking-by-kind.md (560 lines). The planner's probe confirmed 7 wrong results on main. Its Q1 is answered above; Q2–Q8 wait for codex plan review r1 (running).
+- CONDITION-D20 plan r0: .tmp-plans/2026-09-28-condition-d20-one-d20-composition.md (909 lines, 17 commits).
+  - C1 is a pin-neutral typed LEGACY_GAPS refactor; each later commit deletes gap entries, so every pin move traces to one commit.
+  - 9 wrong results were reproduced by a read-only probe.
+  - The planner recommends splitting it into -A (before SQUEEZE-COMBAT) and -B (before REGEN).
+  - Its Q-A..Q-H wait for codex plan review r1 (running).
+
+Next free id: D940.
