@@ -19,11 +19,13 @@
  *                         Tests may reference it. Any other module may only
  *                         if it is listed, with exactly what it references:
  *                         today's runtime importers (D917), each removed by
- *                         SRD-BUILDTIME, and SRD tooling. A stale entry fails,
- *                         so the list only shrinks; with the runtime entries
- *                         gone the SRD is read by tests and tooling only
- *                         (D915). No other module may reach the SRD through a
- *                         test or a tool either.
+ *                         SRD-BUILDTIME, and SRD tooling. The path decides
+ *                         which: tools/ and scripts/ are tooling, the rest is
+ *                         production, whatever the entry says. A stale entry
+ *                         fails, so the list only shrinks; with the runtime
+ *                         entries gone the SRD is read by tests and tooling
+ *                         only (D915). No production module may reach the
+ *                         SRD through a test or a tool either.
  *   R3 forbidden          no path, however indirect, from an entry to a
  *      reachability       forbidden module (or any file under a directory). A
  *                         `pending` entry is one that does not hold yet; it
@@ -74,6 +76,16 @@ const SRD_TEXT = 'docs/srd/';
 const SRD_TEST_PREFIX = 'tests/';
 
 /**
+ * R2: a module's PATH says whether it is tooling, never its allowlist entry
+ * (review r2 P2: an src/ importer labelled `tooling` was once accepted, and
+ * then neither counted as a runtime importer nor stopped as a carrier).
+ * Tooling is what runs at build or maintenance time: everything under tools/
+ * and scripts/. Every other module outside tests/ is production: src/ (the
+ * app and the engine) and, failing closed, db/ and the root config files.
+ */
+const SRD_TOOLING_PREFIXES = Object.freeze(['tools/', 'scripts/']);
+
+/**
  * R2: every reference in src/ (the app and the engine) must resolve, or R2
  * cannot prove it reads no SRD text; a computed `import()` is the case R0
  * leaves open.
@@ -81,7 +93,19 @@ const SRD_TEST_PREFIX = 'tests/';
 const SRD_PROVEN_PREFIX = 'src/';
 
 /** R2's policy apart from the allowlist; the self-test runs it unchanged. */
-const SRD_POLICY = Object.freeze({ text: SRD_TEXT, testPrefix: SRD_TEST_PREFIX, provenPrefix: SRD_PROVEN_PREFIX });
+const SRD_POLICY = Object.freeze({
+  text: SRD_TEXT,
+  testPrefix: SRD_TEST_PREFIX,
+  toolingPrefixes: SRD_TOOLING_PREFIXES,
+  provenPrefix: SRD_PROVEN_PREFIX,
+});
+
+/** R2: 'test', 'tooling' or 'production', from the path alone (`srd`: R2's policy). */
+function moduleKind(file, srd) {
+  if (file.startsWith(srd.testPrefix)) return 'test';
+  if (srd.toolingPrefixes.some((prefix) => file.startsWith(prefix))) return 'tooling';
+  return 'production';
+}
 
 /** R2: the unit that removes every runtime entry below (D915, D917). */
 const SRD_BUILDTIME = 'SRD-BUILDTIME';
@@ -91,15 +115,19 @@ const SRD_BUILDTIME = 'SRD-BUILDTIME';
  * the files it references (the check fails on a file an entry does not list,
  * and on a listed file the module no longer references).
  *
- * `removedBy: 'SRD-BUILDTIME'`: TODAY's runtime importers, the D917 census (18
- * modules, 32 references to 28 extracts and the full SRD). Each parses the SRD
- * text at runtime. SRD-BUILDTIME turns each derivation into generated typed
- * data and, because a stale entry fails, deletes the file (and the entry,
- * when it is the last) in the commit that removes the import. When the last
- * runtime entry goes, R2 means: tests, the generator and its drift tests only.
+ * What an entry is follows from its path (SRD_TOOLING_PREFIXES), and the
+ * entry must say the same:
  *
- * `tooling`: a build-time tool that reads the SRD text, with why. The
- * SRD-BUILDTIME generator is listed here when it lands.
+ * a production module says `removedBy: 'SRD-BUILDTIME'` and nothing else:
+ * TODAY's runtime importers, the D917 census (18 modules, 32 references to 28
+ * extracts and the full SRD). Each parses the SRD text at runtime.
+ * SRD-BUILDTIME turns each derivation into generated typed data and, because
+ * a stale entry fails, deletes the file (and the entry, when it is the last)
+ * in the commit that removes the import. When the last runtime entry goes, R2
+ * means: tests, the generator and its drift tests only.
+ *
+ * a tool (under tools/ or scripts/) says `tooling: '<why>'` and nothing else.
+ * The SRD-BUILDTIME generator, under scripts/, is listed here when it lands.
  */
 const SRD_TEXT_IMPORTERS = [
   {
@@ -298,22 +326,29 @@ function ruleR1(graph) {
  */
 function ruleR2(graph, srd) {
   const diagnostics = [];
-  const isTest = (file) => file.startsWith(srd.testPrefix);
+  const isTest = (file) => moduleKind(file, srd) === 'test';
+  const isTooling = (file) => moduleKind(file, srd) === 'tooling';
+  const tooling = srd.toolingPrefixes.join(' or ');
   const entries = new Map();
   for (const entry of srd.importers) {
     const problems = [];
-    if (isTest(entry.importer)) problems.push('is a test, and tests need no entry');
+    const why = typeof entry.tooling === 'string' && entry.tooling.trim() !== '';
+    const kind = moduleKind(entry.importer, srd);
+    if (kind === 'test') problems.push('is a test, and tests need no entry');
     if (entries.has(entry.importer)) problems.push('is listed twice');
-    const removed = entry.removedBy === SRD_BUILDTIME;
-    const tooling = typeof entry.tooling === 'string' && entry.tooling.trim() !== '';
-    if (removed === tooling) problems.push(`must say either removedBy: '${SRD_BUILDTIME}' or, for a tool, tooling: '<why>'`);
+    if (kind === 'production' && (entry.removedBy !== SRD_BUILDTIME || entry.tooling !== undefined)) {
+      problems.push(`is production code (not under ${tooling}), a runtime importer, so it says ` +
+        `removedBy: '${SRD_BUILDTIME}' and nothing else; a label cannot make it tooling`);
+    }
+    if (kind === 'tooling' && (!why || entry.removedBy !== undefined)) {
+      problems.push(`is tooling (under ${tooling}), so it says tooling: '<why>' and nothing else`);
+    }
     if (!Array.isArray(entry.files) || entry.files.length === 0 || entry.files.some((file) => !file.startsWith(srd.text))) {
       problems.push(`must list the ${srd.text} files it references`);
     }
     for (const problem of problems) diagnostics.push(`R2 allowlist entry ${entry.importer} ${problem}`);
     entries.set(entry.importer, entry);
   }
-  const isTooling = (file) => typeof entries.get(file)?.tooling === 'string';
 
   // Direct references: importer -> SRD file -> the first edge naming it.
   const referenced = new Map();
@@ -393,7 +428,7 @@ function ruleR2(graph, srd) {
       `'${reference.specifier}', so R2 cannot prove it reads no SRD text; name the file literally`);
   }
 
-  const runtimeEntries = srd.importers.filter((entry) => entry.removedBy === SRD_BUILDTIME);
+  const runtimeEntries = srd.importers.filter((entry) => moduleKind(entry.importer, srd) === 'production');
   const runtimeFiles = runtimeEntries.reduce((sum, entry) => sum + (entry.files?.length ?? 0), 0);
   const notes = [`R2 ${String(runtimeEntries.length)} runtime importer(s) of the SRD text, ${String(runtimeFiles)} ` +
     `file reference(s), left for ${SRD_BUILDTIME} to remove`];
@@ -747,8 +782,10 @@ const SELF_TESTS = [
   },
   {
     rule: 'R2',
-    name: 'a listed runtime importer and its importer, a listed tool, tests in every form, a non-SRD raw import',
+    name: 'a listed runtime importer and its importer, a listed tool and an unlisted tool importing it, tests in every form, ' +
+      'a non-SRD raw import',
     expect: 0,
+    noteMentions: ['R2 1 runtime importer(s) of the SRD text, 1 file reference(s)'],
     policy: {
       srdImporters: [
         { importer: 'src/rules/armor-srd.ts', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/armor-table.txt'] },
@@ -759,6 +796,7 @@ const SELF_TESTS = [
       'src/rules/armor-srd.ts': "import table from '../../docs/srd/source/armor-table.txt?raw';\nexport const armor = table;\n",
       'src/sheet.ts': "import { armor } from './rules/armor-srd';\nimport notes from '../docs/other.txt?raw';\n",
       'scripts/srd/tool.mjs': "export const text = new URL('../../docs/srd/full/srd.txt', import.meta.url);\n",
+      'tools/srd-report.ts': "import { text } from '../scripts/srd/tool.mjs';\nexport const report = () => text;\n",
       'tests/unit/extracts.test.ts': "import table from '../../docs/srd/source/armor-table.txt?raw';\n" +
         "import full from '../../docs/srd/full/srd.txt?raw';\n" +
         "export const all = import.meta.glob('../../docs/srd/source/*.txt', { query: '?raw', eager: true });\n" +
@@ -856,9 +894,9 @@ const SELF_TESTS = [
     expect: 5,
     mentions: [
       'R2 allowlist entry tests/unit/extract.test.ts is a test',
-      'R2 allowlist entry src/neither.ts must say either',
-      'R2 allowlist entry src/someday.ts must say either',
-      'R2 allowlist entry src/both.ts must say either',
+      'R2 allowlist entry src/neither.ts is production code',
+      'R2 allowlist entry src/someday.ts is production code',
+      'R2 allowlist entry src/both.ts is production code',
       'R2 allowlist entry src/twice.ts is listed twice',
     ],
     policy: {
@@ -877,6 +915,47 @@ const SELF_TESTS = [
       'src/someday.ts': "import feats from '../docs/srd/source/feats.txt?raw';\n",
       'src/both.ts': "import feats from '../docs/srd/source/feats.txt?raw';\n",
       'src/twice.ts': "import feats from '../docs/srd/source/feats.txt?raw';\n",
+      'docs/srd/source/feats.txt': 'feats',
+    },
+  },
+  {
+    rule: 'R2',
+    name: 'an src/ importer labelled tooling (the r2 P2 case): its path makes it production, and a runtime importer',
+    expect: 1,
+    mentions: ['R2 allowlist entry src/rules/x.ts is production code'],
+    noteMentions: ['R2 1 runtime importer(s) of the SRD text, 1 file reference(s)'],
+    policy: {
+      srdImporters: [{ importer: 'src/rules/x.ts', tooling: 'claimed generator', files: ['docs/srd/source/feats.txt'] }],
+    },
+    files: {
+      'src/rules/x.ts': "import feats from '../../docs/srd/source/feats.txt?raw';\nexport const x = feats;\n",
+      'docs/srd/source/feats.txt': 'feats',
+    },
+  },
+  {
+    rule: 'R2',
+    name: 'tool entries that say removedBy or give no why; db/ and a root config file labelled tooling (fail closed)',
+    expect: 4,
+    mentions: [
+      'R2 allowlist entry scripts/srd/removed.mjs is tooling',
+      'R2 allowlist entry tools/no-why.ts is tooling',
+      'R2 allowlist entry db/schema/srd.ts is production code',
+      'R2 allowlist entry vite.config.ts is production code',
+    ],
+    noteMentions: ['R2 2 runtime importer(s) of the SRD text, 2 file reference(s)'],
+    policy: {
+      srdImporters: [
+        { importer: 'scripts/srd/removed.mjs', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/feats.txt'] },
+        { importer: 'tools/no-why.ts', tooling: ' ', files: ['docs/srd/source/feats.txt'] },
+        { importer: 'db/schema/srd.ts', tooling: 'a schema note', files: ['docs/srd/source/feats.txt'] },
+        { importer: 'vite.config.ts', tooling: 'a build plugin', files: ['docs/srd/source/feats.txt'] },
+      ],
+    },
+    files: {
+      'scripts/srd/removed.mjs': "import feats from '../../docs/srd/source/feats.txt?raw';\n",
+      'tools/no-why.ts': "import feats from '../docs/srd/source/feats.txt?raw';\n",
+      'db/schema/srd.ts': "import feats from '../../docs/srd/source/feats.txt?raw';\n",
+      'vite.config.ts': "import feats from './docs/srd/source/feats.txt?raw';\n",
       'docs/srd/source/feats.txt': 'feats',
     },
   },
@@ -1125,6 +1204,12 @@ function runSelfTest() {
     for (const mention of fixture.mentions ?? []) {
       if (!own.some((diagnostic) => diagnostic.includes(mention))) {
         failures.push(`${fixture.rule} fixture '${fixture.name}': no finding mentions '${mention}':\n  ${own.join('\n  ')}`);
+      }
+    }
+    const notes = results[fixture.rule].notes;
+    for (const mention of fixture.noteMentions ?? []) {
+      if (!notes.some((note) => note.includes(mention))) {
+        failures.push(`${fixture.rule} fixture '${fixture.name}': no note mentions '${mention}':\n  ${notes.join('\n  ')}`);
       }
     }
     if (own.length !== fixture.expect) {

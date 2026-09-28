@@ -240,6 +240,9 @@ describe('the import-boundary guard', () => {
       expect(result.stdout).toMatch(new RegExp(`^${rule} green 0 finding\\(s\\)`, 'mu'));
       expect(result.stdout).toMatch(new RegExp(`^${rule} red {3}[1-9]\\d* finding\\(s\\)`, 'mu'));
     }
+    // Review r2 P2: an src/ module that reads the SRD is production by its path,
+    // whatever its entry says; labelled tooling, it fails (1 finding).
+    expect(result.stdout).toContain('R2 red   1 finding(s): an src/ importer labelled tooling (the r2 P2 case)');
     // D927: --update raises a budget as well as lowers one, and R5 then holds.
     // Worked by hand in the self-test's witness: 2 files and 45 bytes at a 10%
     // margin are 3 and 50; 1 file of 23 bytes is 2 and 26.
