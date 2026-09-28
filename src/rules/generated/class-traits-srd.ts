@@ -11,9 +11,10 @@
  * Commons Attribution 4.0 International License, available at
  * https://creativecommons.org/licenses/by/4.0/legalcode.
  */
+import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdClassTraitsArtifact } from '../class-traits-srd-reader';
 
-export const BUNDLED_SRD_CLASS_TRAITS = {
+export const BUNDLED_SRD_CLASS_TRAITS = deepFreeze({
   "traits": [
     {
       "class_name": "Barbarian",
@@ -529,4 +530,4 @@ export const BUNDLED_SRD_CLASS_TRAITS = {
     12,
     12
   ]
-} as const satisfies SrdClassTraitsArtifact;
+} as const satisfies SrdClassTraitsArtifact);

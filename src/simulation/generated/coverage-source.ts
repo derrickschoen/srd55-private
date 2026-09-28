@@ -11,9 +11,10 @@
  * Commons Attribution 4.0 International License, available at
  * https://creativecommons.org/licenses/by/4.0/legalcode.
  */
+import { deepFreeze } from '../../domain/deep-freeze';
 import type { BundledCoverageSource } from '../coverage-source';
 
-export const BUNDLED_COVERAGE_SOURCE = {
+export const BUNDLED_COVERAGE_SOURCE = deepFreeze({
   "reviewed_headings_in_bundled_srd": [
     "Acid Splash",
     "Advantage/Disadvantage",
@@ -6252,4 +6253,4 @@ export const BUNDLED_COVERAGE_SOURCE = {
       "end": 3321
     }
   ]
-} as const satisfies BundledCoverageSource;
+} as const satisfies BundledCoverageSource);

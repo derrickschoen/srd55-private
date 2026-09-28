@@ -11,6 +11,7 @@
  * Commons Attribution 4.0 International License, available at
  * https://creativecommons.org/licenses/by/4.0/legalcode.
  */
+import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdWeaponsArtifact } from '../weapons-srd-reader';
 
 /** Every weapon template key this artifact records: the closed set the runtime mints `ContentKey` from. */
@@ -54,7 +55,7 @@ export type BundledSrdWeaponContentKeyText =
   | "2024:weapon:musket"
   | "2024:weapon:pistol";
 
-export const BUNDLED_SRD_WEAPONS = {
+export const BUNDLED_SRD_WEAPONS = deepFreeze({
   "templates": [
     {
       "content_key": "2024:weapon:club",
@@ -1174,4 +1175,4 @@ export const BUNDLED_SRD_WEAPONS = {
       ]
     }
   ]
-} as const satisfies SrdWeaponsArtifact<BundledSrdWeaponContentKeyText>;
+} as const satisfies SrdWeaponsArtifact<BundledSrdWeaponContentKeyText>);

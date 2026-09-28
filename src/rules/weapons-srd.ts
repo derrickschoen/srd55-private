@@ -21,6 +21,7 @@ import { ensureBundledStableContentIdentity } from '../catalog/content-registry'
 import type { WeaponMasteryGrant } from '../domain/enums';
 import { rowContractError } from '../domain/contracts/rows';
 import { deepFreeze } from '../domain/deep-freeze';
+import { FrozenMap } from '../domain/frozen-map';
 import {
   recordedContentKeys,
   type RecordedContentKey,
@@ -64,17 +65,22 @@ const TEMPLATES: readonly BundledWeaponTemplate[] = deepFreeze(
   })),
 );
 
-const MASTERY_PROGRESSIONS: readonly SrdMasteryProgression[] = Object.freeze(
+/** A Weapon Mastery column as the runtime hands it out: its counts a {@link FrozenMap}. */
+export interface BundledMasteryProgression extends SrdMasteryProgression {
+  readonly counts: FrozenMap<number, number>;
+}
+
+const MASTERY_PROGRESSIONS: readonly BundledMasteryProgression[] = Object.freeze(
   BUNDLED_SRD_WEAPONS.mastery_progressions.map((progression) => Object.freeze({
     class_name: progression.class_name,
-    counts: new Map<number, number>(
+    counts: new FrozenMap<number, number>(
       progression.counts.map((count, index) => [index + 1, count] as const),
     ),
   })),
 );
 
 /** Every class's parsed Weapon Mastery column, level to count. */
-export function bundledWeaponMasteryProgressions(): readonly SrdMasteryProgression[] {
+export function bundledWeaponMasteryProgressions(): readonly BundledMasteryProgression[] {
   return MASTERY_PROGRESSIONS;
 }
 
@@ -113,13 +119,13 @@ export function bundledWeaponMasteryProgressions(): readonly SrdMasteryProgressi
  */
 export const WEAPON_MASTERY_GRANTS: Readonly<
   Record<string, Exclude<WeaponMasteryGrant, 'not_granted'>>
-> = {
+> = Object.freeze({
   Barbarian: 'counts_known',
   Fighter: 'counts_known',
   Paladin: 'counts_unsourced',
   Ranger: 'counts_unsourced',
   Rogue: 'counts_unsourced',
-};
+});
 
 function assertRow(table: 'weapon_templates', row: Record<string, unknown>): void;
 function assertRow(

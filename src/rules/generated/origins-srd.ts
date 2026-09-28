@@ -11,6 +11,7 @@
  * Commons Attribution 4.0 International License, available at
  * https://creativecommons.org/licenses/by/4.0/legalcode.
  */
+import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdOriginsArtifact } from '../origins-srd-reader';
 
 /** Every species template key this artifact records: the closed set the runtime mints `ContentKey` from. */
@@ -32,7 +33,7 @@ export type BundledSrdBackgroundContentKeyText =
   | "2024:background:sage"
   | "2024:background:soldier";
 
-export const BUNDLED_SRD_ORIGINS = {
+export const BUNDLED_SRD_ORIGINS = deepFreeze({
   "species": [
     {
       "content_key": "2024:species:dragonborn",
@@ -654,4 +655,4 @@ export const BUNDLED_SRD_ORIGINS = {
       ]
     }
   ]
-} as const satisfies SrdOriginsArtifact<BundledSrdSpeciesContentKeyText, BundledSrdBackgroundContentKeyText>;
+} as const satisfies SrdOriginsArtifact<BundledSrdSpeciesContentKeyText, BundledSrdBackgroundContentKeyText>);

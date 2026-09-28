@@ -10,9 +10,10 @@
  * Commons Attribution 4.0 International License, available at
  * https://creativecommons.org/licenses/by/4.0/legalcode.
  */
+import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdSubclassManifest } from '../srd-subclasses-reader';
 
-export const BUNDLED_SRD_SUBCLASS_MANIFEST = {
+export const BUNDLED_SRD_SUBCLASS_MANIFEST = deepFreeze({
   "by_class": {
     "Barbarian": {
       "class_name": "Barbarian",
@@ -1600,4 +1601,4 @@ export const BUNDLED_SRD_SUBCLASS_MANIFEST = {
       ]
     }
   ]
-} as const satisfies SrdSubclassManifest;
+} as const satisfies SrdSubclassManifest);

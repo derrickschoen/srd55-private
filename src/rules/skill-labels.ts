@@ -9,8 +9,11 @@
  */
 import type { Skill } from '../domain/enums';
 
-/** Display spelling for each enum member, as the Skills table prints it. */
-export const SKILL_LABELS: Readonly<Record<Skill, string>> = {
+/**
+ * Display spelling for each enum member, as the Skills table prints it. Frozen:
+ * one shared record, so no caller can re-spell a skill for the next one.
+ */
+export const SKILL_LABELS = Object.freeze({
   acrobatics: 'Acrobatics',
   animal_handling: 'Animal Handling',
   arcana: 'Arcana',
@@ -29,7 +32,7 @@ export const SKILL_LABELS: Readonly<Record<Skill, string>> = {
   sleight_of_hand: 'Sleight of Hand',
   stealth: 'Stealth',
   survival: 'Survival',
-};
+} as const satisfies Readonly<Record<Skill, string>>);
 
 const LABEL_TO_SKILL: ReadonlyMap<string, Skill> = new Map(
   (Object.entries(SKILL_LABELS) as [Skill, string][]).map(

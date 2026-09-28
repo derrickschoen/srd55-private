@@ -10,9 +10,10 @@
  * Commons Attribution 4.0 International License, available at
  * https://creativecommons.org/licenses/by/4.0/legalcode.
  */
+import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdClassLevelFeatures } from '../class-level-features-srd-reader';
 
-export const BUNDLED_SRD_CLASS_LEVEL_FEATURES = [
+export const BUNDLED_SRD_CLASS_LEVEL_FEATURES = deepFreeze([
   {
     "class_name": "Barbarian",
     "levels": [
@@ -2403,4 +2404,4 @@ export const BUNDLED_SRD_CLASS_LEVEL_FEATURES = [
       }
     ]
   }
-] as const satisfies readonly SrdClassLevelFeatures[];
+] as const satisfies readonly SrdClassLevelFeatures[]);

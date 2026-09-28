@@ -10,9 +10,10 @@
  * Commons Attribution 4.0 International License, available at
  * https://creativecommons.org/licenses/by/4.0/legalcode.
  */
+import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdAbilityScoreGenerationArtifact } from '../ability-score-generation-srd-reader';
 
-export const BUNDLED_SRD_ABILITY_SCORE_GENERATION = {
+export const BUNDLED_SRD_ABILITY_SCORE_GENERATION = deepFreeze({
   "standard_array": [
     15,
     14,
@@ -56,4 +57,4 @@ export const BUNDLED_SRD_ABILITY_SCORE_GENERATION = {
       9
     ]
   ]
-} as const satisfies SrdAbilityScoreGenerationArtifact;
+} as const satisfies SrdAbilityScoreGenerationArtifact);

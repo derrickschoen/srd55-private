@@ -11,9 +11,10 @@
  * Commons Attribution 4.0 International License, available at
  * https://creativecommons.org/licenses/by/4.0/legalcode.
  */
+import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdMulticlassEntryGrant } from '../multiclass-entry-srd-reader';
 
-export const BUNDLED_SRD_MULTICLASS_ENTRY_GRANTS = [
+export const BUNDLED_SRD_MULTICLASS_ENTRY_GRANTS = deepFreeze([
   {
     "class_name": "Barbarian",
     "hit_die": true,
@@ -176,4 +177,4 @@ export const BUNDLED_SRD_MULTICLASS_ENTRY_GRANTS = [
     },
     "tool_grants": []
   }
-] as const satisfies readonly SrdMulticlassEntryGrant[];
+] as const satisfies readonly SrdMulticlassEntryGrant[]);

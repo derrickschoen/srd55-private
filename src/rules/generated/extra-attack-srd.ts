@@ -10,9 +10,10 @@
  * Commons Attribution 4.0 International License, available at
  * https://creativecommons.org/licenses/by/4.0/legalcode.
  */
+import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdNamedFeature } from '../extra-attack-srd-reader';
 
-export const BUNDLED_SRD_NAMED_EXTRA_ATTACK_FEATURES = [
+export const BUNDLED_SRD_NAMED_EXTRA_ATTACK_FEATURES = deepFreeze([
   {
     "content_key": "2024:feature:thirsting-blade",
     "name": "Thirsting Blade",
@@ -33,4 +34,4 @@ export const BUNDLED_SRD_NAMED_EXTRA_ATTACK_FEATURES = [
     "attack_count": 3,
     "weapon_scope": "one_bonded_weapon"
   }
-] as const satisfies readonly SrdNamedFeature[];
+] as const satisfies readonly SrdNamedFeature[]);

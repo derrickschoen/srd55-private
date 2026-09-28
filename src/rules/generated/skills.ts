@@ -10,9 +10,10 @@
  * Commons Attribution 4.0 International License, available at
  * https://creativecommons.org/licenses/by/4.0/legalcode.
  */
+import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdSkillAbilitiesArtifact } from '../skills-reader';
 
-export const BUNDLED_SRD_SKILL_ABILITIES = {
+export const BUNDLED_SRD_SKILL_ABILITIES = deepFreeze({
   "acrobatics": "dexterity",
   "animal_handling": "wisdom",
   "arcana": "intelligence",
@@ -31,4 +32,4 @@ export const BUNDLED_SRD_SKILL_ABILITIES = {
   "sleight_of_hand": "dexterity",
   "stealth": "dexterity",
   "survival": "wisdom"
-} as const satisfies SrdSkillAbilitiesArtifact;
+} as const satisfies SrdSkillAbilitiesArtifact);

@@ -12,9 +12,10 @@
  * Commons Attribution 4.0 International License, available at
  * https://creativecommons.org/licenses/by/4.0/legalcode.
  */
+import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdClassEquipment } from '../class-equipment-srd-reader';
 
-export const BUNDLED_SRD_CLASS_EQUIPMENT = [
+export const BUNDLED_SRD_CLASS_EQUIPMENT = deepFreeze([
   {
     "class_name": "Barbarian",
     "items": [
@@ -939,4 +940,4 @@ export const BUNDLED_SRD_CLASS_EQUIPMENT = [
       }
     ]
   }
-] as const satisfies readonly SrdClassEquipment[];
+] as const satisfies readonly SrdClassEquipment[]);

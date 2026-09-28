@@ -18,6 +18,7 @@
  * Commons Attribution 4.0 International License, available at
  * https://creativecommons.org/licenses/by/4.0/legalcode.
  */
+import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdSpellCatalogArtifact } from '../spells-srd-reader';
 
 /** Every spell version key this artifact records: the closed set the runtime mints `ContentKey` from. */
@@ -362,7 +363,7 @@ export type BundledSrdSpellContentKeyText =
   | "2024:word-of-recall"
   | "2024:zone-of-truth";
 
-export const BUNDLED_SRD_SPELL_CATALOG = {
+export const BUNDLED_SRD_SPELL_CATALOG = deepFreeze({
   "descriptions": [
     {
       "name": "Acid Arrow",
@@ -18026,4 +18027,4 @@ export const BUNDLED_SRD_SPELL_CATALOG = {
       "spell_list_key": "Wizard"
     }
   ]
-} as const satisfies SrdSpellCatalogArtifact<BundledSrdSpellContentKeyText>;
+} as const satisfies SrdSpellCatalogArtifact<BundledSrdSpellContentKeyText>);

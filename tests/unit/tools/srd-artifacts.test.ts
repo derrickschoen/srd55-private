@@ -60,12 +60,13 @@ describe('the SRD artifact drift check', () => {
   });
 
   it('reports a one-row loss, naming the file and the first differing line', () => {
-    // 14 header lines, the export line, `"rows": [`, then the lost row: line 17.
+    // 15 header lines (fix round 3 added the `deepFreeze` import), the export
+    // line, `"rows": [`, then the lost row: line 18.
     const lostRow = fresh.replace('    "alpha",\n', '');
     expect(lostRow).not.toBe(fresh);
     expect(() => assertSrdArtifactFresh(artifact, probeCorpus, lostRow)).toThrow(
       new SrdArtifactError(
-        'src/generated/probe.ts is stale at line 17: the SRD text derives "    \\"alpha\\",", ' +
+        'src/generated/probe.ts is stale at line 18: the SRD text derives "    \\"alpha\\",", ' +
           'the committed file has "    \\"beta\\"". Run `npm run srd:artifacts`; never edit it by hand.',
       ),
     );
@@ -135,9 +136,31 @@ describe('the SRD artifact composer', () => {
     const artifact = syntheticArtifact('src/generated/probe.ts');
     const text = composeSrdArtifact(artifact, probeCorpus);
     expect(text).toContain("import type { Probe } from '../probe-reader';");
-    expect(text).toContain('export const PROBE = {');
-    expect(text).toMatch(/\n\} as const satisfies Probe;\n$/u);
+    expect(text).toContain('export const PROBE = deepFreeze({');
+    expect(text).toMatch(/\n\} as const satisfies Probe\);\n$/u);
     expect(text).not.toContain('PROBE: Probe');
+  });
+
+  /**
+   * FROZEN WHERE IT IS DEFINED (fix round 3, P2): the literal is wrapped in the
+   * domain's `deepFreeze`, imported relative to the artifact's own directory.
+   * Each specifier below was worked out by hand from the two paths.
+   */
+  it.each([
+    ['src/generated/probe.ts', '../domain/deep-freeze'],
+    ['src/rules/generated/probe.ts', '../../domain/deep-freeze'],
+    ['src/simulation/generated/probe.ts', '../../domain/deep-freeze'],
+    ['src/domain/probe.ts', './deep-freeze'],
+  ])('wraps the literal in deepFreeze, imported from %s as %s', (path, specifier) => {
+    const text = composeSrdArtifact(syntheticArtifact(path), probeCorpus);
+    expect(text).toContain([
+      ` */`,
+      `import { deepFreeze } from '${specifier}';`,
+      "import type { Probe } from '../probe-reader';",
+      '',
+      'export const PROBE = deepFreeze({',
+    ].join('\n'));
+    expect(text).toMatch(/\n\} as const satisfies Probe\);\n$/u);
   });
 
   it('refuses a derivation that reads a corpus it does not declare', () => {
@@ -179,9 +202,9 @@ describe('the recorded key unions', () => {
       '  | "2024:beta"',
       '  | "2024:alpha";',
       '',
-      'export const PROBE = {',
+      'export const PROBE = deepFreeze({',
     ].join('\n'));
-    expect(text).toMatch(/\n\} as const satisfies Probe<ProbeKey>;\n$/u);
+    expect(text).toMatch(/\n\} as const satisfies Probe<ProbeKey>\);\n$/u);
   });
 
   it.each([
@@ -232,7 +255,7 @@ describe('the SRD artifact writer', () => {
     for (const artifact of artifacts) {
       expect(written.get(artifact.path)).toBe(composeSrdArtifact(artifact, probeCorpus));
     }
-    expect(written.get('src/generated/second.ts')).toContain('export const PROBE = 10 as const satisfies Probe;');
+    expect(written.get('src/generated/second.ts')).toContain('export const PROBE = deepFreeze(10 as const satisfies Probe);');
     expect(reads.every((path) => path.startsWith('docs/srd/'))).toBe(true);
   });
 

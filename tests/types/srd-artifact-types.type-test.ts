@@ -22,6 +22,7 @@ import type {
   ClassResourceFormulaStep,
 } from '../../src/domain/class-resources';
 import type { Ability, CharacterLevel, Skill } from '../../src/domain/enums';
+import type { FrozenMap, ReadonlyMapView } from '../../src/domain/frozen-map';
 import type { ContentKey } from '../../src/domain/ids';
 import type { PerCharacterLevel } from '../../src/domain/per-level';
 import type { RecordedContentKey } from '../../src/domain/recorded-content-keys';
@@ -32,6 +33,12 @@ import type {
   BundledBackgroundContentKey,
   BundledSpeciesContentKey,
 } from '../../src/rules/origins-srd';
+import type { POINT_COSTS } from '../../src/rules/ability-score-generation-srd';
+import type {
+  bundledSrdExtraAttackGrants,
+  bundledSrdMartialArtsDice,
+} from '../../src/rules/class-traits-srd';
+import type { skillAbilities } from '../../src/rules/skills';
 import type { SrdSkillAbilitiesArtifact } from '../../src/rules/skills-reader';
 import type { BundledSpellContentKey } from '../../src/rules/spells-srd';
 import type {
@@ -44,7 +51,10 @@ import type {
   SrdSpellLevel,
 } from '../../src/rules/spells-srd-reader';
 import type { BundledClassContentKeyText, SrdClassName } from '../../src/rules/srd-class-names';
-import type { BundledWeaponContentKey } from '../../src/rules/weapons-srd';
+import type {
+  BundledWeaponContentKey,
+  bundledWeaponMasteryProgressions,
+} from '../../src/rules/weapons-srd';
 import type {
   BUNDLED_SRD_ARMOR_TEMPLATES,
   BundledSrdArmorContentKeyText,
@@ -347,3 +357,35 @@ type _BackgroundKeyUnionIsExactlyTheRecordedKeys = Assert<Exact<
 >>;
 type _BackgroundKeyAcceptsSage = Assert<Accepts<'2024:background:sage' & ContentKey, BundledBackgroundContentKey>>;
 type _BackgroundKeyRefusesNoble = Assert<Refuses<'2024:background:noble' & ContentKey, BundledBackgroundContentKey>>;
+
+/**
+ * A SHARED RULE MAP HAS NO MUTATOR, AND ONLY A FrozenMap IS ONE (fix round 3,
+ * P2). Each shared map is typed `FrozenMap`, whose type has no `set`, `delete`
+ * or `clear`, so a write through the export does not compile. Private fields
+ * make the class nominal: a plain `Map` (whose entries stay writable at
+ * runtime) and a live `ReadonlyMapView` are not `FrozenMap`s, so no module can
+ * hand either out in a shared map's place.
+ */
+type Mutators = 'set' | 'delete' | 'clear';
+type _FrozenMapHasNoMutator = Assert<Exact<Extract<keyof FrozenMap<number, number>, Mutators>, never>>;
+type _AMapHasTheMutators = Assert<Exact<Extract<keyof Map<number, number>, Mutators>, Mutators>>;
+type _PointCostsHaveNoMutator = Assert<Exact<Extract<keyof typeof POINT_COSTS, Mutators>, never>>;
+type _SkillAbilitiesHaveNoMutator = Assert<Exact<
+  Extract<keyof ReturnType<typeof skillAbilities>, Mutators>,
+  never
+>>;
+type _MartialArtsDiceHaveNoMutator = Assert<Exact<
+  Extract<keyof ReturnType<typeof bundledSrdMartialArtsDice>, Mutators>,
+  never
+>>;
+type _ExtraAttackCountsHaveNoMutator = Assert<Exact<
+  Extract<keyof ReturnType<typeof bundledSrdExtraAttackGrants>[number]['counts'], Mutators>,
+  never
+>>;
+type _MasteryCountsHaveNoMutator = Assert<Exact<
+  Extract<keyof ReturnType<typeof bundledWeaponMasteryProgressions>[number]['counts'], Mutators>,
+  never
+>>;
+type _AMapIsNotAFrozenMap = Assert<Refuses<Map<number, number>, FrozenMap<number, number>>>;
+type _AViewIsNotAFrozenMap = Assert<Refuses<ReadonlyMapView<number, number>, FrozenMap<number, number>>>;
+type _AFrozenMapIsAReadonlyMap = Assert<Accepts<FrozenMap<number, number>, ReadonlyMap<number, number>>>;

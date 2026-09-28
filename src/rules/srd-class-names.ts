@@ -12,7 +12,8 @@ import {
   type RecordedContentKey,
 } from '../domain/recorded-content-keys';
 
-export const SRD_CLASS_NAMES = [
+/** Frozen: one shared list, so no caller can add, drop or reorder a class. */
+export const SRD_CLASS_NAMES = Object.freeze([
   'Barbarian',
   'Bard',
   'Cleric',
@@ -25,7 +26,7 @@ export const SRD_CLASS_NAMES = [
   'Sorcerer',
   'Warlock',
   'Wizard',
-] as const;
+] as const);
 
 export type SrdClassName = (typeof SRD_CLASS_NAMES)[number];
 

@@ -10,9 +10,10 @@
  * Commons Attribution 4.0 International License, available at
  * https://creativecommons.org/licenses/by/4.0/legalcode.
  */
+import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdUnarmoredDefenseFeature } from '../unarmored-defense-srd-reader';
 
-export const BUNDLED_SRD_UNARMORED_DEFENSE_FEATURES = [
+export const BUNDLED_SRD_UNARMORED_DEFENSE_FEATURES = deepFreeze([
   {
     "class_name": "Barbarian",
     "class_level": 1,
@@ -33,4 +34,4 @@ export const BUNDLED_SRD_UNARMORED_DEFENSE_FEATURES = [
     "ability_2": "wisdom",
     "allows_shield": false
   }
-] as const satisfies readonly SrdUnarmoredDefenseFeature[];
+] as const satisfies readonly SrdUnarmoredDefenseFeature[]);

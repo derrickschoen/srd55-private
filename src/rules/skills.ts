@@ -26,15 +26,19 @@
  * in `skill-labels.ts`.
  */
 import { abilities, type Ability, type Skill } from '../domain/enums';
+import { FrozenMap } from '../domain/frozen-map';
 import { SrdSkillsError } from './skills-reader';
 import { BUNDLED_SRD_SKILL_ABILITIES } from './generated/skills';
 
-const SKILL_ABILITIES: ReadonlyMap<Skill, Ability> = new Map(
+const SKILL_ABILITIES: FrozenMap<Skill, Ability> = new FrozenMap<Skill, Ability>(
   Object.entries(BUNDLED_SRD_SKILL_ABILITIES) as [Skill, Ability][],
 );
 
-/** The parsed map, in the Skills table's printed order. */
-export function skillAbilities(): ReadonlyMap<Skill, Ability> {
+/**
+ * The parsed map, in the Skills table's printed order: one shared
+ * {@link FrozenMap}, so no caller can re-govern a skill for the next one.
+ */
+export function skillAbilities(): FrozenMap<Skill, Ability> {
   return SKILL_ABILITIES;
 }
 

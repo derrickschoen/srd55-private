@@ -10,6 +10,7 @@
  * Commons Attribution 4.0 International License, available at
  * https://creativecommons.org/licenses/by/4.0/legalcode.
  */
+import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdArmorTemplate } from '../armor-srd-reader';
 
 /** Every armour template key this artifact records: the closed set the runtime mints `ContentKey` from. */
@@ -28,7 +29,7 @@ export type BundledSrdArmorContentKeyText =
   | "2024:armor:plate-armor"
   | "2024:armor:shield";
 
-export const BUNDLED_SRD_ARMOR_TEMPLATES = [
+export const BUNDLED_SRD_ARMOR_TEMPLATES = deepFreeze([
   {
     "content_key": "2024:armor:padded-armor",
     "name": "Padded Armor",
@@ -159,4 +160,4 @@ export const BUNDLED_SRD_ARMOR_TEMPLATES = [
     "strength_requirement": null,
     "stealth_disadvantage": false
   }
-] as const satisfies readonly SrdArmorTemplate<BundledSrdArmorContentKeyText>[];
+] as const satisfies readonly SrdArmorTemplate<BundledSrdArmorContentKeyText>[]);

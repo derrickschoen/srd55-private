@@ -10,9 +10,10 @@
  * Commons Attribution 4.0 International License, available at
  * https://creativecommons.org/licenses/by/4.0/legalcode.
  */
+import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdDraconicResilienceFeature } from '../draconic-resilience-srd-reader';
 
-export const BUNDLED_SRD_DRACONIC_RESILIENCE = {
+export const BUNDLED_SRD_DRACONIC_RESILIENCE = deepFreeze({
   "class_name": "Sorcerer",
   "subclass_name": "Draconic Sorcery",
   "class_level": 3,
@@ -33,4 +34,4 @@ export const BUNDLED_SRD_DRACONIC_RESILIENCE = {
       "allows_shield": false
     }
   ]
-} as const satisfies SrdDraconicResilienceFeature;
+} as const satisfies SrdDraconicResilienceFeature);

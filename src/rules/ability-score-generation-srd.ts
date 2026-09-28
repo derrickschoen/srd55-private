@@ -13,6 +13,7 @@
  * `npm run srd:artifacts`). This module imports no SRD text.
  */
 import { deepFreeze } from '../domain/deep-freeze';
+import { FrozenMap } from '../domain/frozen-map';
 import type { StandardArrayScores } from './ability-score-generation-srd-reader';
 import { BUNDLED_SRD_ABILITY_SCORE_GENERATION } from './generated/ability-score-generation-srd';
 
@@ -24,8 +25,11 @@ export const STANDARD_ARRAY: StandardArrayScores = ARTIFACT.standard_array;
 /** The point-buy budget: the points a character has to spend. */
 export const POINT_BUY_BUDGET: number = ARTIFACT.point_buy_budget;
 
-/** Point cost by score, exactly the printed table — no interpolation. */
-export const POINT_COSTS: ReadonlyMap<number, number> = new Map(
+/**
+ * Point cost by score, exactly the printed table — no interpolation. A
+ * {@link FrozenMap}: shared by every caller, so no caller can reprice a score.
+ */
+export const POINT_COSTS: FrozenMap<number, number> = new FrozenMap<number, number>(
   ARTIFACT.point_costs,
 );
 

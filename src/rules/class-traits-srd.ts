@@ -14,6 +14,7 @@
  */
 import type { MartialArtsDieSize } from '../domain/enums';
 import { deepFreeze } from '../domain/deep-freeze';
+import { FrozenMap } from '../domain/frozen-map';
 import type {
   SrdClassTraits,
   SrdExtraAttackGrant,
@@ -22,14 +23,19 @@ import { BUNDLED_SRD_CLASS_TRAITS } from './generated/class-traits-srd';
 
 const ARTIFACT = deepFreeze(BUNDLED_SRD_CLASS_TRAITS);
 
-const EXTRA_ATTACK_GRANTS: readonly SrdExtraAttackGrant[] = Object.freeze(
+/** An Extra Attack row as the runtime hands it out: its counts a {@link FrozenMap}. */
+export interface BundledSrdExtraAttackGrant extends SrdExtraAttackGrant {
+  readonly counts: FrozenMap<number, number>;
+}
+
+const EXTRA_ATTACK_GRANTS: readonly BundledSrdExtraAttackGrant[] = Object.freeze(
   ARTIFACT.extra_attack_grants.map((grant) => Object.freeze({
     class_name: grant.class_name,
-    counts: new Map<number, number>(grant.counts),
+    counts: new FrozenMap<number, number>(grant.counts),
   })),
 );
 
-const MARTIAL_ARTS_DICE: ReadonlyMap<number, MartialArtsDieSize> = new Map(
+const MARTIAL_ARTS_DICE: FrozenMap<number, MartialArtsDieSize> = new FrozenMap(
   ARTIFACT.martial_arts_dice.map((die, index) => [index + 1, die] as const),
 );
 
@@ -39,11 +45,11 @@ export function bundledSrdClassTraits(): readonly SrdClassTraits[] {
 }
 
 /** Each class's Extra Attack rows: level to TOTAL attacks on the Attack action. */
-export function bundledSrdExtraAttackGrants(): readonly SrdExtraAttackGrant[] {
+export function bundledSrdExtraAttackGrants(): readonly BundledSrdExtraAttackGrant[] {
   return EXTRA_ATTACK_GRANTS;
 }
 
-/** The Monk's Martial Arts die at each level, 1 through 20. */
-export function bundledSrdMartialArtsDice(): ReadonlyMap<number, MartialArtsDieSize> {
+/** The Monk's Martial Arts die at each level, 1 through 20: one shared {@link FrozenMap}. */
+export function bundledSrdMartialArtsDice(): FrozenMap<number, MartialArtsDieSize> {
   return MARTIAL_ARTS_DICE;
 }

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { posix } from 'node:path';
 import {
   deriveSrdAbilityScoreGenerationArtifact,
 } from '../src/rules/ability-score-generation-srd-reader';
@@ -63,6 +64,11 @@ import {
  * type is instantiated with. The runtime module mints the `ContentKey` brand
  * by membership in that set (`src/domain/recorded-content-keys.ts`), never by
  * a cast.
+ *
+ * AN ARTIFACT IS FROZEN WHERE IT IS DEFINED. `as const` is only a type: the
+ * emitted literal is wrapped in `deepFreeze`, so every object and array in it
+ * is frozen when its module first evaluates, before any importer can reach it.
+ * No importer, whichever module loads first, can change a rule for the next.
  *
  * EVERY BYTE OF EVERY SOURCE IS PINNED. The header records each source
  * corpus's sha256, so an edit the parse ignores (a preamble line, an
@@ -627,6 +633,15 @@ const SRD_ATTRIBUTION = [
   'https://creativecommons.org/licenses/by/4.0/legalcode.',
 ] as const;
 
+/** Where every artifact imports `deepFreeze` from: the domain's, the one implementation. */
+const DEEP_FREEZE_MODULE = 'src/domain/deep-freeze';
+
+/** The `deepFreeze` import specifier, relative to the artifact's own path. */
+function deepFreezeSpecifier(artifactPath: string): string {
+  const relative = posix.relative(posix.dirname(artifactPath), DEEP_FREEZE_MODULE);
+  return relative.startsWith('.') ? relative : `./${relative}`;
+}
+
 /** The artifact's complete source text, derived from the corpora `read` returns. */
 export function composeSrdArtifact(
   artifact: SrdArtifact,
@@ -650,10 +665,11 @@ export function composeSrdArtifact(
     '/**',
     ...SRD_ATTRIBUTION.map((line) => ` * ${line}`),
     ' */',
+    `import { deepFreeze } from '${deepFreezeSpecifier(artifact.path)}';`,
     `import type { ${artifact.type.names.join(', ')} } from '${artifact.type.module}';`,
     '',
     ...(artifact.keyUnions ?? []).flatMap((union) => keyUnionLines(artifact, union, value)),
-    `export const ${artifact.exportName} = ${JSON.stringify(value, null, 2)} as const satisfies ${artifact.type.satisfies};`,
+    `export const ${artifact.exportName} = deepFreeze(${JSON.stringify(value, null, 2)} as const satisfies ${artifact.type.satisfies});`,
     '',
   ].join('\n');
 }

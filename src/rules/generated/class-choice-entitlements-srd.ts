@@ -12,9 +12,10 @@
  * Commons Attribution 4.0 International License, available at
  * https://creativecommons.org/licenses/by/4.0/legalcode.
  */
+import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdClassChoiceEntitlementArtifact } from '../class-choice-entitlements-srd-reader';
 
-export const BUNDLED_SRD_CLASS_CHOICE_ENTITLEMENTS = {
+export const BUNDLED_SRD_CLASS_CHOICE_ENTITLEMENTS = deepFreeze({
   "expertise": [
     {
       "class_name": "Bard",
@@ -269,4 +270,4 @@ export const BUNDLED_SRD_CLASS_CHOICE_ENTITLEMENTS = {
       ]
     }
   ]
-} as const satisfies SrdClassChoiceEntitlementArtifact;
+} as const satisfies SrdClassChoiceEntitlementArtifact);
