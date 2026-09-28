@@ -3492,3 +3492,24 @@ VERIFIED BY ME:
 Both are ACCEPTED. They join landing batch 2 with FOOTPRINT, whose codex r3 is still pending. Landing batch 1 (RECORDER-A, IMPORT-GUARD, SRD-BUILDTIME, PATH-ONE) is being integrated.
 
 Next free id: D934.
+
+## D934 — 2026-09-28 03:03 — landing batch 1 integrated (claude/landing-batch1 ef07083f); adaptation commits in codex review; verified by me
+
+INTEGRATION (agent-reported): main e63e6505 plus 47 unit commits, 0 textual conflicts. The unit ranges:
+- RECORDER-A eb45b16b..a61851fe (9);
+- IMPORT-GUARD 2e25a29d..4b432b28 (16);
+- SRD-BUILDTIME 2e25a29d..0389d97f (20);
+- PATH-ONE 0b688fbe..5a2b42e8 (2).
+A semantic conflict surfaced: the guard went red after the picks, with 32 stale R2 entries and 4 R3 pending entries that now hold. Three adaptation commits follow:
+- e4c9d1bd: test-affected.mjs uses the shared runtime-edge classifier. Old against new walker census on 1,829 files is byte-equal.
+- 1df6978b: R2's runtime-importer allowlist is empty and the removedBy mechanism is deleted.
+- ef07083f: budgets rewritten via --update (D927). Engine child 5.10 → 2.18 MB; encounter 5.02 → 2.03 MB; main +3 files; worker +8 files.
+- Tests: 494 spec files, 7,941 tests pass; pins unchanged; 15/15 mutants killed.
+
+VERIFIED BY ME at ef07083f:
+- clean tree; check-command-outcomes exit 0; `git grep "docs/srd/.*?raw" -- src db` = 0 files.
+- Hand mutant scripts/runtime-import-edges.mjs: an all-inline-type import is classified ERASED again (the RECORDER-A P1 regression). KILLED by 3 tests in tests/unit/verdict-closure-walker.test.ts, including "a stored green is not reused once a module the test loads changes: inline type". Restored 7a58c500; 64/64.
+
+Codex review of the 3 adaptation commits is running. After it: the timed pair (A = main, B = landing batch 1) in a quiet window, then landing.
+
+Next free id: D935.
