@@ -3378,3 +3378,38 @@ FINDING AGAINST MY OWN WORK (the D919 option text): the option I offered the own
   - the in-app hash-chain check stays.
 
 Next free id: D930.
+
+## D930 — 2026-09-27 22:34 — wave 6 harvested; RECORDER-A APPROVED; PC-EXPORT r2 and RULE-INDEX r2 REVISE → wave 7
+
+HARVESTED (agent-reported; codex reviews running: FOOTPRINT r2, SRD-BUILDTIME r3, IMPORT-GUARD r3):
+- FOOTPRINT fix1, claude/footprint c9ca9b88 on 56ff040a, 9 commits:
+  - AbsentToken is minted, with compile witnesses;
+  - the archive keeps every accepted input text byte-for-byte, with a per-text sha;
+  - autosave restore points survive migration by archive;
+  - every v13 revision records its EngineBuild. Offline tool tools/session-archive-replay.ts replays an archive at its recorded commit (git archive of src/ + docs/srd/, esbuild driver, that commit's reducer). A tampered-with-recomputed-hashes save is caught at turn 3. v12 archives give recorded_commit_unknown (exit 3); --assume-commit is reported as operator_assumed.
+  - 30/30 mutants killed (29 runtime, 1 compile-only); 229 spec files pass; pins unchanged from impl.
+  - It also fixed a red two-room-fixture test (token key order) that the implementation round had left.
+- SRD-BUILDTIME fix2:
+  - class-resource formulas are a discriminated union with typed step tuples;
+  - generated literal key unions, and the ContentKey brand is earned;
+  - readback mutants.
+- IMPORT-GUARD fix2, 7d80c21b:
+  - --update raises and lowers budgets (D927);
+  - production vs tooling derived from the path;
+  - 30/30 mutants killed.
+
+REVIEWS:
+- RECORDER-A r3 (gpt-6-sol xhigh): APPROVE on a61851fe. Owed: its timed pair.
+- PC-EXPORT r2 REVISE, accepted:
+  - P1: the owner cannot complete the accepted reset. database-worker-boot.ts collapses the typed reason to boot_failed and the UI shows only "Failed".
+  - P2: migration 0066 and authored-senses travel lack named mutants.
+- RULE-INDEX r2 REVISE, accepted:
+  - P2: "Parts of a Stat Block" span cut at a page break.
+  - P2: Deafened typed_only not earned (condition and mechanics are uncorrelated).
+  - P2: D923 exclusions have no excluded_by_owner rows.
+  - P2: magic items have a count pin only.
+- Wave 7 (wf_c25b6b4e-c84) fixes both.
+
+APPROVED, AWAITING A QUIET WINDOW: PATH-ONE (5a2b42e8) and RECORDER-A (a61851fe). Timed pairs run when no workflow agent is running.
+
+Next free id: D931.
