@@ -3636,4 +3636,18 @@ WAVE 10 (agent-reported):
   - The planner recommends splitting it into -A (before SQUEEZE-COMBAT) and -B (before REGEN).
   - Its Q-A..Q-H wait for codex plan review r1 (running).
 
-Next free id: D940.
+## D940 — 2026-09-28 14:33 — owner: attempt simple deterministic migrations where practical (amends D939)
+
+OWNER, verbatim: "we should make an effort to do simple detrministic migrations if practical".
+- Amends D939's last bullet ("the rules units add no new migrations"). Each rules unit (MOVE-COST, CONDITION-D20, SQUEEZE-*, MOVEMENT-MODES, COVER-EDGE …) now first asks: can an earlier-build save be carried forward by a simple deterministic migration?
+- Supervisor reading (owner may overturn):
+  - "Deterministic" = a pure, total function of the saved bytes: no dice, no clock, no model call, no replay under a different rule set that could produce a different outcome. Same input, same output, pinned by golden fixtures (an earlier-build save in, exact migrated save out).
+  - "Simple" = a typed, versioned step in the existing migration chain (the D919 v12→v13 pattern), small enough to review in one sitting, with a mutant killed on a plausible wrong migrated value.
+  - Practical cases: shape changes (renamed/added fields with a rule-given default), and history whose affected moves are still legal and priced the same under the new rules (migrate; the unit proves "unchanged under new rules" per move, not by assumption).
+  - Not practical: a recorded move whose cost, legality or roll the new rules change. Rewriting it would invent history. Those saves keep D939's clear typed refusal naming both engine builds.
+- Each plan states which case it is in, with the probe that shows it. The D939 refusal stays as the fallback and is still introduced by the first rules unit.
+
+Codex plan reviews r1 all returned REVISE (env-trace-flake, MOVE-COST, CONDITION-D20); dispositions follow.
+
+Next free id: D941.
+
