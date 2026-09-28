@@ -3513,3 +3513,17 @@ VERIFIED BY ME at ef07083f:
 Codex review of the 3 adaptation commits is running. After it: the timed pair (A = main, B = landing batch 1) in a quiet window, then landing.
 
 Next free id: D935.
+
+## D935 — 2026-09-28 03:24 — FOOTPRINT fix3 verified by me and accepted (cap); landing batch 1 adaptation review r1 REVISE (P2 salt)
+
+FOOTPRINT, claude/footprint 29911b5d (on ea40ab3d). fix3 addresses the codex r3 P1 (a legacy session no longer writes over an IndexedDB stream; placements are new_session / held / extends / diverged, and a diverged save is kept as its own named save) and the P2 (a checked shape instead of the any cast).
+- Agent-reported: 8 witnesses red first; 20 runtime + 4 type-rejected mutants; 17 affected spec files (262 tests); pins equal fix2.
+VERIFIED BY ME: clean tree; check-command-outcomes exit 0. Hand mutant src/vtt/local-session-store.ts legacySessionPlacement: the final `diverged` return becomes `extends` (a divergent legacy save written over the stored stream). KILLED by 6 of 8 tests in tests/unit/vtt/footprint-legacy-session-collision.test.ts; restored 484f5050; 8/8.
+FOOTPRINT is ACCEPTED at the cap and joins landing batch 2 with PC-EXPORT-TRUTH (d58092ea) and RULE-INDEX (3e3c782b).
+
+LANDING BATCH 1, codex review of the 3 adaptation commits (gpt-6-sol xhigh): REVISE.
+- P2: the shared classifier is not in the verdict-cache global salt (test-affected.mjs ~:668), so a classifier-only change could reuse a stale green. Accepted; fixing (wf_20a23518-5a3) with a witness and a mutant.
+- P3: R2 covers graph edges only; a production fs read of docs/srd is outside it. Recorded here, with cheap coverage requested.
+- The reviewer independently confirmed zero production SRD module references and the budget arithmetic (main 356 → 392 and worker 451 → 497 files at +10%; both byte budgets fell).
+
+Next free id: D936.
