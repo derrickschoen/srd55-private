@@ -3556,3 +3556,24 @@ LANDED: main = 37b0075b, 52 commits cherry-picked onto 597c62ce. The main tree i
 NEXT: landing batch 2 = FOOTPRINT (29911b5d), PC-EXPORT-TRUTH (d58092ea) and RULE-INDEX (3e3c782b), integrated on 37b0075b.
 
 Next free id: D937.
+
+## D937 — 2026-09-28 06:13 — landing batch 2: integration review APPROVE; timed pair FAILS (codec-slot tree scan 2.4 s → 20.8 s); fix dispatched
+
+INTEGRATION REVIEW (gpt-6-sol xhigh) of claude/landing-batch2 3b66eb88: APPROVE, no P1/P2.
+- The reviewer independently matched all 1,766 rule-index entries (key order included) and the species values, and recomputed the 0067 schema checksum, the catalog pin e25e464d and all six source shas.
+- P3, recorded: a dev database that applied FOOTPRINT's former 0066 (only possible on the unlanded FOOTPRINT branch; no persisted image found) is refused at boot with export and reset available, never rewritten. Covered by the D923 Q11 reset acceptance.
+
+VERIFIED BY ME before the pair:
+- clean tree; check-command-outcomes 0; 0 production SRD importers; migrations 0066 (species senses) then 0067 (footprint).
+- Hand mutant src/rules/generated/species-srd-tables.ts: the Brass ancestor's damageType "Fire" → "Lightning". KILLED by 4 tests (byte drift, printed-cell drift, the hand-read ten Draconic Ancestors, runtime readback); restored 4d7e2e59; 79/79.
+
+TIMED PAIR, label b2-0928-5dcff9e4 (new label; report folders empty before the run). A = main 5dcff9e4, B = + batch 2 (2535eae8 ≙ 3b66eb88); both arms tsc 0 and check 0.
+- A: prewarm 195.6 s, timed 189.4 s, passed. 676 files / 12,002 tests.
+- B: prewarm 237.1 s, timed 225.4 s, verdict FAILED in both runs (VALID). 701 files / 12,311 tests.
+  - The file tests/unit/db/codec-slot-is-never-an-identity.test.ts fails even after the serial retry: the test "finds no passthrough codec in any decoded read, anywhere in the tree" takes 23.8 s initial and 21.4 s on retry, a STACK_TRACE_ERROR timeout.
+- Solo, by me (--maxWorkers=1): main 2,426 ms, batch 2 20,785 ms. A deterministic cost regression, not load.
+- Mechanism, read by me: passthroughBindings() takes each const's initialiser up to the next ';' and runs regexes over it. Batch 2 adds large generated artifacts: src/rules/srd/generated/rule-index.ts is 408 KB. spells-srd.ts at 687 KB was already on main without this cost, so the exact trigger is for the fix to establish.
+- No per-unit check caught this. Each unit alone was under the threshold, or had no rule index yet (RULE-INDEX's own clone had the index, but the codec test was not in its affected set: the closure walker does not see git ls-files readers).
+- Fix dispatched (wf_9da352c6-a75): a linear, bounded scan keeping every offence it catches today; an exclusion is allowed only with proof that artifacts are pure data. Batch 2 is NOT landed.
+
+Next free id: D938.
