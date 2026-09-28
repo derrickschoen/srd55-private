@@ -3335,3 +3335,46 @@ REVIEWS → dispositions (all accepted):
 - PATH-ONE (approved r2) waits for a quiet window for its timed pair.
 
 Next free id: D929.
+
+## D929 — 2026-09-27 20:12 — wave 5 harvested; FOOTPRINT r1, SRD-BUILDTIME r2 and IMPORT-GUARD r2 REVISE → wave 6; a finding against my own D919 option text
+
+HARVESTED (agent-reported; codex reviews running: PC-EXPORT r2, RULE-INDEX r2, RECORDER-A r3):
+- PC-EXPORT fix1, claude/pcexport 6c92aab5 on eb45b16b:
+  - a typed marker-reset boot error;
+  - packs that state no skills or senses are refused; heldout packs re-exported, with 4 members hand-checked;
+  - the resistance resolver fixed; Topple DC = 8 + mod + PB;
+  - Stonecunning and Devil's Sight typed; authored species require senses (migration 0066);
+  - 12 witnesses red first; 245 spec files (4,952 tests) pass; 28/28 mutants killed; pins unchanged.
+  - The implementer notes that NO UI screen renders the typed boot-failure reason. This is in review.
+- RULE-INDEX fix1, claude/ruleindex ce1256fb:
+  - statuses quote their SRD clauses; parsed witnesses; Burrow/Climb/Swim moved to unrepresented;
+  - independent derivations per kind;
+  - DamageType left open, with the blocking consumers named.
+- RECORDER-A fix2, claude/recordera a61851fe:
+  - symlink stale green reproduced and fixed;
+  - bare builtins (worker_threads, cluster, getBuiltinModule, createRequire) fail closed.
+
+REVIEWS → wave 6 (wf_2919bbb8-50d), all findings accepted:
+- FOOTPRINT r1 REVISE:
+  - P1: decodeAbsentTokens casts past the whole-body proof.
+  - P1: stream migration breaks earlier autosave restore points.
+  - P1: the archive stores a canonical re-serialization, not the original bytes.
+  - P2: "verify on demand" checks hashes only; it does not replay old turns.
+  - P3: mutation accounting is 33 runtime + 2 static + 1 compile-only; the W17 comment refers to the withdrawn amendment.
+- SRD-BUILDTIME r2 REVISE:
+  - P1: class-resource formulas keep a JSON string field.
+  - P2: unchecked ContentKey casts.
+  - P2: readback assertions lack mutants.
+- IMPORT-GUARD r2 REVISE:
+  - P2: D927 raises not implemented.
+  - P2: a production path can be labelled tooling.
+
+FINDING AGAINST MY OWN WORK (the D919 option text): the option I offered the owner said the archive is "checked with the old rules on demand".
+- An in-app check cannot replay old turns under old rules once the engine changes; that needs the engine version the save was recorded with.
+- I wrote the option without that constraint. The review caught it.
+- Remedy, briefed into FOOTPRINT fix1:
+  - an offline tool checks out the engine commit recorded in the archive and replays every archived turn with that commit's reducer;
+  - saves made before commit recording existed report a typed 'recorded commit unknown';
+  - the in-app hash-chain check stays.
+
+Next free id: D930.
