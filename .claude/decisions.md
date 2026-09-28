@@ -3649,5 +3649,19 @@ OWNER, verbatim: "we should make an effort to do simple detrministic migrations 
 
 Codex plan reviews r1 all returned REVISE (env-trace-flake, MOVE-COST, CONDITION-D20); dispositions follow.
 
-Next free id: D941.
+## D941 — 2026-09-28 14:36 — owner: relaxed loading for tests (trust recorded history) plus minimal per-rule toggles
+
+OWNER asked: "can we try to migrate our existing ones to save time and reuse our earlier results? maybe lets have an option that relaxes certain rules that is default off , but can be turned on in testing scenarios".
+QUESTION (AskUserQuestion; recommendation "Trust recorded history"). OWNER, verbatim: "both, try to minimize per rule toggles to those we really need".
+- TRUST-RECORDED-HISTORY mode:
+  - Default off. Test and dev only; the production/app path cannot construct it (typed, not a string flag).
+  - Load still checks history integrity (chain, hashes, schema). It does not re-derive recorded reducer revisions under current rules (today's check is session-persistence.ts ~:1695-1715).
+  - Resume starts from the last recorded state, and new actions use the current rules.
+  - Every result produced this way carries a typed stamp naming the recording build(s) and "loaded relaxed".
+- PER-RULE TOGGLES: kept to the minimum. Each one needs a named consumer test that cannot be served by trust-history, a cited reason in the unit's plan, and a supervisor ruling recorded here. A toggle with no remaining consumer is deleted.
+- GUARD (supervisor, non-negotiable): pinned rule-output tests (D569 cells, arena verdicts, survival seeds, room cohorts, blind rows …) refuse relaxed mode and toggles by type. When a rules fix corrects a result, its pin must move, never be held green.
+- Relation: D939's typed refusal stays the strict/default behaviour. D940's deterministic migrations stay preferred where practical. This mode is the test-time way to reuse existing saves and recorded runs.
+- Placement: the first rules unit to land (MOVE-COST or CONDITION-D20) introduces it together with the D939 refusal, unless the plan review splits it into its own small unit first.
+
+Next free id: D942.
 
