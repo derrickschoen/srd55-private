@@ -3442,3 +3442,32 @@ REVIEWS → wave 8 (wf_279c01aa-392), all findings accepted:
   - Its round-1 PARTIAL (a duplicate walker in test-affected.mjs) is settled at landing (D919).
 
 Next free id: D932.
+
+## D932 — 2026-09-28 01:51 — the consensus cap is reached for SRD-BUILDTIME and IMPORT-GUARD; both verified by me and accepted; landing batch 1 is assembled
+
+CAP: SRD-BUILDTIME (r1–r3) and IMPORT-GUARD (r1–r3) have used their three codex rounds. Their fix3 rounds address every r3 finding.
+
+VERIFIED BY ME:
+- SRD-BUILDTIME, claude/srdbuild 0389d97f (on 2e25a29d):
+  - check-command-outcomes exit 0; tsc -b --force exit 0 with 0 errors.
+  - `git grep "docs/srd/.*?raw" -- src db` finds 0 files (main: 18).
+  - Hand mutant 1: the Barbarian rage maxima's 3rd value 3 → 2 in the generated artifact. REJECTED BY THE COMPILER: tests/types/srd-artifact-types.type-test.ts(153,55) TS2344. The fact lives in the types. Restored f7097e73; 66/66 after restore.
+  - Hand mutant 2: one non-data byte in docs/srd/source/ability-score-generation.txt ("ability-score" → "ability score" in the header). KILLED: 2 drift tests fail by assertion (the per-artifact byte test and the whole-source sha pin). Restored 0999337d; 66/66 after.
+- IMPORT-GUARD, claude/importguard 4b432b28 (on 2e25a29d):
+  - check-command-outcomes exit 0; tsc 0.
+  - The guard exits 0 on the clean tree.
+  - A planted src/rules/zz-plant.ts importing skills-table.txt?raw: exit 1.
+  - A planted db/zz-computed.ts with a computed dynamic import: exit 1, naming "cannot resolve dynamic reference … on a production path".
+  - Both plants removed; clean tree.
+
+ACCEPTED (codex-approved or supervisor-verified at the cap): PATH-ONE (5a2b42e8), RECORDER-A (a61851fe), IMPORT-GUARD (4b432b28), SRD-BUILDTIME (0389d97f).
+
+LANDING BATCH 1 (D888: a timed A/B pair per small-unit batch): one branch claude/landing-batch1 in dnd-probe-landing-batch1-*, on main, holding all four plus integration adaptations:
+- R2's allowlist is emptied once SRD-BUILDTIME is in: production importers are now 0, so R2 becomes "tests + generator + drift tests only".
+- test-affected.mjs switches to the guard's shared runtime-edge classifier (the D919 "whichever lands second").
+- Every conflict is resolved and recorded.
+Then my timed pair against main, and Playwright where affected.
+
+In flight: FOOTPRINT r3 (last review round); PC-EXPORT and RULE-INDEX fix3 (their last rounds; I verify after).
+
+Next free id: D933.
