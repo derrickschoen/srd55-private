@@ -13,7 +13,7 @@
 import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdUnarmoredDefenseFeature } from '../unarmored-defense-srd-reader';
 
-export const BUNDLED_SRD_UNARMORED_DEFENSE_FEATURES = deepFreeze([
+export const BUNDLED_SRD_UNARMORED_DEFENSE_FEATURES = [
   {
     "class_name": "Barbarian",
     "class_level": 1,
@@ -34,4 +34,5 @@ export const BUNDLED_SRD_UNARMORED_DEFENSE_FEATURES = deepFreeze([
     "ability_2": "wisdom",
     "allows_shield": false
   }
-] as const satisfies readonly SrdUnarmoredDefenseFeature[]);
+] as const satisfies readonly SrdUnarmoredDefenseFeature[];
+deepFreeze(BUNDLED_SRD_UNARMORED_DEFENSE_FEATURES);

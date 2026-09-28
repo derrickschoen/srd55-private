@@ -14,7 +14,7 @@
 import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdClassTraitsArtifact } from '../class-traits-srd-reader';
 
-export const BUNDLED_SRD_CLASS_TRAITS = deepFreeze({
+export const BUNDLED_SRD_CLASS_TRAITS = {
   "traits": [
     {
       "class_name": "Barbarian",
@@ -530,4 +530,5 @@ export const BUNDLED_SRD_CLASS_TRAITS = deepFreeze({
     12,
     12
   ]
-} as const satisfies SrdClassTraitsArtifact);
+} as const satisfies SrdClassTraitsArtifact;
+deepFreeze(BUNDLED_SRD_CLASS_TRAITS);

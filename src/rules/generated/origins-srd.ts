@@ -33,7 +33,7 @@ export type BundledSrdBackgroundContentKeyText =
   | "2024:background:sage"
   | "2024:background:soldier";
 
-export const BUNDLED_SRD_ORIGINS = deepFreeze({
+export const BUNDLED_SRD_ORIGINS = {
   "species": [
     {
       "content_key": "2024:species:dragonborn",
@@ -655,4 +655,5 @@ export const BUNDLED_SRD_ORIGINS = deepFreeze({
       ]
     }
   ]
-} as const satisfies SrdOriginsArtifact<BundledSrdSpeciesContentKeyText, BundledSrdBackgroundContentKeyText>);
+} as const satisfies SrdOriginsArtifact<BundledSrdSpeciesContentKeyText, BundledSrdBackgroundContentKeyText>;
+deepFreeze(BUNDLED_SRD_ORIGINS);

@@ -363,7 +363,7 @@ export type BundledSrdSpellContentKeyText =
   | "2024:word-of-recall"
   | "2024:zone-of-truth";
 
-export const BUNDLED_SRD_SPELL_CATALOG = deepFreeze({
+export const BUNDLED_SRD_SPELL_CATALOG = {
   "descriptions": [
     {
       "name": "Acid Arrow",
@@ -18027,4 +18027,5 @@ export const BUNDLED_SRD_SPELL_CATALOG = deepFreeze({
       "spell_list_key": "Wizard"
     }
   ]
-} as const satisfies SrdSpellCatalogArtifact<BundledSrdSpellContentKeyText>);
+} as const satisfies SrdSpellCatalogArtifact<BundledSrdSpellContentKeyText>;
+deepFreeze(BUNDLED_SRD_SPELL_CATALOG);

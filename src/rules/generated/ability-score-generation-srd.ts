@@ -13,7 +13,7 @@
 import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdAbilityScoreGenerationArtifact } from '../ability-score-generation-srd-reader';
 
-export const BUNDLED_SRD_ABILITY_SCORE_GENERATION = deepFreeze({
+export const BUNDLED_SRD_ABILITY_SCORE_GENERATION = {
   "standard_array": [
     15,
     14,
@@ -57,4 +57,5 @@ export const BUNDLED_SRD_ABILITY_SCORE_GENERATION = deepFreeze({
       9
     ]
   ]
-} as const satisfies SrdAbilityScoreGenerationArtifact);
+} as const satisfies SrdAbilityScoreGenerationArtifact;
+deepFreeze(BUNDLED_SRD_ABILITY_SCORE_GENERATION);

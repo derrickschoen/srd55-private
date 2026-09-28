@@ -66,9 +66,13 @@ import {
  * a cast.
  *
  * AN ARTIFACT IS FROZEN WHERE IT IS DEFINED. `as const` is only a type: the
- * emitted literal is wrapped in `deepFreeze`, so every object and array in it
- * is frozen when its module first evaluates, before any importer can reach it.
- * No importer, whichever module loads first, can change a rule for the next.
+ * module's last statement is `deepFreeze(<EXPORT>)`, so every object and array
+ * in the literal is frozen when the module first evaluates. An artifact imports
+ * nothing but `deepFreeze` and types, so its body finishes before any importer's
+ * runs: no importer, whichever module loads first, can change a rule for the
+ * next. It is a statement rather than a call around the literal because the
+ * call would make the compiler infer `deepFreeze`'s type parameter from each
+ * literal, about 10,000 more types for the app check (fix round 3, measured).
  *
  * EVERY BYTE OF EVERY SOURCE IS PINNED. The header records each source
  * corpus's sha256, so an edit the parse ignores (a preamble line, an
@@ -669,7 +673,8 @@ export function composeSrdArtifact(
     `import type { ${artifact.type.names.join(', ')} } from '${artifact.type.module}';`,
     '',
     ...(artifact.keyUnions ?? []).flatMap((union) => keyUnionLines(artifact, union, value)),
-    `export const ${artifact.exportName} = deepFreeze(${JSON.stringify(value, null, 2)} as const satisfies ${artifact.type.satisfies});`,
+    `export const ${artifact.exportName} = ${JSON.stringify(value, null, 2)} as const satisfies ${artifact.type.satisfies};`,
+    `deepFreeze(${artifact.exportName});`,
     '',
   ].join('\n');
 }

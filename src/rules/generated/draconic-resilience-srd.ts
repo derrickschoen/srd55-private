@@ -13,7 +13,7 @@
 import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdDraconicResilienceFeature } from '../draconic-resilience-srd-reader';
 
-export const BUNDLED_SRD_DRACONIC_RESILIENCE = deepFreeze({
+export const BUNDLED_SRD_DRACONIC_RESILIENCE = {
   "class_name": "Sorcerer",
   "subclass_name": "Draconic Sorcery",
   "class_level": 3,
@@ -34,4 +34,5 @@ export const BUNDLED_SRD_DRACONIC_RESILIENCE = deepFreeze({
       "allows_shield": false
     }
   ]
-} as const satisfies SrdDraconicResilienceFeature);
+} as const satisfies SrdDraconicResilienceFeature;
+deepFreeze(BUNDLED_SRD_DRACONIC_RESILIENCE);

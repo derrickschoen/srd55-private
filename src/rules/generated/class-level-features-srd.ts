@@ -13,7 +13,7 @@
 import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdClassLevelFeatures } from '../class-level-features-srd-reader';
 
-export const BUNDLED_SRD_CLASS_LEVEL_FEATURES = deepFreeze([
+export const BUNDLED_SRD_CLASS_LEVEL_FEATURES = [
   {
     "class_name": "Barbarian",
     "levels": [
@@ -2404,4 +2404,5 @@ export const BUNDLED_SRD_CLASS_LEVEL_FEATURES = deepFreeze([
       }
     ]
   }
-] as const satisfies readonly SrdClassLevelFeatures[]);
+] as const satisfies readonly SrdClassLevelFeatures[];
+deepFreeze(BUNDLED_SRD_CLASS_LEVEL_FEATURES);

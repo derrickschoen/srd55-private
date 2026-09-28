@@ -13,7 +13,7 @@
 import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdSubclassManifest } from '../srd-subclasses-reader';
 
-export const BUNDLED_SRD_SUBCLASS_MANIFEST = deepFreeze({
+export const BUNDLED_SRD_SUBCLASS_MANIFEST = {
   "by_class": {
     "Barbarian": {
       "class_name": "Barbarian",
@@ -1601,4 +1601,5 @@ export const BUNDLED_SRD_SUBCLASS_MANIFEST = deepFreeze({
       ]
     }
   ]
-} as const satisfies SrdSubclassManifest);
+} as const satisfies SrdSubclassManifest;
+deepFreeze(BUNDLED_SRD_SUBCLASS_MANIFEST);

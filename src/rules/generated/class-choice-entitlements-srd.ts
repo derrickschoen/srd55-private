@@ -15,7 +15,7 @@
 import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdClassChoiceEntitlementArtifact } from '../class-choice-entitlements-srd-reader';
 
-export const BUNDLED_SRD_CLASS_CHOICE_ENTITLEMENTS = deepFreeze({
+export const BUNDLED_SRD_CLASS_CHOICE_ENTITLEMENTS = {
   "expertise": [
     {
       "class_name": "Bard",
@@ -270,4 +270,5 @@ export const BUNDLED_SRD_CLASS_CHOICE_ENTITLEMENTS = deepFreeze({
       ]
     }
   ]
-} as const satisfies SrdClassChoiceEntitlementArtifact);
+} as const satisfies SrdClassChoiceEntitlementArtifact;
+deepFreeze(BUNDLED_SRD_CLASS_CHOICE_ENTITLEMENTS);

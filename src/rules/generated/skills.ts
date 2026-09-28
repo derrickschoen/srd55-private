@@ -13,7 +13,7 @@
 import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdSkillAbilitiesArtifact } from '../skills-reader';
 
-export const BUNDLED_SRD_SKILL_ABILITIES = deepFreeze({
+export const BUNDLED_SRD_SKILL_ABILITIES = {
   "acrobatics": "dexterity",
   "animal_handling": "wisdom",
   "arcana": "intelligence",
@@ -32,4 +32,5 @@ export const BUNDLED_SRD_SKILL_ABILITIES = deepFreeze({
   "sleight_of_hand": "dexterity",
   "stealth": "dexterity",
   "survival": "wisdom"
-} as const satisfies SrdSkillAbilitiesArtifact);
+} as const satisfies SrdSkillAbilitiesArtifact;
+deepFreeze(BUNDLED_SRD_SKILL_ABILITIES);

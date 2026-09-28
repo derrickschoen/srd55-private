@@ -55,7 +55,7 @@ export type BundledSrdWeaponContentKeyText =
   | "2024:weapon:musket"
   | "2024:weapon:pistol";
 
-export const BUNDLED_SRD_WEAPONS = deepFreeze({
+export const BUNDLED_SRD_WEAPONS = {
   "templates": [
     {
       "content_key": "2024:weapon:club",
@@ -1175,4 +1175,5 @@ export const BUNDLED_SRD_WEAPONS = deepFreeze({
       ]
     }
   ]
-} as const satisfies SrdWeaponsArtifact<BundledSrdWeaponContentKeyText>);
+} as const satisfies SrdWeaponsArtifact<BundledSrdWeaponContentKeyText>;
+deepFreeze(BUNDLED_SRD_WEAPONS);

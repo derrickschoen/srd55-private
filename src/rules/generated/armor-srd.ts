@@ -29,7 +29,7 @@ export type BundledSrdArmorContentKeyText =
   | "2024:armor:plate-armor"
   | "2024:armor:shield";
 
-export const BUNDLED_SRD_ARMOR_TEMPLATES = deepFreeze([
+export const BUNDLED_SRD_ARMOR_TEMPLATES = [
   {
     "content_key": "2024:armor:padded-armor",
     "name": "Padded Armor",
@@ -160,4 +160,5 @@ export const BUNDLED_SRD_ARMOR_TEMPLATES = deepFreeze([
     "strength_requirement": null,
     "stealth_disadvantage": false
   }
-] as const satisfies readonly SrdArmorTemplate<BundledSrdArmorContentKeyText>[]);
+] as const satisfies readonly SrdArmorTemplate<BundledSrdArmorContentKeyText>[];
+deepFreeze(BUNDLED_SRD_ARMOR_TEMPLATES);

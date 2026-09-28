@@ -14,7 +14,7 @@
 import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdMulticlassEntryGrant } from '../multiclass-entry-srd-reader';
 
-export const BUNDLED_SRD_MULTICLASS_ENTRY_GRANTS = deepFreeze([
+export const BUNDLED_SRD_MULTICLASS_ENTRY_GRANTS = [
   {
     "class_name": "Barbarian",
     "hit_die": true,
@@ -177,4 +177,5 @@ export const BUNDLED_SRD_MULTICLASS_ENTRY_GRANTS = deepFreeze([
     },
     "tool_grants": []
   }
-] as const satisfies readonly SrdMulticlassEntryGrant[]);
+] as const satisfies readonly SrdMulticlassEntryGrant[];
+deepFreeze(BUNDLED_SRD_MULTICLASS_ENTRY_GRANTS);

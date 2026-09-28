@@ -15,7 +15,7 @@
 import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdClassEquipment } from '../class-equipment-srd-reader';
 
-export const BUNDLED_SRD_CLASS_EQUIPMENT = deepFreeze([
+export const BUNDLED_SRD_CLASS_EQUIPMENT = [
   {
     "class_name": "Barbarian",
     "items": [
@@ -940,4 +940,5 @@ export const BUNDLED_SRD_CLASS_EQUIPMENT = deepFreeze([
       }
     ]
   }
-] as const satisfies readonly SrdClassEquipment[]);
+] as const satisfies readonly SrdClassEquipment[];
+deepFreeze(BUNDLED_SRD_CLASS_EQUIPMENT);

@@ -14,7 +14,7 @@
 import { deepFreeze } from '../../domain/deep-freeze';
 import type { BundledCoverageSource } from '../coverage-source';
 
-export const BUNDLED_COVERAGE_SOURCE = deepFreeze({
+export const BUNDLED_COVERAGE_SOURCE = {
   "reviewed_headings_in_bundled_srd": [
     "Acid Splash",
     "Advantage/Disadvantage",
@@ -6253,4 +6253,5 @@ export const BUNDLED_COVERAGE_SOURCE = deepFreeze({
       "end": 3321
     }
   ]
-} as const satisfies BundledCoverageSource);
+} as const satisfies BundledCoverageSource;
+deepFreeze(BUNDLED_COVERAGE_SOURCE);

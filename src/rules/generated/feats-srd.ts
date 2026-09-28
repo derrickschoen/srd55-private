@@ -13,7 +13,7 @@
 import { deepFreeze } from '../../domain/deep-freeze';
 import type { SrdFeatDefinitionRecord } from '../feats-srd-reader';
 
-export const BUNDLED_SRD_FEAT_DEFINITIONS = deepFreeze([
+export const BUNDLED_SRD_FEAT_DEFINITIONS = [
   {
     "content_key": "2024:feat:alert",
     "name": "Alert",
@@ -352,4 +352,5 @@ export const BUNDLED_SRD_FEAT_DEFINITIONS = deepFreeze([
     "grant_rules": [],
     "notes": "You gain the following benefits.\n\nAbility Score Increase. Increase one ability score of your choice by 1, to a maximum of 30.\n\nTruesight. You have Truesight with a range of 60 feet."
   }
-] as const satisfies readonly SrdFeatDefinitionRecord[]);
+] as const satisfies readonly SrdFeatDefinitionRecord[];
+deepFreeze(BUNDLED_SRD_FEAT_DEFINITIONS);
