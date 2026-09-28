@@ -6,24 +6,24 @@
   },
   "sentinels": {
     "tools/engine-mcp-server.ts": {
-      "files": 114,
-      "bytes": 5101684
+      "files": 107,
+      "bytes": 2180886
     },
     "src/combat/encounter.ts": {
-      "files": 84,
-      "bytes": 5018571
+      "files": 75,
+      "bytes": 2030193
     },
     "tests/helpers/open-db.ts": {
-      "files": 207,
-      "bytes": 2544992
+      "files": 204,
+      "bytes": 2422329
     },
     "src/main.ts": {
-      "files": 389,
-      "bytes": 7211413
+      "files": 392,
+      "bytes": 4817787
     },
     "src/db/worker.ts": {
-      "files": 489,
-      "bytes": 8972320
+      "files": 497,
+      "bytes": 7106704
     }
   }
 }
