@@ -1,6 +1,6 @@
 import type { DamageType, EffectKind } from '../domain/enums';
 import { effectKinds, isEnumValue } from '../domain/enums';
-import type { SrdSpeciesName } from './generated/species-srd-tables';
+import type { SrdSpeciesName } from './species-srd-tables';
 
 /**
  * WHAT A MECHANICAL EFFECT ACTUALLY DOES.

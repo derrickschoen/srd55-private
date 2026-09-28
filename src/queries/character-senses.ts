@@ -9,7 +9,7 @@ import {
   type LineageDarkvision,
   type SpeciesSenseSource,
 } from '../rules/character-senses';
-import { SRD_SPECIES_SENSES, type SrdSpeciesName } from '../rules/generated/species-srd-tables';
+import { SRD_SPECIES_SENSES, type SrdSpeciesName } from '../rules/species-srd-tables';
 import { BUNDLED_ORIGIN_RULES_EDITION } from '../rules/origin-rules-edition';
 import type { CharacterSheet } from './character-sheet-builder';
 

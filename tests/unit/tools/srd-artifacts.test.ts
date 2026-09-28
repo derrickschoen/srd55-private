@@ -5,6 +5,7 @@ import classLevelFeaturesDrift from '../rules/class-level-features-srd-generatio
 import classResourcesDrift from '../rules/class-resources-srd-generation.test.ts?raw';
 import spellsDrift from '../rules/spells-srd-generation.test.ts?raw';
 import coverageSourceDrift from '../simulation/coverage-source-generation.test.ts?raw';
+import speciesSrdTablesDrift from '../rules/species-srd-tables-generation.test.ts?raw';
 import artifactsFreshDrift from './srd-artifacts-fresh.test.ts?raw';
 import generatorSource from '../../../scripts/generate-srd-artifacts.ts?raw';
 import {
@@ -313,9 +314,10 @@ describe('the SRD artifact table', () => {
     'tests/unit/rules/spells-srd-generation.test.ts': spellsDrift,
     'tests/unit/simulation/coverage-source-generation.test.ts': coverageSourceDrift,
     'tests/unit/tools/srd-artifacts-fresh.test.ts': artifactsFreshDrift,
+    'tests/unit/rules/species-srd-tables-generation.test.ts': speciesSrdTablesDrift,
   };
 
-  it('generates all eighteen runtime SRD catalogs from exactly their corpora', () => {
+  it('generates all nineteen SRD artifacts from exactly their corpora: the eighteen runtime catalogs and the species tables', () => {
     const corpus = SRD_CORPUS_PATHS;
     expect(SRD_ARTIFACTS.map((artifact) => [artifact.path, artifact.sources])).toEqual([
       ['src/rules/generated/class-level-features-srd.ts', [corpus.classLevelTables]],
@@ -336,6 +338,8 @@ describe('the SRD artifact table', () => {
       ['src/rules/generated/srd-subclasses.ts', [corpus.subclasses]],
       ['src/rules/generated/unarmored-defense-srd.ts', [corpus.unarmoredDefense]],
       ['src/rules/generated/weapons-srd.ts', [corpus.weaponsTable, corpus.weaponMasteryProgression]],
+      // Landing batch 2: PC-EXPORT-TRUTH's generated module joined the table.
+      ['src/rules/generated/species-srd-tables.ts', [corpus.speciesDescriptions]],
     ]);
     expect(() => srdArtifact('src/rules/generated/nothing.ts')).toThrow(
       'src/rules/generated/nothing.ts is not a generated SRD artifact.',

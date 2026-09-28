@@ -29,6 +29,7 @@ import {
   SRD_SPELL_LISTS,
   type SrdSpellList,
 } from '../src/rules/spells-srd-reader';
+import { deriveSrdSpeciesTablesArtifact } from '../src/rules/species-srd-tables-reader';
 import { parseSrdSubclasses } from '../src/rules/srd-subclasses-reader';
 import {
   parseSrdUnarmoredDefenseFeatures,
@@ -495,6 +496,24 @@ export const SRD_ARTIFACTS: readonly SrdArtifact[] = [
     derive: (read) => deriveSrdWeaponsArtifact(
       read(SRD_CORPUS_PATHS.weaponsTable),
       read(SRD_CORPUS_PATHS.weaponMasteryProgression),
+    ),
+  },
+  // PC-EXPORT-TRUTH (D918): the Draconic Ancestors table and each species'
+  // standing Darkvision. It joined this table at landing batch 2; it had its
+  // own generator and header before.
+  {
+    path: 'src/rules/generated/species-srd-tables.ts',
+    sources: [SRD_CORPUS_PATHS.speciesDescriptions],
+    reader: 'src/rules/species-srd-tables-reader.ts',
+    driftTest: 'tests/unit/rules/species-srd-tables-generation.test.ts',
+    exportName: 'BUNDLED_SRD_SPECIES_TABLES',
+    type: {
+      satisfies: 'SpeciesSrdTablesArtifact',
+      names: ['SpeciesSrdTablesArtifact'],
+      module: '../species-srd-tables-reader',
+    },
+    derive: (read) => deriveSrdSpeciesTablesArtifact(
+      read(SRD_CORPUS_PATHS.speciesDescriptions),
     ),
   },
 ];

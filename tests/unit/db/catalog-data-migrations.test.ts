@@ -93,6 +93,7 @@ describe('catalog data-migration registry', () => {
         'src/catalog/reconcile-species-lineage-content-v2.ts',
         'src/rules/origin-definitions-srd.ts',
         'src/rules/generated/species-srd-tables.ts',
+        'src/rules/species-srd-tables.ts',
         'src/grants/configured-choice-rule.ts',
         'src/grants/configured-choice-rule-errors.ts',
         'src/grants/grant-rule.ts',
@@ -148,7 +149,11 @@ describe('catalog data-migration registry', () => {
       // Re-pinned 2026-09-27 with the registry for PC-EXPORT-TRUTH fix 1 (D923
       // Q10): the frozen projector reads stated species senses through the
       // newly frozen species-senses.ts — see the registry comment.
-      checksum: 'c11d45534e495b419e016cd1b1e62d9927fa5896b2fce1043591ad2b7594f890',
+      // Re-pinned 2026-09-28 with the registry at landing batch 2: the
+      // species table joined the SRD artifact table (same values, new bytes)
+      // and is read through the newly frozen species-srd-tables.ts — see the
+      // registry comment.
+      checksum: 'e25e464de5944b2cae37f99eb63b7f0b38958efee13370ff06b5e88114ce58cd',
     }]);
     expect(() =>
       validateCatalogDataMigrationRegistry(CATALOG_DATA_MIGRATIONS)

@@ -10,7 +10,7 @@ import {
   type CharacterSenseInputs,
   type LineageDarkvision,
 } from '../../../src/rules/character-senses';
-import { SRD_SPECIES_SENSES, type SrdSpeciesName } from '../../../src/rules/generated/species-srd-tables';
+import { SRD_SPECIES_SENSES, type SrdSpeciesName } from '../../../src/rules/species-srd-tables';
 import { bundledSpeciesTemplates } from '../../../src/rules/origins-srd';
 
 function inputs(overrides: Partial<CharacterSenseInputs> = {}): CharacterSenseInputs {

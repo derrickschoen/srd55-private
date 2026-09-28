@@ -14,6 +14,7 @@ import {
 import lineageMigrationSource from './reconcile-species-lineage-content-v2.ts?raw';
 import lineageSeedSource from '../rules/origin-definitions-srd.ts?raw';
 import speciesSrdTablesSource from '../rules/generated/species-srd-tables.ts?raw';
+import speciesSrdTablesViewSource from '../rules/species-srd-tables.ts?raw';
 import configuredChoiceSource from '../grants/configured-choice-rule.ts?raw';
 import configuredChoiceErrorsSource from '../grants/configured-choice-rule-errors.ts?raw';
 import grantRuleSource from '../grants/grant-rule.ts?raw';
@@ -123,6 +124,13 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
         Object.freeze({
           path: 'src/rules/generated/species-srd-tables.ts',
           bytes: speciesSrdTablesSource,
+        }),
+        // Landing batch 2: origin-definitions-srd.ts reads that table through
+        // this module (DRACONIC_ANCESTORS names the artifact's rows), so it
+        // decides the options as much as the table does.
+        Object.freeze({
+          path: 'src/rules/species-srd-tables.ts',
+          bytes: speciesSrdTablesViewSource,
         }),
         Object.freeze({
           path: 'src/grants/configured-choice-rule.ts',
@@ -275,8 +283,18 @@ export const CATALOG_DATA_MIGRATIONS: readonly CatalogDataMigration[] =
       // every row this migration reads or writes projects byte-identically;
       // the pin moves because D226 freezes source bytes. Images carrying the
       // previous pin are refused with the typed reset remedy (D923 Q11).
+      // Re-pinned 2026-09-28 at landing batch 2: the generated species table
+      // is one entry of the SRD artifact table now (a header pinning its
+      // extract's sha256, one frozen literal), origin-definitions-srd.ts
+      // imports it through the new frozen source src/rules/species-srd-tables.ts,
+      // and the table's VALUES are unchanged (evaluated literal against literal:
+      // the ten ancestors, their span and the nine species' senses are equal).
+      // Every row this migration reads or writes is unchanged; the pin moves
+      // because D226 freezes source bytes. Recomputed over the merged bytes
+      // by an independent re-implementation of catalogDataMigrationChecksum,
+      // which first reproduced the two earlier pins.
       checksum:
-        'c11d45534e495b419e016cd1b1e62d9927fa5896b2fce1043591ad2b7594f890',
+        'e25e464de5944b2cae37f99eb63b7f0b38958efee13370ff06b5e88114ce58cd',
       run: reconcileSpeciesLineageContentV2,
     }),
   ]);

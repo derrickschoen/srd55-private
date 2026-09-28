@@ -17,6 +17,7 @@ import subclassesText from '../../../src/rules/generated/srd-subclasses.ts?raw';
 import unarmoredDefenseText from '../../../src/rules/generated/unarmored-defense-srd.ts?raw';
 import weaponsText from '../../../src/rules/generated/weapons-srd.ts?raw';
 import coverageSourceText from '../../../src/simulation/generated/coverage-source.ts?raw';
+import speciesSrdTablesText from '../../../src/rules/generated/species-srd-tables.ts?raw';
 import { BUNDLED_SRD_ABILITY_SCORE_GENERATION } from '../../../src/rules/generated/ability-score-generation-srd';
 import { BUNDLED_SRD_ARMOR_TEMPLATES } from '../../../src/rules/generated/armor-srd';
 import { BUNDLED_SRD_CLASS_CHOICE_ENTITLEMENTS } from '../../../src/rules/generated/class-choice-entitlements-srd';
@@ -73,6 +74,8 @@ const COMMITTED: Readonly<Record<string, string>> = {
   'src/rules/generated/srd-subclasses.ts': subclassesText,
   'src/rules/generated/unarmored-defense-srd.ts': unarmoredDefenseText,
   'src/rules/generated/weapons-srd.ts': weaponsText,
+  // Landing batch 2: checked by its own drift test; here for the source pin.
+  'src/rules/generated/species-srd-tables.ts': speciesSrdTablesText,
 };
 
 /** The value each artifact module exports, as the runtime imports it. */
@@ -139,8 +142,10 @@ describe('every source of every SRD artifact is pinned by its whole-text sha256'
     artifact.sources.map((source) => ({ artifact, path: artifact.path, source })),
   );
 
-  it('covers every source of every artifact, 36 pairs', () => {
-    expect(pairs).toHaveLength(36);
+  it('covers every source of every artifact, 37 pairs', () => {
+    // 36 for the eighteen runtime catalogs, + 1 for the species tables (the
+    // species extract).
+    expect(pairs).toHaveLength(37);
     for (const { source } of pairs) {
       expect(SRD_CORPUS_TEXTS[source], source).toBeDefined();
     }

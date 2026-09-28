@@ -36,7 +36,7 @@
  */
 import type { CombatSense } from '../combat/statblock';
 import type { RangedSenseKind } from '../domain/enums';
-import { SRD_SPECIES_SENSES, type SrdSpeciesName } from './generated/species-srd-tables';
+import { SRD_SPECIES_SENSES, type SrdSpeciesName } from './species-srd-tables';
 
 export type SrdFullSpan = `docs/srd/full/srd-5.2.1.txt:${number}-${number}`;
 

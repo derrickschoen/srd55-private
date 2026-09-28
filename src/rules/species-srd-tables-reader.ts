@@ -10,11 +10,14 @@
  * THE BUILD-TIME READER OF `src/rules/generated/species-srd-tables.ts` (D915,
  * D918 production rule G: generated, with a byte drift test).
  *
- * It is imported by the generator (`scripts/generate-species-srd-tables.ts`)
- * and by the drift test, NEVER by application code: application code imports
- * the generated module, which holds typed literals and no SRD text. The text
- * is a required argument, so the drift test can prove the check fails on an
- * edited extract.
+ * It is one entry of the SRD artifact table (`scripts/srd-artifacts.ts`), so
+ * the one SRD generator writes it (`npm run srd:artifacts`) with the header
+ * that pins its source extract by sha256, `as const satisfies
+ * SpeciesSrdTablesArtifact`, frozen where it is defined. It is imported by
+ * that table and by the drift test, NEVER by application code: application
+ * code reads the generated module through `species-srd-tables.ts`, which holds
+ * typed literals and no SRD text. The text is a required argument, so the
+ * drift test can prove the check fails on an edited extract.
  *
  * TWO FACTS, BOTH PRINTED AS DATA RATHER THAN PROSE:
  *
@@ -37,9 +40,6 @@ import { damageTypes, isEnumValue, type KnownDamageType } from '../domain/enums'
 import { parseSrdSpeciesTemplates, type SrdSpeciesTemplate } from './origins-srd-reader';
 
 export const SPECIES_EXTRACT_PATH = 'docs/srd/source/species-descriptions.txt';
-export const SPECIES_SRD_TABLES_PATH = 'src/rules/generated/species-srd-tables.ts';
-export const SPECIES_SRD_TABLES_GENERATOR = 'npx vite-node scripts/generate-species-srd-tables.ts';
-export const SPECIES_SRD_TABLES_DRIFT_TEST = 'tests/unit/rules/species-srd-tables-generation.test.ts';
 
 export class SpeciesSrdTableError extends Error {
   override readonly name = 'SpeciesSrdTableError' as const;
@@ -55,15 +55,23 @@ export interface SrdSpeciesDarkvision {
   readonly rangeFeet: number;
 }
 
-export interface SpeciesSrdTables {
-  /** 1-based extract lines from the table caption to its last row. */
-  readonly draconicAncestorsSpan: readonly [number, number];
+/**
+ * WHAT THE BUILD RECORDS (the generated artifact's contract).
+ */
+export interface SpeciesSrdTablesArtifact {
+  /**
+   * Where Draconic Ancestors is printed: the extract, then the 1-based lines
+   * from the table caption to its last row.
+   */
+  readonly draconicAncestorsSpan: `${typeof SPECIES_EXTRACT_PATH}:${number}-${number}`;
+  /** Draconic Ancestors: the left column top to bottom, then the right. */
   readonly draconicAncestors: readonly DraconicAncestorRow[];
-  /** Every SRD species, in printed order, with its standing senses. */
-  readonly speciesSenses: readonly {
-    readonly species: string;
-    readonly senses: readonly SrdSpeciesDarkvision[];
-  }[];
+  /**
+   * Each SRD species, in printed order, with its standing senses: its printed
+   * "Darkvision" trait, whose whole text is "You have Darkvision with a range
+   * of N feet.". An empty list is the species printing no such trait.
+   */
+  readonly speciesSenses: Readonly<Record<string, readonly SrdSpeciesDarkvision[]>>;
 }
 
 const DRACONIC_ANCESTORS_CAPTION = 'Draconic Ancestors';
@@ -128,7 +136,10 @@ function draconicAncestors(templates: readonly SrdSpeciesTemplate[]): readonly D
   return table;
 }
 
-function draconicAncestorsSpan(extract: string, rows: readonly DraconicAncestorRow[]): readonly [number, number] {
+function draconicAncestorsSpan(
+  extract: string,
+  rows: readonly DraconicAncestorRow[],
+): SpeciesSrdTablesArtifact['draconicAncestorsSpan'] {
   const lines = extract.split('\n');
   const captions = lines.flatMap((line, index) =>
     line.trimStart().startsWith(`${DRACONIC_ANCESTORS_CAPTION} `) || line.trim() === DRACONIC_ANCESTORS_CAPTION
@@ -145,24 +156,25 @@ function draconicAncestorsSpan(extract: string, rows: readonly DraconicAncestorR
   if (last < 0) {
     throw new SpeciesSrdTableError(`The ${DRACONIC_ANCESTORS_CAPTION} last row is not on an extract line.`);
   }
-  return [first, last + 1];
+  return `${SPECIES_EXTRACT_PATH}:${first}-${last + 1}`;
 }
 
-function speciesSenses(templates: readonly SrdSpeciesTemplate[]): SpeciesSrdTables['speciesSenses'] {
-  return templates.map((template) => {
+function speciesSenses(templates: readonly SrdSpeciesTemplate[]): SpeciesSrdTablesArtifact['speciesSenses'] {
+  return Object.fromEntries(templates.map((template): [string, readonly SrdSpeciesDarkvision[]] => {
     const darkvision = traitNamed(template, 'Darkvision');
-    if (darkvision === null) return { species: template.name, senses: [] };
+    if (darkvision === null) return [template.name, []];
     const feet = DARKVISION_SENTENCE.exec(darkvision.description)?.groups?.['feet'];
     if (feet === undefined) {
       throw new SpeciesSrdTableError(
         `${template.name}'s Darkvision trait is not the fixed range sentence: ${JSON.stringify(darkvision.description)}.`,
       );
     }
-    return { species: template.name, senses: [{ kind: 'darkvision', rangeFeet: Number(feet) }] };
-  });
+    return [template.name, [{ kind: 'darkvision', rangeFeet: Number(feet) }]];
+  }));
 }
 
-export function readSpeciesSrdTables(extract: string): SpeciesSrdTables {
+/** The artifact, derived from the species extract's text (the SRD artifact table's `derive`). */
+export function deriveSrdSpeciesTablesArtifact(extract: string): SpeciesSrdTablesArtifact {
   const templates = parseSrdSpeciesTemplates(extract);
   const ancestors = draconicAncestors(templates);
   return {
@@ -170,51 +182,4 @@ export function readSpeciesSrdTables(extract: string): SpeciesSrdTables {
     draconicAncestors: ancestors,
     speciesSenses: speciesSenses(templates),
   };
-}
-
-function literal(value: string): string {
-  return `'${value.replaceAll('\\', '\\\\').replaceAll('\'', '\\\'')}'`;
-}
-
-/** The whole generated module, byte for byte; the drift test compares against it. */
-export function renderSpeciesSrdTablesModule(tables: SpeciesSrdTables): string {
-  const [first, last] = tables.draconicAncestorsSpan;
-  return [
-    '/**',
-    ' * This work includes material from the System Reference Document 5.2.1',
-    ' * ("SRD 5.2.1") by Wizards of the Coast LLC, available at',
-    ' * https://www.dndbeyond.com/srd. The SRD 5.2.1 is licensed under the Creative',
-    ' * Commons Attribution 4.0 International License, available at',
-    ' * https://creativecommons.org/licenses/by/4.0/legalcode.',
-    ' *',
-    ` * GENERATED from ${SPECIES_EXTRACT_PATH} by \`${SPECIES_SRD_TABLES_GENERATOR}\`.`,
-    ' * Never edit by hand: the reader is src/rules/species-srd-tables-reader.ts,',
-    ` * and ${SPECIES_SRD_TABLES_DRIFT_TEST} fails on any byte difference.`,
-    ' */',
-    "import type { KnownDamageType } from '../../domain/enums';",
-    '',
-    `/** Draconic Ancestors, ${SPECIES_EXTRACT_PATH}:${String(first)}-${String(last)}; the left column, then the right. */`,
-    'export const DRACONIC_ANCESTORS = [',
-    ...tables.draconicAncestors.map((row) =>
-      `  { dragon: ${literal(row.dragon)}, damageType: ${literal(row.damageType)} },`),
-    '] as const satisfies readonly { readonly dragon: string; readonly damageType: KnownDamageType }[];',
-    '',
-    `export const DRACONIC_ANCESTORS_SPAN = '${SPECIES_EXTRACT_PATH}:${String(first)}-${String(last)}' as const;`,
-    '',
-    'export type DraconicAncestor = (typeof DRACONIC_ANCESTORS)[number][\'dragon\'];',
-    '',
-    '/**',
-    ' * Each SRD species\' standing senses: its printed "Darkvision" trait, whose whole',
-    ' * text is "You have Darkvision with a range of N feet.". An empty list is the',
-    ' * species printing no such trait.',
-    ' */',
-    'export const SRD_SPECIES_SENSES = {',
-    ...tables.speciesSenses.map((entry) =>
-      `  ${entry.species}: [${entry.senses.map((sense) =>
-        `{ kind: ${literal(sense.kind)}, rangeFeet: ${String(sense.rangeFeet)} }`).join(', ')}],`),
-    '} as const satisfies Readonly<Record<string, readonly { readonly kind: \'darkvision\'; readonly rangeFeet: number }[]>>;',
-    '',
-    'export type SrdSpeciesName = keyof typeof SRD_SPECIES_SENSES;',
-    '',
-  ].join('\n');
 }

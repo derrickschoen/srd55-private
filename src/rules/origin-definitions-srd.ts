@@ -75,7 +75,7 @@ import {
 import type { DatabaseContext } from '../db/database';
 import { GrantRule } from '../grants/grant-rule';
 import { parseSourceGrantRules } from '../grants/configured-choice-rule';
-import { DRACONIC_ANCESTORS } from './generated/species-srd-tables';
+import { DRACONIC_ANCESTORS } from './species-srd-tables';
 import { BUNDLED_ORIGIN_RULES_EDITION } from './origins-srd';
 
 type GrantRuleSeed = Readonly<Record<string, unknown>>;
