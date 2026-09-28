@@ -169,23 +169,32 @@ export type ArchivedSource =
   | { readonly kind: 'stored_stream'; readonly revisions: readonly ArchivedText[] };
 
 /**
+ * What an archived source's revisions record (FOOTPRINT fix2, codex r2 P1), read from the archived texts
+ * themselves: archivedSourceRecording derives it, and nothing else is trusted to state it.
+ */
+export interface ArchivedSourceRecording {
+  /** Every session schema version the source's revisions were recorded under, ascending. */
+  readonly recordedSchemaVersions: readonly number[];
+  /**
+   * The engine commit the source's revisions were recorded under: the engine build each revision names inside its
+   * own checksum (engine-build.ts), when they all name one commit. It is the commit tools/session-archive-replay.ts
+   * replays every archived turn at. A history recorded by schema 12 or older names none:
+   * 'recorded_commit_unknown', recorded_before_engine_recording.
+   */
+  readonly recordedEngine: RecordedEngine;
+}
+
+/**
  * FOOTPRINT (owner D919): the history of a v12-or-older save that v13 cannot express, kept byte for byte and
  * read-only. `source` holds every input the loader accepted as it arrived, each text with its sha256. It is
  * verifiable on demand under the rules it was recorded under: verifySessionHistoryArchive re-reads it with those
  * versions' integrity rules and re-derives the migrated root, and exportSessionHistoryArchive hands the texts back
- * unchanged. No old turn is re-interpreted here.
+ * unchanged. No old turn is re-interpreted here. The recording it states is its source's: derived when the archive
+ * is made, and checked against the source whenever it is decoded (SessionHistoryArchiveMetadataError).
  */
-export interface SessionHistoryArchive {
+export interface SessionHistoryArchive extends ArchivedSourceRecording {
   readonly kind: 'vtt_session_history_archive';
   readonly source: ArchivedSource;
-  /** Every session schema version the source's revisions were recorded under, ascending. */
-  readonly recordedSchemaVersions: readonly number[];
-  /**
-   * The engine commit the source's revisions were recorded under, taken from the engine build each names when the
-   * archive is made (engine-build.ts): the commit tools/session-archive-replay.ts replays every archived turn at.
-   * A history recorded by schema 12 or older names none: 'recorded_commit_unknown', recorded_before_engine_recording.
-   */
-  readonly recordedEngine: RecordedEngine;
 }
 
 export type SessionTransition =
@@ -3637,12 +3646,20 @@ function archivedV13Bundle(
   return { ...migratedBody, fingerprint: sha256(canonicalJson(migratedBody)) };
 }
 
-/** The engine build a stored or saved revision names; a revision of schema 12 or older names none. */
+/**
+ * The engine build a stored or saved revision names, read from inside its own checksum; a revision of schema 12 or
+ * older names none.
+ */
 function recordedByOf(revision: unknown, label: string): EngineBuild {
   if (!isRecord(revision) || !Number.isSafeInteger(revision.schemaVersion)) throw new TypeError(`${label} is malformed.`);
-  return (revision.schemaVersion as number) > VTT_SESSION_LAST_V12_SCHEMA_VERSION
-    ? decodeEngineBuild(revision.recordedBy, `${label} recordedBy`)
-    : RECORDED_BEFORE_ENGINE_RECORDING;
+  if ((revision.schemaVersion as number) <= VTT_SESSION_LAST_V12_SCHEMA_VERSION) return RECORDED_BEFORE_ENGINE_RECORDING;
+  // FOOTPRINT fix2 (codex r2 P1): the build is read only from inside the revision's own checksum, so a build
+  // written over the recorded one is refused rather than believed.
+  const { checksum, ...body } = revision;
+  if (typeof checksum !== 'string' || sha256(canonicalJson(body)) !== checksum) {
+    throw new TypeError(`${label} checksum does not cover its recorded engine build.`);
+  }
+  return decodeEngineBuild(revision.recordedBy, `${label} recordedBy`);
 }
 
 /**
@@ -3660,29 +3677,37 @@ function savedSessionRecording(value: unknown): readonly { readonly schemaVersio
 }
 
 /**
- * The archive of a history exactly as the loader accepted it (owner D919): every accepted text with its sha256, the
- * schema versions its revisions were recorded under, and the engine commit they were recorded under (the engine
- * build each revision names, engine-build.ts). The v12 -> v13 migration archives with it; tools that hold a save
- * (tools/session-archive-replay.ts) do too.
+ * What an archived source's revisions record, derived from its texts alone (FOOTPRINT fix2, codex r2 P1): each
+ * revision's schema version, and the engine build each names inside its own checksum, reduced to the one commit
+ * they all name or why there is none (recordedEngineOf). This is the only source of an archive's recording: an
+ * archive's own metadata is checked against it, never used in its place. Throws when a text is not a revision whose
+ * recording it can read.
  */
-export function sessionHistoryArchiveOf(input: AcceptedInput): SessionHistoryArchive {
-  const recorded = input.kind === 'saved_session'
-    ? savedSessionRecording(JSON.parse(input.text))
-    : input.texts.map((text, index) => {
-        const revision: unknown = JSON.parse(text);
-        return {
-          schemaVersion: isRecord(revision) ? revision.schemaVersion as number : Number.NaN,
-          recordedBy: recordedByOf(revision, `Stored revision ${String(index + 1)}`),
-        };
+export function archivedSourceRecording(source: ArchivedSource): ArchivedSourceRecording {
+  const recorded = source.kind === 'saved_session'
+    ? savedSessionRecording(JSON.parse(source.save.text))
+    : source.revisions.map((archived, index) => {
+        const revision: unknown = JSON.parse(archived.text);
+        const recordedBy = recordedByOf(revision, `Stored revision ${String(index + 1)}`);
+        // recordedByOf refuses a revision without a safe-integer schemaVersion.
+        return { schemaVersion: (revision as Readonly<Record<string, unknown>>).schemaVersion as number, recordedBy };
       });
   return {
-    kind: 'vtt_session_history_archive',
-    source: input.kind === 'saved_session'
-      ? { kind: 'saved_session', save: archivedText(input.text) }
-      : { kind: 'stored_stream', revisions: input.texts.map(archivedText) },
     recordedSchemaVersions: [...new Set(recorded.map((entry) => entry.schemaVersion))].sort((left, right) => left - right),
     recordedEngine: recordedEngineOf(recorded.map((entry) => entry.recordedBy)),
   };
+}
+
+/**
+ * The archive of a history exactly as the loader accepted it (owner D919): every accepted text with its sha256, and
+ * what its revisions record (archivedSourceRecording). The v12 -> v13 migration archives with it; tools that hold a
+ * save (tools/session-archive-replay.ts) do too.
+ */
+export function sessionHistoryArchiveOf(input: AcceptedInput): SessionHistoryArchive {
+  const source: ArchivedSource = input.kind === 'saved_session'
+    ? { kind: 'saved_session', save: archivedText(input.text) }
+    : { kind: 'stored_stream', revisions: input.texts.map(archivedText) };
+  return { kind: 'vtt_session_history_archive', source, ...archivedSourceRecording(source) };
 }
 
 /**
@@ -3825,8 +3850,10 @@ function decodeArchivedSource(value: unknown): ArchivedSource {
 }
 
 /**
- * A session history archive as decoded: its shape, and every archived text against its recorded sha256
- * (tampering is refused).
+ * A session history archive as decoded: its shape; every archived text against its recorded sha256 (tampering is
+ * refused); and its stated recording against the one its archived revisions record (FOOTPRINT fix2, codex r2 P1):
+ * metadata that names another engine commit or other schema versions is refused
+ * (SessionHistoryArchiveMetadataError). The recording returned is the derived one.
  */
 function decodeSessionHistoryArchive(value: unknown): SessionHistoryArchive {
   if (
@@ -3839,18 +3866,26 @@ function decodeSessionHistoryArchive(value: unknown): SessionHistoryArchive {
   ) {
     throw new SessionHistoryArchiveError('The session history archive is malformed.');
   }
-  let recordedEngine: RecordedEngine;
+  let claimed: ArchivedSourceRecording;
   try {
-    recordedEngine = decodeRecordedEngine(value.recordedEngine, 'The session history archive recordedEngine');
+    claimed = {
+      recordedSchemaVersions: value.recordedSchemaVersions as readonly number[],
+      recordedEngine: decodeRecordedEngine(value.recordedEngine, 'The session history archive recordedEngine'),
+    };
   } catch (error) {
     throw new SessionHistoryArchiveError(error instanceof Error ? error.message : String(error));
   }
-  return {
-    kind: 'vtt_session_history_archive',
-    source: decodeArchivedSource(value.source),
-    recordedSchemaVersions: value.recordedSchemaVersions as readonly number[],
-    recordedEngine,
-  };
+  const source = decodeArchivedSource(value.source);
+  let derived: ArchivedSourceRecording;
+  try {
+    derived = archivedSourceRecording(source);
+  } catch (error) {
+    throw new SessionHistoryArchiveError(
+      `The archived revisions do not state what recorded them: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (canonicalJson(claimed) !== canonicalJson(derived)) throw new SessionHistoryArchiveMetadataError(claimed, derived);
+  return { kind: 'vtt_session_history_archive', source, ...derived };
 }
 
 /**
@@ -3876,6 +3911,19 @@ export function sessionHistoryArchiveDocument(archive: SessionHistoryArchive): s
 /** A session history archive that fails its own verification (D919: tampering is refused on demand). */
 export class SessionHistoryArchiveError extends Error {
   override readonly name = 'SessionHistoryArchiveError' as const;
+}
+
+/**
+ * An archive whose stated recording (its schema versions and engine commit) is not the one its archived revisions
+ * record (FOOTPRINT fix2, codex r2 P1): edited metadata would name a commit to replay at that the history never
+ * named, so the archive is refused, never read by its metadata.
+ */
+export class SessionHistoryArchiveMetadataError extends Error {
+  override readonly name = 'SessionHistoryArchiveMetadataError' as const;
+
+  constructor(readonly claimed: ArchivedSourceRecording, readonly derived: ArchivedSourceRecording) {
+    super(`The session history archive states ${canonicalJson(claimed)}, but its archived revisions record ${canonicalJson(derived)}.`);
+  }
 }
 
 /**

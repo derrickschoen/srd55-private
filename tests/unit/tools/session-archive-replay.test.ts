@@ -15,6 +15,7 @@ import {
   importSavedSession,
   MemoryBrowserSessionStore,
   MemoryMirrorSink,
+  SessionHistoryArchiveMetadataError,
   sessionHistoryArchiveDocument,
   sessionHistoryArchiveOf,
   type SessionHistoryArchive,
@@ -79,6 +80,15 @@ function revisionBundle(revisions: readonly unknown[]): string {
   const first = revisions[0] as { readonly sessionId: string };
   const body = { format: 'vtt-session-revisions', schemaVersion: 13, sessionId: first.sessionId, revisions };
   return canonicalJson({ ...body, fingerprint: sha256(canonicalJson(body)) });
+}
+
+function thrown(action: () => unknown): unknown {
+  try {
+    action();
+  } catch (error) {
+    return error;
+  }
+  return undefined;
 }
 
 function migratedArchive(bytes: string): SessionHistoryArchive {
@@ -177,6 +187,76 @@ describe('FOOTPRINT fix1: an archive replays offline at the commit it was record
     expect(report.kind).toBe('archive_refused');
     expect(report.kind === 'archive_refused' ? report.error : '').toContain('does not match its recorded sha256');
     expect(exitCodeOf(report)).toBe(1);
+  });
+
+  it('fix2: the recorded commit is derived from the archived revisions; metadata naming another is refused, typed', async () => {
+    // codex r2 P1. A v12 history names no engine build, so its archive records no commit. The same archive with only
+    // its metadata edited to name the base commit (every archived text and sha256 intact) was replayed at that commit
+    // as 'recorded'. The recording is derived from the archived texts, and metadata that disagrees is refused.
+    const base = engineCommit((JSON.parse(inputs.fixtures.readText(PROVENANCE)) as { readonly baseCommit: string }).baseCommit);
+    const archive = migratedArchive(inputs.fixtures.readText(OVERHANG));
+    const claimed = { recordedSchemaVersions: [12], recordedEngine: { kind: 'engine_commit', commit: base } } as const;
+    const mismatch = {
+      kind: 'archive_metadata_mismatch',
+      claimed,
+      derived: { recordedSchemaVersions: [12], recordedEngine: { kind: 'recorded_commit_unknown', reason: 'recorded_before_engine_recording' } },
+    };
+    // (a) An archive document with its recordedEngine edited.
+    const document = JSON.parse(sessionHistoryArchiveDocument(archive)) as Record<string, unknown>;
+    document.recordedEngine = claimed.recordedEngine;
+    const fromDocument = await replaySessionArchiveFile(JSON.stringify(document));
+    expect(fromDocument).toEqual(mismatch);
+    expect(exitCodeOf(fromDocument)).toBe(1);
+    // (b) The same archive handed to the tool in memory: the tool re-reads it and never selects by the field.
+    expect(await replaySessionArchive({ ...archive, recordedEngine: claimed.recordedEngine })).toEqual(mismatch);
+    // (c) A migrated save whose root's archive metadata is edited, the root checksum and the save's fingerprint
+    // recomputed: the app refuses to load it, so the tool does too.
+    const store = new MemoryBrowserSessionStore();
+    const [root] = store.revisions(importSavedSession(store, inputs.fixtures.readText(OVERHANG)));
+    const { checksum: _checksum, ...body } = structuredClone(root!) as unknown as Record<string, any>;
+    body.transition.archive.recordedEngine = claimed.recordedEngine;
+    const edited = revisionBundle([{ ...body, checksum: sha256(canonicalJson(body)) }]);
+    const refused = thrown(() => importSavedSession(new MemoryBrowserSessionStore(), edited));
+    expect(refused).toBeInstanceOf(SessionHistoryArchiveMetadataError);
+    expect(refused).toMatchObject({ claimed: mismatch.claimed, derived: mismatch.derived });
+    expect(await replaySessionArchiveFile(edited)).toEqual(mismatch);
+  });
+
+  it('fix2: every archived revision names its engine build inside its own checksum, and they must agree', async () => {
+    // The recorded save's revision 2 re-attributed to the base commit. The archive's metadata keeps naming HEAD, the
+    // one commit the save named before the edit.
+    const commit = head();
+    const base = engineCommit((JSON.parse(inputs.fixtures.readText(PROVENANCE)) as { readonly baseCommit: string }).baseCommit);
+    const revisions = recordedAt(commit);
+    const reattributed = (rehash: boolean): string => revisionBundle(revisions.map((revision) => {
+      if (revision.revision !== 2) return revision;
+      const { checksum, ...body } = structuredClone(revision);
+      const moved = { ...body, recordedBy: { kind: 'engine_commit', commit: base } };
+      return { ...moved, checksum: rehash ? sha256(canonicalJson(moved)) : checksum };
+    }));
+    const documentOf = (text: string, recordedEngine: unknown): string => canonicalJson({
+      kind: 'vtt_session_history_archive',
+      source: { kind: 'saved_session', save: { text, sha256: sha256(text) } },
+      recordedSchemaVersions: [13],
+      recordedEngine,
+    });
+    const claimed = { kind: 'engine_commit', commit };
+    // (a) The recordedBy edited outside its checksum: the edit is not what revision 2 recorded, refused.
+    const outside = await replaySessionArchiveFile(documentOf(reattributed(false), claimed));
+    expect(outside.kind).toBe('archive_refused');
+    expect(outside.kind === 'archive_refused' ? outside.error : '').toContain('Saved revision 2 checksum does not cover its recorded engine build');
+    // (b) Inside its checksum: the revisions name two commits, so there is no one recorded commit; the metadata
+    // naming HEAD disagrees and is refused.
+    const several = { kind: 'recorded_commit_unknown', reason: 'recorded_by_several_commits' } as const;
+    expect(await replaySessionArchiveFile(documentOf(reattributed(true), claimed))).toEqual({
+      kind: 'archive_metadata_mismatch',
+      claimed: { recordedSchemaVersions: [13], recordedEngine: claimed },
+      derived: { recordedSchemaVersions: [13], recordedEngine: several },
+    });
+    // (c) Metadata that says so: typed unknown, nothing replayed.
+    const unknown = await replaySessionArchiveFile(documentOf(reattributed(true), several));
+    expect(unknown).toEqual({ kind: 'recorded_commit_unknown', reason: 'recorded_by_several_commits', recordedSchemaVersions: [13] });
+    expect(exitCodeOf(unknown)).toBe(3);
   });
 
   it('the running build of a test run records no commit', () => {

@@ -26,6 +26,10 @@ import {
   SqliteBrowserSessionStore,
   replaySessionRevisions,
   SessionHistoryArchiveError,
+  SessionHistoryArchiveMetadataError,
+  decodeSessionHistoryArchiveDocument,
+  sessionHistoryArchiveDocument,
+  sessionHistoryArchiveOf,
   verifySessionHistoryArchive,
   type SessionRevision,
 } from '../../../src/vtt/session-persistence';
@@ -160,7 +164,8 @@ describe('FOOTPRINT session v13: a save v13 cannot express is repaired and archi
   });
 
   it('fix1: a v13 revision must name its engine build, and a migrated root archives a v12-or-older history only', () => {
-    const root = rootOf(imported(text('overhangRevisions')).revisions);
+    const { store, revisions } = imported(text('overhangRevisions'));
+    const root = rootOf(revisions);
     const withoutBuild = rehashed(root, (body) => { delete body.recordedBy; });
     const missing = thrown(() => importSavedSession(new MemoryBrowserSessionStore(), v13Save([withoutBuild])));
     expect(missing).toBeInstanceOf(TypeError);
@@ -168,11 +173,44 @@ describe('FOOTPRINT session v13: a save v13 cannot express is repaired and archi
     const shortCommit = rehashed(root, (body) => { body.recordedBy = { kind: 'engine_commit', commit: 'abc1234' }; });
     expect(String(thrown(() => importSavedSession(new MemoryBrowserSessionStore(), v13Save([shortCommit])))))
       .toContain('Not a full git commit name');
-    // The archive claims a v13 history: a migrated root is the migration of a v12-or-older save, so it is refused.
-    const v13History = rehashed(root, (body) => { body.transition.archive.recordedSchemaVersions = [13]; });
+    // fix2 (codex r2 P1): the archive's metadata claims a v13 history that its archived save (v12) does not record.
+    // The recording is derived from the archived revisions, so the claim is refused as metadata they contradict.
+    const unknownBefore = { kind: 'recorded_commit_unknown', reason: 'recorded_before_engine_recording' };
+    const v13Claim = rehashed(root, (body) => { body.transition.archive.recordedSchemaVersions = [13]; });
+    const contradicted = thrown(() => importSavedSession(new MemoryBrowserSessionStore(), v13Save([v13Claim])));
+    expect(contradicted).toBeInstanceOf(SessionHistoryArchiveMetadataError);
+    expect(contradicted).toMatchObject({
+      claimed: { recordedSchemaVersions: [13], recordedEngine: unknownBefore },
+      derived: { recordedSchemaVersions: [12], recordedEngine: unknownBefore },
+    });
+    // A root archiving a real v13 history (the migrated save itself, whose metadata is true to it): a migrated root is
+    // the migration of a v12-or-older save, so it is refused.
+    const v13Text = exportSavedSession(store, root.sessionId);
+    const v13History = rehashed(root, (body) => {
+      body.transition.archive = sessionHistoryArchiveOf({ kind: 'saved_session', text: v13Text });
+    });
+    expect(v13History).toMatchObject({ transition: { archive: { recordedSchemaVersions: [13] } } });
     const refused = thrown(() => importSavedSession(new MemoryBrowserSessionStore(), v13Save([v13History])));
     expect(refused).toBeInstanceOf(SessionHistoryArchiveError);
     expect(String(refused)).toContain('A migrated root archives a history of session schema 12 or older.');
+  });
+
+  it('fix2: an archive whose metadata names an engine commit its archived revisions do not is refused on load', () => {
+    // codex r2 P1. The v12 history names no engine build; its root's archive metadata edited to name a commit, with
+    // the root checksum and the save fingerprint recomputed, is refused on load, and an archive document on decode.
+    const root = rootOf(imported(text('overhangRevisions')).revisions);
+    const named = { kind: 'engine_commit', commit: 'c'.repeat(40) };
+    const edited = rehashed(root, (body) => { body.transition.archive.recordedEngine = named; });
+    const refused = thrown(() => importSavedSession(new MemoryBrowserSessionStore(), v13Save([edited])));
+    expect(refused).toBeInstanceOf(SessionHistoryArchiveMetadataError);
+    expect(refused).toMatchObject({
+      claimed: { recordedSchemaVersions: [12], recordedEngine: named },
+      derived: { recordedSchemaVersions: [12], recordedEngine: { kind: 'recorded_commit_unknown', reason: 'recorded_before_engine_recording' } },
+    });
+    const document = JSON.parse(sessionHistoryArchiveDocument(root.transition.archive)) as Record<string, unknown>;
+    expect(decodeSessionHistoryArchiveDocument(JSON.stringify(document))).toEqual(root.transition.archive);
+    document.recordedEngine = named;
+    expect(thrown(() => decodeSessionHistoryArchiveDocument(JSON.stringify(document)))).toBeInstanceOf(SessionHistoryArchiveMetadataError);
   });
 
   it('W21b: the same save as a v12 journal DAG gives the same repaired root, archiving the DAG', () => {

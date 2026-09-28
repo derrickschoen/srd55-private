@@ -11,7 +11,10 @@ import {
   importSavedSession,
   MemoryBrowserSessionStore,
   SessionHistoryArchiveError,
+  SessionHistoryArchiveMetadataError,
+  sessionHistoryArchiveDocument,
   verifySessionHistoryArchive,
+  type ArchivedSourceRecording,
   type SessionHistoryArchive,
 } from '../src/vtt/session-persistence';
 import { SESSION_ARCHIVE_REPLAY_DRIVER_PATH, type DriverReport, type DriverTurn } from './session-archive-replay-driver';
@@ -23,9 +26,13 @@ import { SESSION_ARCHIVE_REPLAY_DRIVER_PATH, type DriverReport, type DriverTurn 
  *
  * Given an archive (an archive document, or a save whose root is a migrated root), this tool:
  *   1. runs the in-app check: every archived text against its sha256 (a save: the full verifySessionHistoryArchive);
- *   2. takes the commit the archive records (`recordedEngine`). A history recorded before revisions named their
- *      engine build (session schema 12 and older) has none: the typed result is `recorded_commit_unknown`, and
- *      nothing is replayed unless the operator names a commit (`--assume-commit`), reported as operator_assumed;
+ *   2. takes the commit the archived revisions record, derived from the archived texts themselves: the engine build
+ *      each revision names inside its own checksum, when they all name one commit (FOOTPRINT fix2, codex r2 P1). An
+ *      archive handed over in memory is decoded again first, so its metadata is never what selects the commit, and
+ *      metadata that disagrees with the revisions is refused (`archive_metadata_mismatch`). A history recorded
+ *      before revisions named their engine build (session schema 12 and older) records none: the typed result is
+ *      `recorded_commit_unknown`, and nothing is replayed unless the operator names a commit (`--assume-commit`),
+ *      reported as operator_assumed;
  *   3. extracts that commit's src/ and docs/srd/ from this repository (git archive) into a throwaway directory,
  *      copies tools/session-archive-replay-driver.ts beside them, bundles it with esbuild against THAT src/, and
  *      runs it with node: the driver loads the archived texts with that commit's loader and replays every turn
@@ -46,6 +53,14 @@ export type ReplayBasis = 'recorded' | 'operator_assumed';
 
 export type ArchiveReplayReport =
   | { readonly kind: 'archive_refused'; readonly error: string }
+  | {
+      /** The archive states a recording its archived revisions do not record (edited metadata): nothing is replayed. */
+      readonly kind: 'archive_metadata_mismatch';
+      /** What the archive's metadata states. */
+      readonly claimed: ArchivedSourceRecording;
+      /** What its archived revisions record, inside their checksums. */
+      readonly derived: ArchivedSourceRecording;
+    }
   | {
       readonly kind: 'recorded_commit_unknown';
       readonly reason: UnknownRecordedCommitReason;
@@ -80,10 +95,19 @@ function described(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 }
 
+/** The report for an archive the in-app check refused: typed when its metadata disagrees with its revisions. */
+function refusalOf(error: unknown): ArchiveReplayReport {
+  return error instanceof SessionHistoryArchiveMetadataError
+    ? { kind: 'archive_metadata_mismatch', claimed: error.claimed, derived: error.derived }
+    : { kind: 'archive_refused', error: described(error) };
+}
+
 /**
- * The archive a file holds, after the in-app check: an archive document (every text against its sha256), or a
- * save whose root is a migrated root (verifySessionHistoryArchive: hashes, the recorded versions' integrity rules,
- * and the root re-derived). SessionHistoryArchiveError, or the save loader's own error, when it does not verify.
+ * The archive a file holds, after the in-app check: an archive document (every text against its sha256, and its
+ * metadata against the recording its revisions derive), or a save whose root is a migrated root
+ * (verifySessionHistoryArchive: the same, the recorded versions' integrity rules, and the root re-derived).
+ * SessionHistoryArchiveError, SessionHistoryArchiveMetadataError or the save loader's own error when it does not
+ * verify.
  */
 export function archiveOfFile(text: string): SessionHistoryArchive {
   const value: unknown = JSON.parse(text);
@@ -165,14 +189,22 @@ export async function replaySessionArchive(
   options: ReplayOptions = {},
 ): Promise<ArchiveReplayReport> {
   const repositoryRoot = options.repositoryRoot ?? REPOSITORY_ROOT;
-  const recorded = archive.recordedEngine;
+  // The archive as the in-app check decodes it, whatever object was handed over: every text against its sha256,
+  // and the recording derived from the archived revisions, checked against the metadata (codex r2 P1).
+  let checked: SessionHistoryArchive;
+  try {
+    checked = decodeSessionHistoryArchiveDocument(sessionHistoryArchiveDocument(archive));
+  } catch (error) {
+    return refusalOf(error);
+  }
+  const recorded = checked.recordedEngine;
   if (recorded.kind === 'engine_commit' && options.assumeCommit !== undefined && options.assumeCommit !== recorded.commit) {
     throw new Error(`The archive records commit ${recorded.commit}; an assumed commit is only for an archive that records none.`);
   }
   let target: { readonly commit: EngineCommit; readonly basis: ReplayBasis };
   if (recorded.kind === 'engine_commit') target = { commit: recorded.commit, basis: 'recorded' };
   else if (options.assumeCommit !== undefined) target = { commit: options.assumeCommit, basis: 'operator_assumed' };
-  else return { kind: 'recorded_commit_unknown', reason: recorded.reason, recordedSchemaVersions: archive.recordedSchemaVersions };
+  else return { kind: 'recorded_commit_unknown', reason: recorded.reason, recordedSchemaVersions: checked.recordedSchemaVersions };
   const present = spawnSync('git', ['cat-file', '-e', `${target.commit}^{commit}`], { cwd: repositoryRoot });
   if (present.error !== undefined || present.status !== 0) return { kind: 'recorded_commit_unavailable', ...target };
   const directory = mkdtempSync(join(tmpdir(), 'vtt-archive-replay-'));
@@ -186,7 +218,7 @@ export async function replaySessionArchive(
       return { kind: 'replay_not_run', ...target, stage: 'bundle', error: described(error) };
     }
     const archivePath = join(directory, 'archive.json');
-    writeFileSync(archivePath, canonicalJson({ source: archive.source }));
+    writeFileSync(archivePath, canonicalJson({ source: checked.source }));
     const run = spawnSync(process.execPath, [bundle, archivePath], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
     if (run.error !== undefined || run.status !== 0) {
       return { kind: 'replay_not_run', ...target, stage: 'driver', error: run.error?.message ?? run.stderr };
@@ -218,7 +250,7 @@ export async function replaySessionArchiveFile(text: string, options: ReplayOpti
   try {
     archive = archiveOfFile(text);
   } catch (error) {
-    return { kind: 'archive_refused', error: described(error) };
+    return refusalOf(error);
   }
   return replaySessionArchive(archive, options);
 }
@@ -227,6 +259,7 @@ export function exitCodeOf(report: ArchiveReplayReport): 0 | 1 | 3 {
   switch (report.kind) {
     case 'replayed': return report.verdict === 'pass' ? 0 : 1;
     case 'archive_refused':
+    case 'archive_metadata_mismatch':
     case 'replay_not_run': return 1;
     case 'recorded_commit_unknown':
     case 'recorded_commit_unavailable': return 3;
