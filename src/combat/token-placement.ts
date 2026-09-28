@@ -98,7 +98,9 @@ export function placedToken<M extends SerializedPlacementMode>(
   label: string,
 ): TokenFor<M> {
   const position = placedOrThrow(context, base.combatantId, anchor, mode, label);
-  return { id: base.id, combatantId: base.combatantId, placementMode: { ...mode }, position } as unknown as TokenFor<M>;
+  // Key order as a token has always been written (id, combatantId, position, placementMode): canonical JSON sorts
+  // keys, but tracked JSON.stringify fixtures (fixtures/scenes/two-room.v1.json) keep this order byte for byte.
+  return { id: base.id, combatantId: base.combatantId, position, placementMode: { ...mode } } as unknown as TokenFor<M>;
 }
 
 /** placedToken, but null when the anchor or the body leaves the grid; a mode/size mismatch still throws. */
@@ -111,7 +113,7 @@ export function placedTokenOrNull<M extends SerializedPlacementMode>(
   const checked = checkPlacement(context, base.combatantId, anchor, mode);
   return checked.kind !== 'placed'
     ? null
-    : { id: base.id, combatantId: base.combatantId, placementMode: { ...mode }, position: checked.anchor } as unknown as TokenFor<M>;
+    : { id: base.id, combatantId: base.combatantId, position: checked.anchor, placementMode: { ...mode } } as unknown as TokenFor<M>;
 }
 
 /** The same token, in the same mode, at `anchor`: a move, a teleport, a forced push, a hypothetical state. */
