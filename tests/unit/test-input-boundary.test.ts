@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { TRANSIENT_PROBES } from '../../scripts/test-affected.mjs';
 import {
   mkdirSync,
   mkdtempSync,
@@ -13,8 +14,9 @@ import {
 const repositoryRoot = process.cwd();
 const vitestExecutable = resolve(repositoryRoot, 'node_modules/vitest/vitest.mjs');
 
+/** A probe directory of its own in TRANSIENT_PROBES, where a probe the ast-grep rule and Vitest's include reach may be written. */
 function repositoryProbeDirectory(): string {
-  const parent = resolve(repositoryRoot, 'tests/test-input-boundary-probes');
+  const parent = resolve(repositoryRoot, TRANSIENT_PROBES);
   mkdirSync(parent, { recursive: true });
   return mkdtempSync(`${parent}/probe-`);
 }

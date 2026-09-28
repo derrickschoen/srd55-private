@@ -26,6 +26,8 @@ orchestration/logs/
 # `git ls-files` what is actually tracked.
 scraped/
 .tmp/
+# Probes tests write while they run (TRANSIENT_PROBES, scripts/test-affected.mjs, D938).
+/tests/transient-probes/
 tools/discord-launcher/.env
 __pycache__/
 .vtt-soak-out/

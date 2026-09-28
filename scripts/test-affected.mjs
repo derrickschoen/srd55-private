@@ -59,6 +59,22 @@ const HASHED_ENVIRONMENT = [
   'TZ',
 ];
 const MODULE_INVENTORY_ROOTS = ['db', 'drizzle', 'scripts', 'src', 'tests', 'tools'];
+/**
+ * The one directory below a module inventory root that tests write into while
+ * they run (D938). A probe that has to lie in the repository (a test file that
+ * Vitest's include or an ast-grep rule's `files` must reach, or a module the
+ * closure walker reads) is made here, in a directory of its own, and removed
+ * when its test ends. What it holds is never a repository input:
+ *   - the module inventory leaves it out, so probes another test file writes
+ *     or removes while a verdict is stored and read back change no salt (the
+ *     ENV-TRACE witness failed on exactly that in a parallel gate, D938);
+ *   - a module outside it whose import, glob or file read reaches into it
+ *     fails closed, so no stored verdict depends on what it holds;
+ *   - test:affected neither runs a test file in it nor stores its verdict.
+ * It is gitignored, so a probe a killed run leaves behind is never committed
+ * and never listed as an untracked file.
+ */
+export const TRANSIENT_PROBES = 'tests/transient-probes';
 const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.mjs', '.cjs'];
 const RESOURCE_EXTENSIONS = new Set([
   '.css',
@@ -115,9 +131,20 @@ const EXTERNAL_EFFECT_MODULES = new Set([
 
 const root = realpathSync(process.cwd());
 const runnerPath = fileURLToPath(import.meta.url);
+const transientProbes = resolve(root, TRANSIENT_PROBES);
 
 function posixPath(path) {
   return path.split(sep).join('/');
+}
+
+/** Whether `path` (absolute) is TRANSIENT_PROBES or lies below it. */
+function inTransientProbes(path) {
+  return path === transientProbes || path.startsWith(`${transientProbes}${sep}`);
+}
+
+/** The reason a module outside TRANSIENT_PROBES that reaches into it by `reference` fails closed. */
+function reachesTransientProbes(reference) {
+  return `<${reference} reaches ${TRANSIENT_PROBES}>`;
 }
 
 function repositoryPath(path) {
@@ -139,12 +166,14 @@ function hashParts(parts) {
   return hash.digest('hex');
 }
 
-function filesBelow(directory) {
+/** Every regular file below `directory`, less the directory `skipped` (absolute) and all it holds. */
+function filesBelow(directory, skipped = undefined) {
   if (!existsSync(directory)) return [];
   const files = [];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const path = resolve(directory, entry.name);
-    if (entry.isDirectory()) files.push(...filesBelow(path));
+    if (path === skipped) continue;
+    if (entry.isDirectory()) files.push(...filesBelow(path, skipped));
     else if (entry.isFile()) files.push(path);
   }
   return files;
@@ -294,16 +323,19 @@ function regularFilesBelow(directory) {
 const UNMATCHED_GLOB_SYNTAX = /[{}[\]()!+@\\]/u;
 
 /**
- * The files one `import.meta.glob` pattern can load, or undefined when the
- * walker cannot say and the call fails closed. A pattern is relative to its
- * importer and uses only `*`, `**` and `?`. Its static base must lie in a
- * MODULE_INVENTORY_ROOTS directory, so a matching file added later changes the
- * global salt. Matching is looser than Vite's (a dotfile matches), which can
- * only add inputs.
+ * The files one `import.meta.glob` pattern can load (`files`), or the reason
+ * the call fails closed when the walker cannot say (`unresolved`). A pattern is
+ * relative to its importer and uses only `*`, `**` and `?`. Its static base
+ * must lie in a MODULE_INVENTORY_ROOTS directory, so a matching file added
+ * later changes the global salt, and, for an importer outside
+ * TRANSIENT_PROBES, must neither lie in that directory nor enclose it: the
+ * inventory leaves it out. Matching is looser than Vite's (a dotfile
+ * matches), which can only add inputs.
  */
 function globTargets(importer, pattern) {
-  if (!pattern.startsWith('./') && !pattern.startsWith('../')) return undefined;
-  if (UNMATCHED_GLOB_SYNTAX.test(pattern)) return undefined;
+  const unsupported = { unresolved: `<unsupported import.meta.glob ${pattern}>` };
+  if (!pattern.startsWith('./') && !pattern.startsWith('../')) return unsupported;
+  if (UNMATCHED_GLOB_SYNTAX.test(pattern)) return unsupported;
   const segments = pattern.split('/');
   const firstWildcard = segments.findIndex((segment) => /[*?]/u.test(segment));
   const staticLength = firstWildcard < 0 ? segments.length - 1 : firstWildcard;
@@ -312,13 +344,21 @@ function globTargets(importer, pattern) {
     const inventoryRoot = resolve(root, directory);
     return base === inventoryRoot || base.startsWith(`${inventoryRoot}${sep}`);
   });
-  if (!inventoried) return undefined;
+  if (!inventoried) return unsupported;
+  if (
+    !inTransientProbes(importer) &&
+    (inTransientProbes(base) || transientProbes.startsWith(`${base}${sep}`))
+  ) {
+    return { unresolved: reachesTransientProbes(`import.meta.glob ${pattern}`) };
+  }
   const matcher = globRegex(segments.slice(staticLength).join('/'));
   const files = regularFilesBelow(base);
-  if (files === undefined) return undefined;
-  return files
-    .filter((path) => matcher.test(posixPath(relative(base, path))))
-    .sort((left, right) => repositoryPath(left).localeCompare(repositoryPath(right)));
+  if (files === undefined) return unsupported;
+  return {
+    files: files
+      .filter((path) => matcher.test(posixPath(relative(base, path))))
+      .sort((left, right) => repositoryPath(left).localeCompare(repositoryPath(right))),
+  };
 }
 
 /**
@@ -347,9 +387,9 @@ function globCallTargets(importer, reference, textOf, unresolved) {
   const targets = [];
   for (const pattern of patterns) {
     if (pattern.startsWith('!')) continue;
-    const paths = globTargets(importer, pattern);
-    if (paths === undefined) unresolved.push(`<unsupported import.meta.glob ${pattern}>`);
-    else targets.push(...paths);
+    const matched = globTargets(importer, pattern);
+    if (matched.unresolved !== undefined) unresolved.push(matched.unresolved);
+    else targets.push(...matched.files);
   }
   return targets;
 }
@@ -587,9 +627,14 @@ function readModule(path) {
     record.unresolved.push(`${repositoryPath(path)} -> <module reached through a symbolic link>`);
   }
   moduleRecords.set(path, record);
+  // TRANSIENT_PROBES is not in the module inventory, so a module outside it
+  // may not depend on what it holds (a glob into it fails in globTargets).
+  const reachesProbes = (target) => !inTransientProbes(path) && inTransientProbes(target);
   for (const specifier of references.specifiers) {
     const resolved = resolvedLocalReference(path, specifier);
-    if (resolved.kind === 'module') record.dependencies.push(resolved.path);
+    if ((resolved.kind === 'module' || resolved.kind === 'resource') && reachesProbes(resolved.path)) {
+      record.unresolved.push(`${repositoryPath(path)} -> ${reachesTransientProbes(specifier)}`);
+    } else if (resolved.kind === 'module') record.dependencies.push(resolved.path);
     else if (resolved.kind === 'resource') record.resources.push(resolved.path);
     else if (resolved.kind === 'unresolved') {
       const candidate = specifier.startsWith('.')
@@ -605,7 +650,9 @@ function readModule(path) {
     else record.resources.push(dependency);
   }
   for (const resource of references.rootRelativeResources) {
-    if (existsSync(resource) && statSync(resource).isFile()) record.resources.push(resource);
+    if (reachesProbes(resource)) {
+      record.unresolved.push(`${repositoryPath(path)} -> ${reachesTransientProbes(repositoryPath(resource))}`);
+    } else if (existsSync(resource) && statSync(resource).isFile()) record.resources.push(resource);
     else record.unresolved.push(`${repositoryPath(path)} -> ${repositoryPath(resource)}`);
   }
   record.dependencies = [...new Set(record.dependencies)];
@@ -637,30 +684,36 @@ export function buildClosure(testFile) {
 }
 
 /**
- * The module-path inventory below `directories`, which keys the global salt:
- * every entry that is not a directory, by kind, and a symbolic link with its
- * target. A file or link added anywhere below changes it, so a stored verdict
- * is not reused after a path appears that a glob or a resolution could reach.
- * A link is listed, not followed: a glob over one (regularFilesBelow) and a
- * module reached through one (readModule) fail closed.
+ * The module-path inventory of the checkout at `repository` (this one unless a
+ * test passes a stand-in), which keys the global salt: every entry below its
+ * MODULE_INVENTORY_ROOTS that is not a directory, by kind and path, and a
+ * symbolic link with its target. A file or link added anywhere below them, a
+ * test file a developer adds included, changes it, so a stored verdict is not
+ * reused after a path appears that a glob or a resolution could reach. A link
+ * is listed, not followed: a glob over one (regularFilesBelow) and a module
+ * reached through one (readModule) fail closed. TRANSIENT_PROBES is left out,
+ * entry and all, so a test's probes change no salt.
  */
-export function moduleInventory(directories) {
+export function moduleInventory(repository = root) {
+  const skipped = resolve(repository, TRANSIENT_PROBES);
   const entries = [];
   const visit = (directory) => {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       const path = resolve(directory, entry.name);
+      if (path === skipped) continue;
       if (entry.isDirectory()) visit(path);
-      else entries.push(inventoryEntry(entry, path));
+      else entries.push(inventoryEntry(entry, path, repository));
     }
   };
-  for (const directory of directories) {
-    if (existsSync(directory)) visit(directory);
+  for (const directory of MODULE_INVENTORY_ROOTS) {
+    const path = resolve(repository, directory);
+    if (existsSync(path)) visit(path);
   }
   return hashParts(entries.map((entry) => JSON.stringify(entry)).sort());
 }
 
-function inventoryEntry(entry, path) {
-  const name = repositoryPath(path);
+function inventoryEntry(entry, path, repository) {
+  const name = posixPath(relative(repository, path));
   if (entry.isSymbolicLink()) return ['link', name, readlinkSync(path)];
   return [entry.isFile() ? 'file' : 'special', name];
 }
@@ -682,11 +735,12 @@ export function walkerSources(walker = runnerPath) {
   return [repositoryPath(walker), ...buildClosure(walker).closure];
 }
 
-/** The salt that keys every verdict; `walker`: as for walkerSources. */
-export function globalSalt(walker = runnerPath) {
-  const inventory = moduleInventory(
-    MODULE_INVENTORY_ROOTS.map((directory) => resolve(root, directory)),
-  );
+/**
+ * The salt that keys every verdict; `walker`: as for walkerSources;
+ * `repository`: the checkout whose module inventory it hashes (moduleInventory).
+ */
+export function globalSalt(walker = runnerPath, repository = root) {
+  const inventory = moduleInventory(repository);
   return hashParts([
     `cache-version=${CACHE_VERSION}`,
     `node=${process.version}`,
@@ -927,9 +981,15 @@ export function failClosedReasons(graph, record) {
   ];
 }
 
-function testFiles() {
+/**
+ * The test files test:affected runs, sorted: every .test.ts below tests/, and
+ * every .live-test.ts when AI_BRIDGE_LIVE=1, less TRANSIENT_PROBES, whose
+ * probes belong to the test that wrote them and may be gone by the time
+ * Vitest would load them.
+ */
+export function testFiles() {
   const includeLive = process.env.AI_BRIDGE_LIVE === '1';
-  return filesBelow(resolve(root, 'tests'))
+  return filesBelow(resolve(root, 'tests'), transientProbes)
     .filter((path) =>
       path.endsWith('.test.ts') || (includeLive && path.endsWith('.live-test.ts')))
     .sort((left, right) => repositoryPath(left).localeCompare(repositoryPath(right)));

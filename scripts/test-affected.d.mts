@@ -1,6 +1,14 @@
 /** The verdict cache `npm run test:affected` keeps; tests pass their own `cacheRoot`. */
 export const CACHE_ROOT: string;
 
+/**
+ * The one directory below a module inventory root that tests write probes into
+ * while they run, each in a directory of its own. The module inventory leaves
+ * it out, a module outside it that reaches into it fails closed, and
+ * test:affected neither runs nor caches a test file in it.
+ */
+export const TRANSIENT_PROBES: 'tests/transient-probes';
+
 /** A test file's static module closure (repository paths) and the references that make it fail closed. */
 export interface ClosureGraph {
   readonly closure: readonly string[];
@@ -33,13 +41,20 @@ export interface VerdictEntry {
 export function buildClosure(testFile: string): ClosureGraph;
 /**
  * The salt that keys every verdict. It hashes the bytes of `walker` (the
- * runner by default; a test passes a stand-in) and of every module it loads.
+ * runner by default; a test passes a stand-in) and of every module it loads,
+ * and the module inventory of `repository` (this checkout by default).
  */
-export function globalSalt(walker?: string): string;
+export function globalSalt(walker?: string, repository?: string): string;
 /** The repository paths of `walker` (the runner by default) and of every module it loads. */
 export function walkerSources(walker?: string): readonly string[];
-/** The hash of every non-directory entry below `directories` (a link with its target) that keys the global salt. */
-export function moduleInventory(directories: readonly string[]): string;
+/**
+ * The hash of every non-directory entry (a link with its target) below the
+ * module inventory roots of `repository` (this checkout by default), less
+ * TRANSIENT_PROBES, that keys the global salt.
+ */
+export function moduleInventory(repository?: string): string;
+/** The absolute paths of the test files test:affected runs, sorted; none lies in TRANSIENT_PROBES. */
+export function testFiles(): readonly string[];
 export function observationRecord(record: unknown): ObservationRecord | undefined;
 export function failClosedReasons(
   graph: ClosureGraph | undefined, record: ObservationRecord | undefined,

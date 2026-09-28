@@ -1,5 +1,5 @@
 import { tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   buildClosure,
@@ -7,6 +7,7 @@ import {
   globalSalt,
   moduleInventory,
   storeVerdict,
+  TRANSIENT_PROBES,
   walkerSources,
   type ObservationRecord,
 } from '../../scripts/test-affected.mjs';
@@ -30,7 +31,10 @@ import {
  * green's closure is not rebuilt, so a path added later (a file or a symbolic
  * link) must change the module inventory, which keys every verdict, and so
  * must a change to the walker's own sources (the runner and the shared
- * classifier it reads module references through) change the salt. A Node
+ * classifier it reads module references through) change the salt. Every
+ * fixture lies in TRANSIENT_PROBES, which the checkout's inventory leaves out
+ * (D938), so a witness of the inventory reads a fixture repository laid out
+ * among them, and a module outside that directory may not reach into it. A Node
  * built-in is the same module bare or node:, and one that runs code where the
  * recorder records nothing (a child process, a worker thread) fails closed.
  *
@@ -184,19 +188,22 @@ const FIXTURES: Readonly<Record<string, readonly string[]>> = {
   'witness-inline/contracts.ts': ["export type Contract = { readonly name: string };", 'export const CONTRACT_VERSION = 1;'],
   'witness-dynamic/entry.ts': ["export const load = () => import('./data.json', { with: { type: 'json' } });"],
   'witness-dynamic/data.json': ['{ "version": 1 }'],
-  // The link witness adds witness-link/handlers/extra.ts -> ../extra.ts once its green is stored.
-  'witness-link/entry.ts': ["export const modules = import.meta.glob('./handlers/*.ts', { eager: true });"],
-  'witness-link/handlers/move.ts': ["export const move = 'move';"],
-  'witness-link/extra.ts': ["export const extra = 'extra';"],
+  // A fixture repository, whose module inventory keys the salt in the link and
+  // inventory witnesses. The link witness adds
+  // repository/src/witness-link/handlers/extra.ts -> ../extra.ts once its green is stored.
+  'repository/src/witness-link/entry.ts': ["export const modules = import.meta.glob('./handlers/*.ts', { eager: true });"],
+  'repository/src/witness-link/handlers/move.ts': ["export const move = 'move';"],
+  'repository/src/witness-link/extra.ts': ["export const extra = 'extra';"],
   // The salt witness: a walker that imports its classifier, as the runner
   // (scripts/test-affected.mjs) imports scripts/runtime-import-edges.mjs, and
   // a test file whose green it stores. It changes the classifier's bytes.
   'salt-walker/walker.mjs': ["import { classify } from './classifier.mjs';", 'export const walk = classify;'],
   'salt-walker/classifier.mjs': ["export const classify = () => 'static';"],
   'witness-salt/entry.ts': ["export const entry = 'entry';"],
-  // The inventory tests add and retarget inventory/alias.ts.
-  'inventory/one.ts': ["export const one = 'one';"],
-  'inventory/two.ts': ["export const two = 'two';"],
+  // The inventory tests add and retarget repository/src/inventory/alias.ts.
+  'repository/src/inventory/one.ts': ["export const one = 'one';"],
+  'repository/src/inventory/two.ts': ["export const two = 'two';"],
+  'repository/tests/unit/present.test.ts': ["import { it } from 'vitest';"],
 };
 
 /**
@@ -243,7 +250,7 @@ const NOTHING_OBSERVED: ObservationRecord = {
 };
 
 beforeAll(() => {
-  const parent = join(repositoryRoot, 'tests/test-input-boundary-probes');
+  const parent = join(repositoryRoot, TRANSIENT_PROBES);
   mkdirSync(parent, { recursive: true });
   probeDirectory = mkdtempSync(`${parent}/closure-walker-`);
   linkDirectory = mkdtempSync(`${parent}/closure-walker-links-`);
@@ -578,26 +585,27 @@ describe('a stored green is not reused once a module the test loads changes', ()
     expect(cachedVerdict(probePath('witness-dynamic/entry.ts'), SALT, cacheRoot)?.testCount).toBe(1);
   });
 
-  // Keyed on the real global salt: the stored closure is not rebuilt, so only
-  // the module inventory can see a path added after the green was stored.
-  // Paths other test files add or remove meanwhile can only make the two salts
-  // differ more; they cannot fail this test.
+  // Keyed on the global salt of the fixture repository: the stored closure is
+  // not rebuilt, so only the module inventory can see a path added after the
+  // green was stored.
   it('link: a symbolic link added under a glob base after the green was stored', () => {
-    const entry = probePath('witness-link/entry.ts');
+    const repository = probePath('repository');
+    const entry = probePath('repository/src/witness-link/entry.ts');
     const graph = buildClosure(entry);
-    expect(graph).toEqual({ closure: names('witness-link/handlers/move.ts'), unresolved: [] });
-    const salt = globalSalt();
+    expect(graph).toEqual({ closure: names('repository/src/witness-link/handlers/move.ts'), unresolved: [] });
+    const salt = globalSalt(undefined, repository);
     expect(storeVerdict({ testFile: entry, graph, record: NOTHING_OBSERVED, testCount: 1, salt, cacheRoot }))
       .toBeTypeOf('string');
     expect(cachedVerdict(entry, salt, cacheRoot)?.testCount).toBe(1);
 
-    const link = probePath('witness-link/handlers/extra.ts');
+    const link = probePath('repository/src/witness-link/handlers/extra.ts');
     symlinkSync('../extra.ts', link);
     try {
-      expect(cachedVerdict(entry, globalSalt(), cacheRoot)).toBeUndefined();
+      expect(cachedVerdict(entry, globalSalt(undefined, repository), cacheRoot)).toBeUndefined();
     } finally {
       rmSync(link);
     }
+    expect(cachedVerdict(entry, globalSalt(undefined, repository), cacheRoot)?.testCount).toBe(1);
   });
 });
 
@@ -609,9 +617,8 @@ describe('a stored green is not reused once a module the test loads changes', ()
  * input it used to miss leaves every green recorded without that input reused.
  */
 describe('the global salt keys the bytes of the walker and of every module it loads', () => {
-  // Keyed on the real global salt, with a fixture walker in place of the
-  // runner. As in the link witness, paths other test files add or remove
-  // meanwhile can only make the two salts differ more.
+  // Keyed on this checkout's global salt, with a fixture walker in place of
+  // the runner.
   it('a stored green is not reused once the classifier the walker imports changes', () => {
     const walker = probePath('salt-walker/walker.mjs');
     const entry = probePath('witness-salt/entry.ts');
@@ -633,18 +640,31 @@ describe('the global salt keys the bytes of the walker and of every module it lo
 });
 
 describe('the module inventory that keys the global salt', () => {
-  const inventory = (): string => moduleInventory([probePath('inventory')]);
-  const alias = (): string => probePath('inventory/alias.ts');
+  const repository = (): string => probePath('repository');
+  const inventory = (): string => moduleInventory(repository());
+  const alias = (): string => probePath('repository/src/inventory/alias.ts');
 
-  it('changes when a file is added', () => {
+  /** Asserts the inventory changes (or not) while `path` below the fixture repository holds a file, and is back once it is gone. */
+  function withFile(path: string, changes: boolean): void {
+    const file = probePath(`repository/${path}`);
+    mkdirSync(dirname(file), { recursive: true });
     const before = inventory();
-    writeFileSync(probePath('inventory/three.ts'), "export const three = 'three';\n", 'utf8');
+    writeFileSync(file, "export const added = 'added';\n", 'utf8');
     try {
-      expect(inventory()).not.toBe(before);
+      if (changes) expect(inventory()).not.toBe(before);
+      else expect(inventory()).toBe(before);
     } finally {
-      rmSync(probePath('inventory/three.ts'));
+      rmSync(file);
     }
     expect(inventory()).toBe(before);
+  }
+
+  it.each(['db', 'drizzle', 'scripts', 'src', 'tests', 'tools'])('changes when a file is added below %s', (directory) => {
+    withFile(`${directory}/added.ts`, true);
+  });
+
+  it('changes when a developer adds a test file below tests/', () => {
+    withFile('tests/unit/added.test.ts', true);
   });
 
   it('changes when a symbolic link is added', () => {
@@ -668,5 +688,78 @@ describe('the module inventory that keys the global salt', () => {
     } finally {
       rmSync(alias(), { force: true });
     }
+  });
+
+  // D938: what another test file writes there while a green is stored and read back.
+  it(`does not change when probes are written in ${TRANSIENT_PROBES} and removed`, () => {
+    const probes = probePath(`repository/${TRANSIENT_PROBES}`);
+    const before = inventory();
+    mkdirSync(join(probes, 'writer/nested'), { recursive: true });
+    writeFileSync(join(probes, 'writer/nested/probe.test.ts'), "import { it } from 'vitest';\n", 'utf8');
+    symlinkSync('nested/probe.test.ts', join(probes, 'writer/alias.test.ts'));
+    try {
+      expect(inventory()).toBe(before);
+    } finally {
+      rmSync(probes, { recursive: true, force: true });
+    }
+    expect(inventory()).toBe(before);
+  });
+
+  it(`changes when a file is added beside ${TRANSIENT_PROBES}, in a directory whose name only begins like it`, () => {
+    try {
+      withFile(`${TRANSIENT_PROBES}-kept/kept.ts`, true);
+    } finally {
+      rmSync(probePath(`repository/${TRANSIENT_PROBES}-kept`), { recursive: true, force: true });
+    }
+  });
+
+  it('is, by default, the inventory of this checkout, and keys its salt', () => {
+    expect(moduleInventory()).toBe(moduleInventory(repositoryRoot));
+    expect(globalSalt()).toBe(globalSalt(undefined, repositoryRoot));
+    expect(globalSalt(undefined, repository())).not.toBe(globalSalt());
+  });
+});
+
+/*
+ * The checkout's module inventory leaves TRANSIENT_PROBES out (D938), so a
+ * module outside it may not depend on what it holds: an import, a glob or a
+ * file read that reaches into it fails closed. These importers lie in the
+ * repository's .tmp, outside every inventory root; every fixture above lies in
+ * TRANSIENT_PROBES and reads its neighbours there freely.
+ */
+describe(`a module outside ${TRANSIENT_PROBES} that reaches into it fails closed`, () => {
+  const outsidePath = (name: string): string => join(outsideDirectory, name);
+  const fromOutside = (path: string): string => relative(outsideDirectory, path).split('\\').join('/');
+  const reachOf = (name: string, lines: readonly string[]): { closure: readonly string[]; unresolved: readonly string[] } => {
+    writeFileSync(outsidePath(name), `${lines.join('\n')}\n`, 'utf8');
+    return buildClosure(outsidePath(name));
+  };
+  const reaching = (name: string, reference: string): string[] =>
+    [`${repositoryPath(outsidePath(name))} -> <${reference} reaches ${TRANSIENT_PROBES}>`];
+
+  it('an import that resolves into it', () => {
+    const specifier = fromOutside(probePath('targets/one'));
+    expect(reachOf('reach-import.ts', [`import '${specifier}';`]))
+      .toEqual({ closure: [], unresolved: reaching('reach-import.ts', specifier) });
+  });
+
+  it('a glob whose base lies in it', () => {
+    const pattern = `${fromOutside(probePath('targets'))}/*.ts`;
+    expect(reachOf('reach-glob.ts', [`export const modules = import.meta.glob('${pattern}');`]))
+      .toEqual({ closure: [], unresolved: reaching('reach-glob.ts', `import.meta.glob ${pattern}`) });
+  });
+
+  it('a glob whose base encloses it', () => {
+    const pattern = `${fromOutside(join(repositoryRoot, 'tests'))}/*/closure-walker-*/targets/*.ts`;
+    expect(reachOf('reach-enclosing-glob.ts', [`export const modules = import.meta.glob('${pattern}');`]))
+      .toEqual({ closure: [], unresolved: reaching('reach-enclosing-glob.ts', `import.meta.glob ${pattern}`) });
+  });
+
+  it('a file read of a repository path in it', () => {
+    const path = repositoryName('data.json');
+    expect(reachOf('reach-read.ts', [
+      "import { readFileSync } from 'node:fs';",
+      `export const data = () => readFileSync('${path}', 'utf8');`,
+    ])).toEqual({ closure: [], unresolved: reaching('reach-read.ts', path) });
   });
 });

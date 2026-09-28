@@ -9,16 +9,20 @@ import {
   globalSalt,
   observationRecord,
   storeVerdict,
+  testFiles,
+  TRANSIENT_PROBES,
   type ObservationRecord,
 } from '../../scripts/test-affected.mjs';
 import { ENGINE_CHILD_BUNDLE_ENV, engineChildSealedReads } from '../../tools/engine-child-bundle';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from '../helpers/test-filesystem';
 
@@ -32,6 +36,10 @@ import {
  *     the verdict by value, so a green recorded with DND_LANE_INTEL_MODE unset
  *     is not reused under DND_LANE_INTEL_MODE=off (the false green the
  *     recorder research reproduced, P6).
+ * The probes are written in a directory of their own in TRANSIENT_PROBES,
+ * which the module inventory leaves out: the witnesses below store a green
+ * and read it back under a salt computed again, and another test file's
+ * probes, written or removed meanwhile, must not change it (D938).
  */
 
 const repositoryRoot = realpathSync(process.cwd());
@@ -100,7 +108,7 @@ function recordOf(probe: Probe): ObservationRecord {
 }
 
 beforeAll(() => {
-  const parent = join(repositoryRoot, 'tests/test-input-boundary-probes');
+  const parent = join(repositoryRoot, TRANSIENT_PROBES);
   mkdirSync(parent, { recursive: true });
   probeDirectory = mkdtempSync(`${parent}/verdict-inputs-`);
   observationsDirectory = mkdtempSync(join(tmpdir(), 'dnd-verdict-recorder-observations-'));
@@ -199,6 +207,34 @@ describe('ENV-TRACE: environment reads key the verdict', () => {
     expect(cachedVerdict(probe, globalSalt(), cacheRoot)).toBeUndefined();
   });
 
+  /*
+   * D938: the first ENV-TRACE witness failed in a parallel gate with
+   * `expected undefined to be 1` where it reads its green back, because a
+   * probe another test file wrote meanwhile changed the module inventory and
+   * so the salt. Here that writer runs between the store and the read, every
+   * time.
+   */
+  it('reuses a green when another test file writes and removes its probes between the store and the read', () => {
+    const probe = probePath('environment');
+    const record = recordOf('environment');
+    const cacheRoot = mkdtempSync(join(tmpdir(), 'dnd-verdict-cache-witness-'));
+    cacheRoots.push(cacheRoot);
+    vi.stubEnv(LANE_INTEL, undefined);
+
+    expect(storeVerdict({ testFile: probe, graph: buildClosure(probe), record, testCount: 1, salt: globalSalt(), cacheRoot }))
+      .toBeTypeOf('string');
+    const concurrent = mkdtempSync(join(repositoryRoot, TRANSIENT_PROBES, 'concurrent-writer-'));
+    try {
+      mkdirSync(join(concurrent, 'nested'));
+      writeFileSync(join(concurrent, 'nested/probe.test.ts'), "import { it } from 'vitest';\n", 'utf8');
+      symlinkSync('nested/probe.test.ts', join(concurrent, 'alias.test.ts'));
+      expect(cachedVerdict(probe, globalSalt(), cacheRoot)?.testCount).toBe(1);
+    } finally {
+      rmSync(concurrent, { recursive: true, force: true });
+    }
+    expect(cachedVerdict(probe, globalSalt(), cacheRoot)?.testCount).toBe(1);
+  });
+
   it('records the variables a test reads, by name', () => {
     const record = recordOf('environment');
 
@@ -211,5 +247,15 @@ describe('ENV-TRACE: environment reads key the verdict', () => {
 
     expect(record.environmentEnumerated).toBe(true);
     expect(failClosedReasons(buildClosure(probePath('enumeration')), record)).toEqual(['<process.env enumerated>']);
+  });
+});
+
+describe('test:affected leaves the transient probes out', () => {
+  it('runs no test file in TRANSIENT_PROBES, where this file\'s own probes lie while it runs', () => {
+    const files = testFiles();
+
+    expect(existsSync(probePath('environment'))).toBe(true);
+    expect(files).toContain(join(repositoryRoot, 'tests/unit/verdict-recorder-inputs.test.ts'));
+    expect(files.filter((file) => file.startsWith(`${join(repositoryRoot, TRANSIENT_PROBES)}/`))).toEqual([]);
   });
 });
