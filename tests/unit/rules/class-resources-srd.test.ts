@@ -343,6 +343,10 @@ describe('class-resource formulas as a discriminated union', () => {
     })).toThrow('step levels must be strictly increasing');
     expect(() => classResourceFormula({
       kind: 'fixed_count_by_class_level',
+      steps: [{ minimum_class_level: 9, count: 1 }, { minimum_class_level: 9, count: 2 }],
+    })).toThrow('step levels must be strictly increasing');
+    expect(() => classResourceFormula({
+      kind: 'fixed_count_by_class_level',
       steps: [{ minimum_class_level: 9, count: 1 }, { minimum_class_level: 13, count: 1 }],
     })).toThrow('each step must change the count');
     expect(() => classResourceFormula({

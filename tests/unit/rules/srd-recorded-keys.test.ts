@@ -77,9 +77,10 @@ describe('each bundled kind mints only the keys its artifact records', () => {
 });
 
 describe('the bundled registry manifest', () => {
-  const manifest = bundledContentManifestV1();
   const keysOf = (kind: string): readonly string[] =>
-    manifest.filter((entry) => entry.kind === kind).map((entry) => entry.contentKey);
+    bundledContentManifestV1()
+      .filter((entry) => entry.kind === kind)
+      .map((entry) => entry.contentKey);
 
   it('holds the nine SRD species and the four SRD backgrounds, definitions and templates as one key each', () => {
     expect(keysOf('species')).toEqual([
