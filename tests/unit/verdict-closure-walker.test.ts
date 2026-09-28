@@ -762,4 +762,13 @@ describe(`a module outside ${TRANSIENT_PROBES} that reaches into it fails closed
       `export const data = () => readFileSync('${path}', 'utf8');`,
     ])).toEqual({ closure: [], unresolved: reaching('reach-read.ts', path) });
   });
+
+  // No such file exists, so the read fails closed as any missing input does, and not as a reach.
+  it('not a file read beside it, in a directory whose name only begins like it', () => {
+    const path = `${TRANSIENT_PROBES}-kept/absent.json`;
+    expect(reachOf('read-beside.ts', [
+      "import { readFileSync } from 'node:fs';",
+      `export const data = () => readFileSync('${path}', 'utf8');`,
+    ])).toEqual({ closure: [], unresolved: [`${repositoryPath(outsidePath('read-beside.ts'))} -> ${path}`] });
+  });
 });
