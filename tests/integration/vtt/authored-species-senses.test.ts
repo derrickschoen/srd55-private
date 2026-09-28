@@ -16,11 +16,20 @@ import {
   createGuidedCharacter,
   listGuidedClassOptions,
 } from '../../../src/builder/guided-creation';
+import { exportWholeLibrary, importLibraryDocument } from '../../../src/backup/library-export';
+import type { SpeciesProjectorAggregateV2 } from '../../../src/catalog/authored-content-projector-contract-v2';
 import { assertedExternalContentKey } from '../../../src/catalog/catalog-key';
 import { commitContentImport, planContentImport } from '../../../src/catalog/content-adoption';
 import { portableSourceContentImportNode } from '../../../src/catalog/source-content-importer';
-import { projectAuthoredContentAggregateV1 } from '../../../src/catalog/stored-authored-content-projector-v1';
-import { canonicalContentIdentityJson } from '../../../src/catalog/content-identity';
+import {
+  projectAuthoredContentAggregateV1,
+  projectSpeciesContentAggregateV2,
+} from '../../../src/catalog/stored-authored-content-projector-v1';
+import {
+  canonicalContentIdentityJson,
+  CONTENT_FINGERPRINT_SCHEME_V2,
+  deriveContentIdentityV2,
+} from '../../../src/catalog/content-identity';
 import { AllocateAbilitiesCommand } from '../../../src/commands/allocate-abilities';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { DatabaseContext } from '../../../src/db/database';
@@ -28,6 +37,7 @@ import type { ContentKey } from '../../../src/domain/ids';
 import { StoredCharacterPartyPackExporter } from '../../../src/vtt/stored-character-party-member';
 import { expectOkOutcome } from '../../helpers/outcome';
 import { openSeededTestDatabase } from '../../helpers/open-db';
+import { portableElfLibraryDocument } from '../../helpers/species-lineage-portability';
 
 /**
  * PC-EXPORT-TRUTH fix 1, owner D923 Q10: "Add typed senses to authoring. The
@@ -212,6 +222,56 @@ describe('an authored species states its senses (owner D923 Q10)', () => {
       senses: [{ kind: 'normal_sight' }, { kind: 'blindsight', rangeFeet: 10 }],
       senseFeatures: [],
     });
+  });
+
+  it('stated_senses_travel_v2: a lineage species (fingerprint scheme v2) keeps its stated senses through a character backup', async () => {
+    // Fix 2 (codex r2 P2): the scheme-v2 half of the travel path —
+    // insertSpeciesV2 writes the statement, readSpeciesV2 reads it back — had
+    // no witness; a species with lineage source rules travels through it. The
+    // fixture is the portable configured-choice Elf, stating one sense.
+    const source = await database();
+    const library = portableElfLibraryDocument(source);
+    const [entry] = library.content;
+    if (entry === undefined) throw new Error('The portable Elf library is empty.');
+    const aggregate = {
+      ...structuredClone(entry.aggregate as SpeciesProjectorAggregateV2),
+      senses: [{ kind: 'darkvision', range_feet: 120 }],
+    } as SpeciesProjectorAggregateV2;
+    const identity = deriveContentIdentityV2({
+      kind: 'species',
+      edition: aggregate.rules_edition,
+      name: aggregate.name,
+      payload: projectSpeciesContentAggregateV2(aggregate).payload,
+    });
+    const stated = attempt(() => importLibraryDocument(source, {
+      ...library,
+      content: [{ ...entry, aggregate, fingerprint_digest: identity.digest }],
+    }));
+    expect('threw' in stated ? stated.threw : 'imported').toBe('imported');
+    const carriedBy = (content: readonly { readonly kind: string; readonly fingerprint_scheme: string; readonly aggregate: object }[]) =>
+      content
+        .filter((item) => item.kind === 'species' && Reflect.get(item.aggregate, 'name') === aggregate.name)
+        .map((item) => [item.fingerprint_scheme, Reflect.get(item.aggregate, 'senses')]);
+
+    const characterId = fighterOf(source, 'Travelling Elf', entry.content_key as ContentKey);
+    const exported = attempt(() => exportCharacterBackup(source, characterId, '2042-06-08T00:00:00.000Z'));
+    if (!('ok' in exported)) throw new Error(`The backup did not export: ${exported.threw}`);
+    expect(carriedBy(exported.ok.content)).toEqual([
+      [CONTENT_FINGERPRINT_SCHEME_V2, [{ kind: 'darkvision', range_feet: 120 }]],
+    ]);
+
+    const target = await database();
+    const imported = attempt(() => {
+      const plan = planCharacterBackupImport(target, exported.ok);
+      return commitCharacterBackupImport(target, exported.ok, plan.token, {});
+    });
+    expect(imported).toMatchObject({ ok: { kind: 'committed' } });
+    // What the other library now stores, read back through its own export.
+    const reexported = attempt(() => exportWholeLibrary(target, '2042-06-09T00:00:00.000Z'));
+    if (!('ok' in reexported)) throw new Error(`The library did not export: ${reexported.threw}`);
+    expect(carriedBy(reexported.ok.content)).toEqual([
+      [CONTENT_FINGERPRINT_SCHEME_V2, [{ kind: 'darkvision', range_feet: 120 }]],
+    ]);
   });
 
   it('stated_senses_are_identity: normal sight only, a stated sense and unstated content are three identities', async () => {
