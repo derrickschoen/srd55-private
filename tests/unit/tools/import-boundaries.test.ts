@@ -293,6 +293,17 @@ describe('the import-boundary guard', () => {
     // An absolute specifier is unproven wherever it points: Vite reads
     // '/docs/srd/...' from the root (2 findings: that one and '/assets/other.js').
     expect(result.stdout).toContain('R2 red   2 finding(s): absolute specifiers on a production path');
+    // Landing batch 1 review r1 P3: R2's graph has no edge for a file read, so
+    // R2 reads each module on a production path for a node:fs read whose path
+    // argument holds a docs/srd/ literal. 4 findings: by name in src/, as
+    // fs.promises.readFile in a path.join in db/, renamed in a template in
+    // vite.config.ts, and in a tool src/main.ts loads. A citation, a read of
+    // another file, a computed path (outside R2), and a tool and a test that
+    // no production module loads give none.
+    expect(result.stdout).toContain(
+      'R2 red   4 finding(s): node:fs reads of the SRD text by a literal path on a production path (review r1 P3)',
+    );
+    expect(result.stdout).toContain('R2 green 0 finding(s): node:fs reads R2 leaves alone');
     // A worker started by asset URL runs in production: src/main.ts starting
     // a listed SRD-reading tool that way reaches the SRD text (1 finding).
     expect(result.stdout).toContain(

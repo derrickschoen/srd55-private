@@ -33,6 +33,17 @@
  *                         might name the SRD text (a computed or an absolute
  *                         one) fails unless its file is allowlisted with a
  *                         reason.
+ *                         SCOPE: all of the above is about GRAPH EDGES, the
+ *                         module references that load or ship a file. A
+ *                         file read is no edge: a production
+ *                         `readFileSync('docs/srd/...')` is not in the graph,
+ *                         so none of it sees one. R2 adds one cheap check
+ *                         (landing batch 1 review r1 P3): on a production
+ *                         path, a node:fs read whose path argument holds a
+ *                         string literal naming docs/srd/ fails. A read whose
+ *                         path is computed any other way (a variable, a
+ *                         parameter, a directory listing, a file of paths) is
+ *                         OUTSIDE R2, and R2 proves nothing about it.
  *   R3 forbidden          no path, however indirect, from an entry to a
  *      reachability       forbidden module (or any file under a directory). A
  *                         `pending` entry is one that does not hold yet; it
@@ -54,6 +65,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import ts from 'typescript';
 import {
   buildModuleGraph,
   closure,
@@ -61,6 +73,7 @@ import {
   EVALUATION,
   isCodeFile,
   nodeFile,
+  parseModule,
   pathTo,
 } from './runtime-import-edges.mjs';
 
@@ -131,6 +144,85 @@ function productionPaths(graph, srd) {
     }
   }
   return parents;
+}
+
+/** R2's file-read check: node:fs's functions that read a file or a directory by path. */
+const FS_READ_FUNCTIONS = Object.freeze([
+  'createReadStream',
+  'open',
+  'openSync',
+  'opendir',
+  'opendirSync',
+  'readFile',
+  'readFileSync',
+  'readdir',
+  'readdirSync',
+]);
+
+/** A string literal naming node:fs in any form (`fs`, `node:fs`, `fs/promises`), as any way of loading it writes it. */
+const NAMES_NODE_FS = /['"`](?:node:)?fs(?:\/promises)?['"`]/u;
+
+/** Whether a path literal names the SRD text: `docs/srd/...`, `../docs/srd/...`, `${root}/docs/srd`. */
+function namesSrdText(literal, srd) {
+  const directory = srd.text.replace(/\/$/u, '');
+  return literal === directory || literal.startsWith(srd.text) ||
+    literal.includes(`/${srd.text}`) || literal.endsWith(`/${directory}`);
+}
+
+/** The literal text in an expression: its string literals and the fixed parts of its templates. */
+function literalTexts(expression) {
+  const texts = [];
+  const visit = (node) => {
+    if (ts.isStringLiteralLike(node) || ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node)) {
+      texts.push(node.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(expression);
+  return texts;
+}
+
+/**
+ * R2's file-read check, on one module's `text`: each call to a node:fs
+ * reading function (FS_READ_FUNCTIONS) whose path argument holds a string
+ * literal naming the SRD text, `{ line, call, literal }`. A call is one by the
+ * function's name (`readFileSync(...)`), as a method (`fs.readFileSync`,
+ * `fs.promises.readFile`), or by a name an import of node:fs gives it
+ * (`import { readFileSync as read }`), in a module that names node:fs. The
+ * literal may be the whole argument or a part of it (`path.join(root,
+ * 'docs/srd/x.txt')`, a template). Any other read is outside R2 (its header).
+ */
+function srdFileReads(file, text, srd) {
+  if (!text.includes(srd.text.replace(/\/$/u, '')) || !NAMES_NODE_FS.test(text)) return [];
+  const sourceFile = parseModule(file, text);
+  const readers = new Map(FS_READ_FUNCTIONS.map((name) => [name, name]));
+  for (const statement of sourceFile.statements) {
+    const bindings = ts.isImportDeclaration(statement) ? statement.importClause?.namedBindings : undefined;
+    if (bindings === undefined || !ts.isNamedImports(bindings) || !NAMES_NODE_FS.test(statement.moduleSpecifier.getText(sourceFile))) {
+      continue;
+    }
+    for (const element of bindings.elements) {
+      const imported = (element.propertyName ?? element.name).text;
+      if (FS_READ_FUNCTIONS.includes(imported)) readers.set(element.name.text, imported);
+    }
+  }
+  const reads = [];
+  const visit = (node) => {
+    if (ts.isCallExpression(node) && node.arguments.length > 0) {
+      const callee = node.expression;
+      const call = ts.isIdentifier(callee)
+        ? readers.get(callee.text)
+        : ts.isPropertyAccessExpression(callee) && FS_READ_FUNCTIONS.includes(callee.name.text) ? callee.name.text : undefined;
+      const literal = call === undefined ? undefined : literalTexts(node.arguments[0]).find((part) => namesSrdText(part, srd));
+      if (literal !== undefined) {
+        const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
+        reads.push({ line, call, literal });
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return reads;
 }
 
 /**
@@ -278,9 +370,17 @@ function ruleR1(graph) {
  * `srd`: `{ text, testPrefix, toolingPrefixes, importers, unproven }`: the SRD
  * text's directory, the tests' directory, the tooling directories, the SRD
  * text allowlist (SRD_TEXT_IMPORTERS) and the unresolved-reference allowlist
- * (SRD_UNPROVEN_REFERENCES).
+ * (SRD_UNPROVEN_REFERENCES). `host`: `{ readFile }`, as for buildModuleGraph.
+ *
+ * SCOPE (landing batch 1 review r1 P3): R2 judges the graph's edges, the
+ * module references that load or ship a file, and one kind of file read: a
+ * node:fs read on a production path whose path argument holds a string
+ * literal naming docs/srd/ (srdFileReads). A production read whose path is
+ * computed any other way, such as `readFileSync(path)` with `path` from a
+ * parameter, a listing or a file of paths, is outside R2: R2 does not prove
+ * that it reads no SRD text.
  */
-function ruleR2(graph, srd) {
+function ruleR2(graph, srd, host) {
   const diagnostics = [];
   const isTest = (file) => moduleKind(file, srd) === 'test';
   const isTooling = (file) => moduleKind(file, srd) === 'tooling';
@@ -421,28 +521,44 @@ function ruleR2(graph, srd) {
       acceptedReferences += references.length;
     }
   }
+  const wayIn = (file) => onProductionPath.get(file) === null
+    ? ''
+    : ` (reached from production by ${pathTo(onProductionPath, file).join(' -> ')})`;
   for (const [file, references] of unproven) {
     // Accepted, or its entry is wrong and has failed above.
     if (accepted.has(file)) continue;
-    const way = onProductionPath.get(file) === null
-      ? ''
-      : ` (reached from production by ${pathTo(onProductionPath, file).join(' -> ')})`;
     for (const reference of references) {
       diagnostics.push(`R2 ${file}:${String(reference.line)}: cannot resolve ${reference.evaluation} reference ` +
-        `'${reference.specifier}' on a production path${way}, so R2 cannot prove it reads no SRD text; name the ` +
+        `'${reference.specifier}' on a production path${wayIn(file)}, so R2 cannot prove it reads no SRD text; name the ` +
         'file literally, or list this file in SRD_UNPROVEN_REFERENCES with a reason');
+    }
+  }
+
+  // File reads, which are no graph edge (the header's SCOPE; review r1 P3):
+  // every module on a production path, tests and tools included, is read for
+  // a node:fs read whose path argument holds a literal naming the SRD text.
+  const pathModules = [...onProductionPath.keys()].filter((id) => graph.edges.has(id));
+  let namingNodeFs = 0;
+  for (const file of pathModules) {
+    const text = host.readFile(file);
+    if (NAMES_NODE_FS.test(text)) namingNodeFs += 1;
+    for (const read of srdFileReads(file, text, srd)) {
+      diagnostics.push(`R2 ${file}:${String(read.line)}: reads the SRD text ('${read.literal}') with node:fs ` +
+        `${read.call} on a production path${wayIn(file)}; production code never reads it: derive the data at build ` +
+        `time into generated typed data (${SRD_BUILDTIME}, D915)`);
     }
   }
 
   const productionImporters = [...referenced.keys()].filter((importer) => moduleKind(importer, srd) === 'production');
   const toolEntries = srd.importers.filter((entry) => moduleKind(entry.importer, srd) === 'tooling');
-  const pathModules = [...onProductionPath.keys()].filter((id) => graph.edges.has(id));
   const reachedOthers = pathModules.filter((file) => moduleKind(file, srd) !== 'production');
   const notes = [
     `R2 ${String(productionImporters.length)} production importer(s) of the SRD text; ` +
       `${String(toolEntries.length)} tool(s) listed`,
     `R2 ${String(pathModules.length)} module(s) on production paths, ${String(reachedOthers.length)} of them tests or ` +
       `tools that production loads or ships; ${String(acceptedReferences)} unresolved reference(s) there accepted unproven`,
+    `R2 ${String(namingNodeFs)} module(s) on production paths name node:fs; R2 checks a read there only when its ` +
+      'path argument holds a literal (a computed path is outside R2)',
   ];
   return { diagnostics, notes };
 }
@@ -593,7 +709,7 @@ function runRules(graph, policy) {
   const results = {
     R0: ruleR0(graph),
     R1: ruleR1(graph),
-    R2: ruleR2(graph, policy.srd),
+    R2: ruleR2(graph, policy.srd, policy),
     R3: ruleR3(graph, policy.forbidden, policy),
     R4: ruleR4(graph, policy.cycles),
     R5: ruleR5(graph, policy.budgets, policy.sizeOf),
@@ -692,6 +808,7 @@ function checkCheckout(host, rules, update) {
     sizeOf: host.sizeOf,
     isFile: host.isFile,
     filesBelow: host.filesBelow,
+    readFile: host.readFile,
   });
   const changes = [];
   if (update) {
@@ -753,6 +870,7 @@ function fixtureResults(files, policy = {}) {
     sizeOf: host.sizeOf,
     isFile: host.isFile,
     filesBelow: host.filesBelow,
+    readFile: host.readFile,
     ...policy,
     // The real SRD policy, with the fixture's allowlists.
     srd: { ...SRD_POLICY, importers: policy.srdImporters ?? [], unproven: policy.srdUnproven ?? [] },
@@ -1092,6 +1210,55 @@ const SELF_TESTS = [
     files: {
       'src/abs.ts': "export const srd = () => import('/docs/srd/full/srd.txt?raw');\n" +
         "export const other = () => import('/assets/other.js');\n",
+      'docs/srd/full/srd.txt': 'SRD',
+    },
+  },
+  {
+    // Landing batch 1 review r1 P3: a file read is no graph edge, so R2 reads
+    // the modules on production paths for a node:fs read of a literal SRD path.
+    rule: 'R2',
+    name: 'node:fs reads of the SRD text by a literal path on a production path (review r1 P3): by name, as a method ' +
+      'in a path.join, renamed in a template, and in a tool that src/main.ts loads',
+    expect: 4,
+    mentions: [
+      "R2 src/rules/read-srd.ts:2: reads the SRD text ('docs/srd/source/feats.txt') with node:fs readFileSync on a " +
+        'production path; production code never reads it',
+      "R2 db/seed-srd.ts:3: reads the SRD text ('docs/srd/full/srd.txt') with node:fs readFile on a production path;",
+      "R2 vite.config.ts:2: reads the SRD text ('/docs/srd/source') with node:fs readdirSync on a production path;",
+      "R2 tools/srd-reader.ts:2: reads the SRD text ('../docs/srd/source/feats.txt') with node:fs readFileSync on a " +
+        'production path (reached from production by src/main.ts:1 -> tools/srd-reader.ts);',
+    ],
+    noteMentions: ['R2 4 module(s) on production paths name node:fs'],
+    files: {
+      'src/rules/read-srd.ts': "import { readFileSync } from 'node:fs';\n" +
+        "export const feats = readFileSync('docs/srd/source/feats.txt', 'utf8');\n",
+      'db/seed-srd.ts': "import fs from 'fs';\nimport path from 'node:path';\n" +
+        "export const srd = (root: string) => fs.promises.readFile(path.join(root, 'docs/srd/full/srd.txt'), 'utf8');\n",
+      'vite.config.ts': "import { readdirSync as list } from 'node:fs';\n" +
+        'export default (root: string) => list(`${root}/docs/srd/source`);\n',
+      'tools/srd-reader.ts': "import { readFileSync } from 'node:fs';\n" +
+        "export const read = () => readFileSync('../docs/srd/source/feats.txt', 'utf8');\n",
+      'src/main.ts': "import { read } from '../tools/srd-reader';\nexport const feats = read();\n",
+      'docs/srd/source/feats.txt': 'feats',
+      'docs/srd/full/srd.txt': 'SRD',
+    },
+  },
+  {
+    rule: 'R2',
+    name: 'node:fs reads R2 leaves alone: a production citation of an SRD path, a read of another file, a read by a ' +
+      'computed path (outside R2), and a tool and a test that read the SRD text where no production module loads them',
+    expect: 0,
+    noteMentions: ['R2 1 module(s) on production paths name node:fs'],
+    files: {
+      'src/rules/cite.ts': "import { readFileSync } from 'node:fs';\n" +
+        "export const SOURCE = 'docs/srd/source/feats.txt';\n" +
+        "export const other = () => readFileSync('data/other.txt', 'utf8');\n" +
+        "export const computed = (name: string) => readFileSync(name, 'utf8');\n",
+      'scripts/srd/generate.ts': "import { readFileSync } from 'node:fs';\n" +
+        "export const text = () => readFileSync('docs/srd/full/srd.txt', 'utf8');\n",
+      'tests/unit/drift.test.ts': "import { readFileSync } from 'node:fs';\n" +
+        "export const feats = readFileSync('docs/srd/source/feats.txt', 'utf8');\n",
+      'docs/srd/source/feats.txt': 'feats',
       'docs/srd/full/srd.txt': 'SRD',
     },
   },
