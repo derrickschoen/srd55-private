@@ -1,4 +1,6 @@
 import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
@@ -25,7 +27,9 @@ import {
   exitCodeOf,
   replaySessionArchive,
   replaySessionArchiveFile,
+  sessionArchiveReplayArguments,
 } from '../../../tools/session-archive-replay';
+import { mkdtempSync, rmSync, writeFileSync } from '../../helpers/test-filesystem';
 import { declareTestInputs } from '../../helpers/test-inputs';
 
 // FOOTPRINT fix1 (codex r1 P2; owner D919 "verifiable with the rules it was recorded under, on demand"; D929). The
@@ -257,6 +261,46 @@ describe('FOOTPRINT fix1: an archive replays offline at the commit it was record
     const unknown = await replaySessionArchiveFile(documentOf(reattributed(true), several));
     expect(unknown).toEqual({ kind: 'recorded_commit_unknown', reason: 'recorded_by_several_commits', recordedSchemaVersions: [13] });
     expect(exitCodeOf(unknown)).toBe(3);
+  });
+
+  it('fix2: the documented command runs under vite-node: the typed report on stdout, and its exit code', () => {
+    // fix1's direct-run check compared this module's URL with argv[1], which under vite-node is vite-node's own path,
+    // so the documented command printed nothing and exited 0. Spawned here as documented, outside the test runner's
+    // environment, on the v12 archive document with its metadata edited to name the base commit.
+    const base = engineCommit((JSON.parse(inputs.fixtures.readText(PROVENANCE)) as { readonly baseCommit: string }).baseCommit);
+    const document = JSON.parse(sessionHistoryArchiveDocument(migratedArchive(inputs.fixtures.readText(OVERHANG)))) as Record<string, unknown>;
+    document.recordedEngine = { kind: 'engine_commit', commit: base };
+    const directory = mkdtempSync(join(tmpdir(), 'archive-replay-command-'));
+    try {
+      const path = join(directory, 'edited-archive.json');
+      writeFileSync(path, JSON.stringify(document));
+      const environment = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('VITEST')));
+      const run = spawnSync(process.execPath, ['node_modules/vite-node/vite-node.mjs', 'tools/session-archive-replay.ts', '--', '--archive', path], {
+        encoding: 'utf8', env: environment,
+      });
+      expect(run.status, run.stderr).toBe(1);
+      expect(run.stdout).not.toBe('');
+      expect(JSON.parse(run.stdout)).toEqual({
+        kind: 'archive_metadata_mismatch',
+        claimed: { recordedSchemaVersions: [12], recordedEngine: { kind: 'engine_commit', commit: base } },
+        derived: { recordedSchemaVersions: [12], recordedEngine: { kind: 'recorded_commit_unknown', reason: 'recorded_before_engine_recording' } },
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('fix2: the command takes --archive once and --assume-commit at most once', () => {
+    const base = engineCommit((JSON.parse(inputs.fixtures.readText(PROVENANCE)) as { readonly baseCommit: string }).baseCommit);
+    expect(sessionArchiveReplayArguments(['--archive', 'a.json'])).toEqual({ path: 'a.json', options: {} });
+    expect(sessionArchiveReplayArguments(['--assume-commit', base, '--archive', 'a.json'])).toEqual({ path: 'a.json', options: { assumeCommit: base } });
+    const refused: readonly (readonly string[])[] = [
+      [], ['a.json'], ['--archive'], ['--archive', 'a.json', '--archive', 'b.json'], ['--assume-commit', base],
+      ['--archive', 'a.json', '--assume-commit', base, '--assume-commit', base], ['--archive', 'a.json', '--other', 'x'],
+    ];
+    for (const args of refused) {
+      expect(() => sessionArchiveReplayArguments(args), args.join(' ')).toThrow('Usage: vite-node tools/session-archive-replay.ts -- --archive');
+    }
   });
 
   it('the running build of a test run records no commit', () => {

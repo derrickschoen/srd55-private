@@ -41,7 +41,7 @@ import { SESSION_ARCHIVE_REPLAY_DRIVER_PATH, type DriverReport, type DriverTurn 
  * It never writes to the repository, its index or its worktrees. Packages resolve from this checkout's
  * node_modules, so a commit whose dependencies differ runs against today's: a stated limit.
  *
- * CLI: vite-node tools/session-archive-replay.ts -- <archive-or-save.json> [--assume-commit <sha>]
+ * CLI: vite-node tools/session-archive-replay.ts -- --archive <archive-or-save.json> [--assume-commit <sha>]
  * Prints the report as canonical JSON. Exit 0: every turn replayed. 1: a turn failed, the archive was refused or
  * the replay could not run. 3: no commit to replay at (unknown, or not in this repository).
  */
@@ -266,16 +266,37 @@ export function exitCodeOf(report: ArchiveReplayReport): 0 | 1 | 3 {
   }
 }
 
-export async function runSessionArchiveReplayCommand(args: readonly string[]): Promise<ArchiveReplayReport> {
-  const [path, flag, commit, ...rest] = args;
-  if (path === undefined || rest.length > 0 || (flag !== undefined && (flag !== '--assume-commit' || commit === undefined))) {
-    throw new Error('Usage: vite-node tools/session-archive-replay.ts -- <archive-or-save.json> [--assume-commit <sha>]');
+const COMMAND_USAGE = 'Usage: vite-node tools/session-archive-replay.ts -- --archive <archive-or-save.json> [--assume-commit <sha>]';
+
+/** The command's arguments: `--archive <path>`, and `--assume-commit <sha>` at most once each; Error otherwise. */
+export function sessionArchiveReplayArguments(args: readonly string[]): { readonly path: string; readonly options: ReplayOptions } {
+  const values = new Map<string, string>();
+  for (let index = 0; index < args.length; index += 2) {
+    const flag = args[index];
+    const value = args[index + 1];
+    if ((flag !== '--archive' && flag !== '--assume-commit') || value === undefined || values.has(flag)) throw new Error(COMMAND_USAGE);
+    values.set(flag, value);
   }
-  return replaySessionArchiveFile(readFileSync(path, 'utf8'), commit === undefined ? {} : { assumeCommit: engineCommit(commit) });
+  const path = values.get('--archive');
+  if (path === undefined) throw new Error(COMMAND_USAGE);
+  const commit = values.get('--assume-commit');
+  return { path, options: commit === undefined ? {} : { assumeCommit: engineCommit(commit) } };
 }
 
+export async function runSessionArchiveReplayCommand(args: readonly string[]): Promise<ArchiveReplayReport> {
+  const { path, options } = sessionArchiveReplayArguments(args);
+  return replaySessionArchiveFile(readFileSync(path, 'utf8'), options);
+}
+
+// Run as a command (FOOTPRINT fix2): by node on this file, or by vite-node, which keeps its own path as argv[1]
+// and passes only the arguments after `--`, so there the command is recognized by its --archive flag (as
+// ai-dm-arena.ts is by its flags). fix1 compared argv[1] with this module alone, so under vite-node the documented
+// command printed nothing and exited 0.
 const invokedPath = process.argv[1];
-if (invokedPath !== undefined && import.meta.url === pathToFileURL(invokedPath).href) {
+if (process.env['VITEST'] !== 'true' && invokedPath !== undefined && (
+  import.meta.url === pathToFileURL(invokedPath).href ||
+  (/[\\/]vite-node(?:\.mjs)?$/u.test(invokedPath) && process.argv.includes('--archive'))
+)) {
   runSessionArchiveReplayCommand(process.argv.slice(2))
     .then((report) => {
       process.stdout.write(`${canonicalJson(report)}\n`);
