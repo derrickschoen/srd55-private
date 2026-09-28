@@ -50,8 +50,10 @@ const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
  * (an annotated one is still caught by 3, wherever it lives, because the scan
  * covers every tracked file), nor one built by a factory (`makeCodec()`), nor
  * an old-style `<T>row` cast. Those need type information this guard does not
- * have. Each of these was measured, not assumed. It is a net with a known
- * mesh size, not
+ * have. Nor does it read a parameter type annotation longer than
+ * {@link MAX_ANNOTATION_CHARS} characters: that bound is what keeps the scan
+ * linear, and a test below pins exactly where it falls. Each of these was
+ * measured, not assumed. It is a net with a known mesh size, not
  * a proof — the proof of REQUIREDNESS is the type test; this is the proof that
  * the required argument is not trivially satisfied in the ways people actually
  * reach for.
@@ -77,6 +79,42 @@ function trackedTypeScriptFiles(): string[] {
 const ENDS = String.raw`(?=\s*[,);]|\s*$)`;
 
 /**
+ * The longest parameter type annotation the patterns read, in characters: the
+ * text between the parameter's `:` and the `)` that closes its list.
+ *
+ * WHY THERE IS A BOUND. Unbounded (`[^)]*`), a pattern that meets a name
+ * followed by `:` reads forward to the next `)`, and it does that again at the
+ * next such name. On text with thousands of names-with-colons and hardly a
+ * parenthesis, that is quadratic. Generated data is exactly that text:
+ * `src/rules/srd/generated/rule-index.ts` is one 406 KB initialiser with about
+ * 11,000 `…txt:NNN` spans and 3 parentheses, and when it joined the tree this
+ * scan went from 2.4 s to 20.8 s, 18.6 s of it on that one initialiser
+ * (D937). Bounded, every name-with-colon costs at most this many characters,
+ * so the scan is linear in the text.
+ *
+ * WHY THIS NUMBER. Measured on the tree, not assumed: the longest typed
+ * parameter list without a nested parenthesis in any tracked `.ts` file is 410
+ * characters (an inline object type in `src/vtt/mcp/engine-server.ts`); the
+ * 99th percentile is 138. A codec's parameter is `row` or `row: SqlRow`. An
+ * annotation longer than this is a blind spot the "reads a parameter
+ * annotation of up to 1,024 characters…" test pins, not a silent one.
+ */
+const MAX_ANNOTATION_CHARS = 1024;
+const ANNOTATION = String.raw`[^)]{0,${MAX_ANNOTATION_CHARS}}`;
+
+/**
+ * The parameter is a WHOLE name: not preceded by a name character.
+ *
+ * The cast and spread patterns may start without a `(`, so without this they
+ * start again at every tail of every name (`txt`, `xt`, `t`), which multiplies
+ * the cost by the name's length, and they match `(subRow) => Row as T`, which
+ * hands back an outer `Row`, not its parameter. A name that IS the parameter
+ * always starts a name, so no passthrough is lost. The bare-arrow pattern has
+ * carried this lookbehind (with `)` added) since the guard was written.
+ */
+const WHOLE_NAME = String.raw`(?<![\w$])`;
+
+/**
  * An arrow that hands back what it was given.
  *
  * Written longhand over the spellings that actually occur rather than as one
@@ -93,7 +131,10 @@ const PASSTHROUGH_ARROWS: readonly RegExp[] = [
   ),
   // (row: SqlRow) => row
   new RegExp(
-    String.raw`\(\s*([A-Za-z_$][\w$]*)\s*:[^)]*\)\s*=>\s*\1\s*` + ENDS,
+    String.raw`\(\s*([A-Za-z_$][\w$]*)\s*:` +
+      ANNOTATION +
+      String.raw`\)\s*=>\s*\1\s*` +
+      ENDS,
     'u',
   ),
   // (row) => row as unknown as Whatever   /  (row) => row as Whatever
@@ -101,14 +142,22 @@ const PASSTHROUGH_ARROWS: readonly RegExp[] = [
   // into a named type, which is the exact defect class `DEEP_REF_DATA_LAYER.md`
   // §3 says the codec requirement exists to remove.
   new RegExp(
-    String.raw`\(?\s*([A-Za-z_$][\w$]*)\s*(?::[^)]*)?\)?\s*=>\s*\1\s+as\s`,
+    String.raw`\(?\s*` +
+      WHOLE_NAME +
+      String.raw`([A-Za-z_$][\w$]*)\s*(?::` +
+      ANNOTATION +
+      String.raw`)?\)?\s*=>\s*\1\s+as\s`,
     'u',
   ),
   // (row) => ({ ...row })  /  (row) => ({ ...row, extra: 1 })
   // Any object literal that spreads the parameter: the added keys are a decoy,
   // every original column still arrives exactly as SQLite returned it.
   new RegExp(
-    String.raw`\(?\s*([A-Za-z_$][\w$]*)\s*(?::[^)]*)?\)?\s*=>\s*\(?\s*\{\s*\.\.\.\1\b`,
+    String.raw`\(?\s*` +
+      WHOLE_NAME +
+      String.raw`([A-Za-z_$][\w$]*)\s*(?::` +
+      ANNOTATION +
+      String.raw`)?\)?\s*=>\s*\(?\s*\{\s*\.\.\.\1\b`,
     'u',
   ),
 ];
@@ -334,5 +383,76 @@ describe('the codec slot never holds a passthrough', () => {
     for (const source of genuine) {
       expect(scan('probe.ts', source), source).toEqual([]);
     }
+  });
+
+  it('reads a parameter annotation of up to 1,024 characters, and not one character further', () => {
+    // The bound's own test: where the mesh falls, pinned on all three spellings
+    // that take an annotated parameter. A short annotation and one of exactly
+    // 1,024 characters are caught; 1,025 is the stated blind spot. The lengths
+    // are written out rather than read from MAX_ANNOTATION_CHARS, so moving
+    // the bound is a diff to this test too: a lower bound fails the second
+    // case, a higher or removed one the third.
+    const annotationOf = (length: number): string =>
+      ' Readonly<Record<string, unknown>>'.padEnd(length, ' ');
+    expect(annotationOf(1024)).toHaveLength(1024);
+    expect(annotationOf(1025)).toHaveLength(1025);
+    const spellings = [
+      (annotation: string) => `db.all(sql, bind, (row:${annotation}) => row);`,
+      (annotation: string) =>
+        `db.one(sql, bind, (row:${annotation}) => row as CharacterRow);`,
+      (annotation: string) =>
+        `db.all(sql, bind, (row:${annotation}) => ({ ...row, extra: 1 }));`,
+    ];
+    for (const spelling of spellings) {
+      const short = spelling(' SqlRow');
+      const atTheBound = spelling(annotationOf(1024));
+      const overTheBound = spelling(annotationOf(1025));
+      expect(scan('probe.ts', short), short).toHaveLength(1);
+      expect(scan('probe.ts', atTheBound), 'at the bound').toHaveLength(1);
+      expect(scan('probe.ts', overTheBound), 'one over the bound').toEqual([]);
+    }
+  });
+
+  it('takes the parameter as a whole name, never the tail of a longer one', () => {
+    // `Row` is the tail of `subRow`, but these arrows hand back an outer `Row`,
+    // not their parameter. See WHOLE_NAME.
+    const tails = [
+      'db.all(sql, bind, (subRow) => Row as CharacterRow);',
+      'db.all(sql, bind, (subRow: SqlRow) => ({ ...Row }));',
+    ];
+    for (const source of tails) {
+      expect(scan('probe.ts', source), source).toEqual([]);
+    }
+  });
+
+  it('reads a generated-artifact-sized initialiser to its end', () => {
+    // The shape that made the unbounded patterns quadratic (D937): one
+    // initialiser of hundreds of KB with thousands of names-with-colons and no
+    // `)`, like `src/rules/srd/generated/rule-index.ts`. Kept here so the shape
+    // stays under test whatever the tree's artifacts become. The passthrough
+    // planted at its very end must still be found, so the cost was not cut by
+    // truncating the initialiser or skipping large text. It is a spread on
+    // purpose: only the last pattern matches it, so the cast and spread
+    // patterns (the two that were quadratic) both read the whole initialiser
+    // first. Cost itself is not asserted (a timing assertion is
+    // load-dependent); a return of the quadratic shows up as this test's
+    // timeout. The size is set for that: 4,000 entries took 4.0 s solo with
+    // the bound removed, under the timeout; 8,000 is about four times that.
+    const entries = Array.from(
+      { length: 8000 },
+      (_, index) =>
+        `  "rule.${index}": { "kind": "rule_section", "spans": ["docs/srd/full/srd-5.2.1.txt:${index}-${index}@left"] },`,
+    );
+    const source = [
+      'export const INDEX = {',
+      ...entries,
+      '  codec: (row) => ({ ...row }),',
+      '} as const;',
+      'db.all(sql, undefined, INDEX.codec);',
+    ].join('\n');
+    expect(source.length).toBeGreaterThan(600_000);
+    const offences = scan('probe.ts', source);
+    expect(offences).toHaveLength(1);
+    expect(offences[0]).toMatchObject({ file: 'probe.ts', line: 1 });
   });
 });
