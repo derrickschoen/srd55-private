@@ -3527,3 +3527,32 @@ LANDING BATCH 1, codex review of the 3 adaptation commits (gpt-6-sol xhigh): REV
 - The reviewer independently confirmed zero production SRD module references and the budget arithmetic (main 356 → 392 and worker 451 → 497 files at +10%; both byte budgets fell).
 
 Next free id: D936.
+
+## D936 — 2026-09-28 04:17 — LANDING BATCH 1 LANDED (RECORDER-A + VERDICT-SOUND, IMPORT-GUARD, SRD-BUILDTIME, PATH-ONE); a finding against my pair procedure (label collision)
+
+LANDING BATCH 1 fix1 (agent-reported, claude/landing-batch1 90ae8385):
+- The verdict-cache global salt hashes the walker's own closure (the shared classifier included). The witness went red first; 9/9 mutants killed.
+- R2 states its scope (graph edges) and fails a node:fs read of a literal docs/srd path on a production path (the review P3, covered cheaply).
+
+TIMED PAIR (run by me; void rule v2; A = main 597c62ce, B = + batch 1 638384f9):
+- Prewarm total: A 219.9 s, B 199.3 s. Timed total: A 199.3 s, B 200.3 s (+1.0 s), inside the +30 s guard. No saving is claimed; batch 1 is correctness work.
+- All four runs VALID and passed. Inventory A 658 files / 11,704 tests; B 676 / 12,002.
+- Both arms passed tsc and check-command-outcomes first.
+
+FINDING AGAINST MY OWN PROCEDURE (full length):
+- I reused the pair label "batch1", which a 2026-09-24 TEST-PERF-01 pair had used. run-gate-arm.sh writes reports into exp/reports/<label>, so each folder held the old reports next to the new ones.
+- gate-summ.py summarised the mix: the B timed line in gate-results.txt reads "files=644 tests=11475 last=…@595s", partly from the old run. The wall times and exit codes are the new runs', and they were correct.
+- I caught it because B's prewarm (676/12,002) and B's timed run disagreed. I recomputed every summary from the new reports only (the figures above); the old reports moved to exp/reports-archive/<label>-2026-09-24/.
+- Rule from here: every pair label is unique, with the date and short sha in the label, and run-pair checks that the report folder is empty before starting.
+
+LANDED: main = 37b0075b, 52 commits cherry-picked onto 597c62ce. The main tree is byte-identical to the timed B arm (git diff empty). Mirror verified.
+- Consequences now on main:
+  - production code imports 0 SRD text files; all 18 are generated `as const satisfies` artifacts with drift tests;
+  - the import boundary guard R0–R5 is in check-command-outcomes;
+  - the verdict cache is sound for globs, inline-type imports, import() with options, symlinks, bare builtins, env reads and classifier changes;
+  - path() does one search per miss.
+- Engine-child bundle 5.10 → 2.18 MB (budget file).
+
+NEXT: landing batch 2 = FOOTPRINT (29911b5d), PC-EXPORT-TRUTH (d58092ea) and RULE-INDEX (3e3c782b), integrated on 37b0075b.
+
+Next free id: D937.
