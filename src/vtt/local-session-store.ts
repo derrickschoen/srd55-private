@@ -138,6 +138,17 @@ function checksumAt(revisions: readonly SessionRevision[], count: number): strin
   return head.checksum;
 }
 
+/**
+ * How many revisions a legacy save records as saved, before any migration: its history length. Every save format
+ * (the v1 bundle, the revision bundle, the journal DAG) lists them under `revisions`. A history that migrates by
+ * archive is one revision after migration, so only the saved list says how long it is.
+ */
+function legacyHistoryLength(bytes: string): number {
+  const value: unknown = JSON.parse(bytes);
+  if (!isRecord(value) || !Array.isArray(value.revisions)) throw new TypeError('Stored browser autosave save lists no revisions.');
+  return value.revisions.length;
+}
+
 /** Whether `prefix` is the first revisions of `stream`, revision for revision (every checksum equal). */
 function isPrefixOf(prefix: readonly SessionRevision[], stream: readonly SessionRevision[]): boolean {
   return prefix.length > 0 && prefix.length <= stream.length &&
@@ -995,7 +1006,8 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
     // version bump, or to two archive roots), and writing it to the session's revision keys replaced the session's
     // head. An autosave whose migrated stream is a prefix of its session's is a live point into it; any other keeps
     // its own save text as an own_save point. Only a session with no stream takes an autosave's revisions: the
-    // longest autosave first, so the session is the longest history the autosaves hold (ties keep key order).
+    // autosave with the longest saved history first (ties keep key order), so the session is the longest history
+    // the autosaves hold, as when every prefix wrote the same keys.
     const autosaves = keys.filter((candidate) => candidate.startsWith(legacyAutosavePrefix())).flatMap((key) => {
       const raw = this.legacyStorage.getItem(key);
       if (raw === null) return [];
@@ -1005,8 +1017,8 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
       if (importSavedSession(imported, legacy.bytes) !== legacy.sessionId) {
         throw new Error('Stored browser autosave identity does not match its session.');
       }
-      return [{ key, legacy, revisions: imported.revisions(legacy.sessionId) }];
-    }).sort((left, right) => right.revisions.length - left.revisions.length);
+      return [{ key, legacy, revisions: imported.revisions(legacy.sessionId), historyLength: legacyHistoryLength(legacy.bytes) }];
+    }).sort((left, right) => right.historyLength - left.historyLength);
     for (const { key, legacy, revisions } of autosaves) {
       const decoded = decodeSavedSessionFingerprint(legacy.bytes, this.recordingEngine);
       const session = streamOf(legacy.sessionId);

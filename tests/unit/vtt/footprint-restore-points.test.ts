@@ -281,17 +281,22 @@ function asV12(revision: StoredRevision): StoredRevision {
   return migrated.revisions[0]!;
 }
 
-/** Legacy localStorage as the pre-IndexedDB app left it: a session's save, its metadata, and autosave saves. */
+/**
+ * Legacy localStorage as the pre-IndexedDB app left it: a session's save (none when `sessionBytes` is null) and its
+ * metadata, then autosave saves, in that key order.
+ */
 function legacyStorage(
-  sessionBytes: string,
+  sessionBytes: string | null,
   sessionId: string,
   autosaves: readonly { readonly storageId: string; readonly trigger: 'encounter_start' | 'round_boundary'; readonly bytes: string }[],
 ): MemoryStorageLike {
   const storage = new MemoryStorageLike();
-  storage.setItem(`srd55:vtt-session:${sessionId}`, sessionBytes);
-  storage.setItem(`srd55:vtt-session-metadata:${sessionId}`, JSON.stringify({
-    name: 'Legacy campaign', updatedAt: '2026-08-20T10:00:00.000Z', retention: { kind: 'named' },
-  }));
+  if (sessionBytes !== null) {
+    storage.setItem(`srd55:vtt-session:${sessionId}`, sessionBytes);
+    storage.setItem(`srd55:vtt-session-metadata:${sessionId}`, JSON.stringify({
+      name: 'Legacy campaign', updatedAt: '2026-08-20T10:00:00.000Z', retention: { kind: 'named' },
+    }));
+  }
   for (const autosave of autosaves) {
     const pool = autosave.trigger === 'encounter_start' ? 'encounter_boundary' : 'per_round';
     storage.setItem(`srd55:vtt-autosave:${autosave.storageId}`, JSON.stringify({
@@ -300,6 +305,27 @@ function legacyStorage(
     }));
   }
   return storage;
+}
+
+/**
+ * The mixed history as the v12 app saved it: r1 (recorded under v11, migrated to v12 by the registered migration),
+ * r2 initiative, r3 the PC to (1,0); the session's save holds all three, its encounter-start autosave r1.
+ */
+function mixedLegacy(): {
+  readonly sessionId: SessionRevision['sessionId'];
+  readonly sessionBytes: string;
+  readonly autosaveBytes: string;
+  readonly S1: string;
+} {
+  const stored = storedRevisions(MIXED);
+  const history = [asV12(stored[0]!), stored[1]!, stored[2]!];
+  const sessionId = history[0]!.sessionId as SessionRevision['sessionId'];
+  return {
+    sessionId,
+    sessionBytes: v12Save(history),
+    autosaveBytes: v12Save(history.slice(0, 1)),
+    S1: `encounter_boundary:${sessionId}:000000000001:encounter_start`,
+  };
 }
 
 /** The autosave record the store keeps for `storageId`, read from IndexedDB directly. */
@@ -339,12 +365,7 @@ describe('FOOTPRINT fix2: a legacy localStorage autosave never writes over its s
     // migration), r2 initiative, r3 the PC to (1,0). The session's save holds all three; the autosave taken at the
     // encounter start holds r1. Each holds the Huge at (17,3) past the 19-column grid, so each migrates by archive:
     // the session to r3's state (PC (1,0)), the autosave to r1's (PC (0,0)); the Huge repaired to (16,2) in both.
-    const stored = storedRevisions(MIXED);
-    const history = [asV12(stored[0]!), stored[1]!, stored[2]!];
-    const sessionId = history[0]!.sessionId as SessionRevision['sessionId'];
-    const sessionBytes = v12Save(history);
-    const autosaveBytes = v12Save(history.slice(0, 1));
-    const S1 = `encounter_boundary:${sessionId}:000000000001:encounter_start`;
+    const { sessionId, sessionBytes, autosaveBytes, S1 } = mixedLegacy();
     const name = 'footprint-legacy-two-roots';
     const indexedDb = new IDBFactory();
     const storage = legacyStorage(sessionBytes, sessionId, [{ storageId: S1, trigger: 'encounter_start', bytes: autosaveBytes }]);
@@ -429,15 +450,105 @@ describe('FOOTPRINT fix2: a legacy localStorage autosave never writes over its s
     store.close();
     expect(await storedSnapshot(indexedDb, name, S1)).toMatchObject({ restorePoint: { kind: 'live', headChecksum: session[0]!.checksum } });
   });
+
+  it('a legacy migration interrupted after the session moved: resumed, the autosave still never writes over the stored session', async () => {
+    // The first open commits the mixed session and its autosave's record, then fails to remove the autosave's
+    // localStorage key. The resumed open finds that key again, and the session is one the database already holds.
+    const { sessionId, sessionBytes, autosaveBytes, S1 } = mixedLegacy();
+    const name = 'footprint-legacy-resumed';
+    const indexedDb = new IDBFactory();
+    const storage = legacyStorage(sessionBytes, sessionId, [{ storageId: S1, trigger: 'encounter_start', bytes: autosaveBytes }]);
+    storage.failRemovalOf = `srd55:vtt-autosave:${S1}`;
+    await expect(IndexedDbBrowserSessionStore.open(indexedDb, storage, { databaseName: name })).rejects.toMatchObject({ operation: 'migration' });
+    expect(storage.getItem(`srd55:vtt-session:${sessionId}`)).toBeNull();
+    expect(storage.getItem(`srd55:vtt-autosave:${S1}`)).not.toBeNull();
+    const resumed = await IndexedDbBrowserSessionStore.open(indexedDb, storage, { databaseName: name });
+    expect(storage.length).toBe(0);
+    expect(resumed.revisions(sessionId)).toHaveLength(1);
+    expect(archivedSaveOf(resumed.revisions(sessionId)[0])).toBe(sessionBytes);
+    expect(positionOf(resumed.revisions(sessionId)[0]!.encounterState, PC)).toEqual({ column: 1, row: 0 });
+    expect(archivedSaveOf(revisionsOf(exportOf(resumed, S1, sessionId))[0])).toBe(autosaveBytes);
+    resumed.close();
+  });
+
+  it('autosaves without their session: the longest is the session; a shorter one that migrated differently keeps its own save', async () => {
+    // lr-squeezed with no session key: a round-boundary autosave holds r1-r2 (the version bump) and a later one
+    // holds r1-r3 (by archive). The shorter comes first in localStorage key order; the session is still the longest
+    // history, and the longer autosave is a live point at its root.
+    const revisions = storedRevisions(LR_SQUEEZED);
+    const sessionId = revisions[0]!.sessionId as SessionRevision['sessionId'];
+    const fullBytes = inputs.fixtures.readText(LR_SQUEEZED);
+    const shorterBytes = v12Save(revisions.slice(0, 2));
+    const shorter = `per_round:${sessionId}:000000000002:round_boundary`;
+    const longer = `per_round:${sessionId}:000000000003:round_boundary`;
+    const name = 'footprint-legacy-longest-first';
+    const indexedDb = new IDBFactory();
+    const storage = legacyStorage(null, sessionId, [
+      { storageId: shorter, trigger: 'round_boundary', bytes: shorterBytes },
+      { storageId: longer, trigger: 'round_boundary', bytes: fullBytes },
+    ]);
+    expect(storage.key(0)).toBe(`srd55:vtt-autosave:${shorter}`);
+    const store = await IndexedDbBrowserSessionStore.open(indexedDb, storage, { databaseName: name });
+    const session = store.revisions(sessionId);
+    expect(session.map((revision) => revision.transition.kind)).toEqual(['session_migrated']);
+    expect(archivedSaveOf(session[0])).toBe(fullBytes);
+    expect(revisionsOf(exportOf(store, shorter, sessionId)).map((revision) => revision.transition.kind)).toEqual(['session_started', 'reducer_applied']);
+    store.close();
+    expect(await storedSnapshot(indexedDb, name, shorter)).toMatchObject({ restorePoint: { kind: 'own_save', text: shorterBytes } });
+    expect(await storedSnapshot(indexedDb, name, longer)).toMatchObject({ restorePoint: { kind: 'live', headChecksum: session[0]!.checksum } });
+  });
+
+  it('an autosave whose save belongs to another session is refused, at migration and when its stored record says so', async () => {
+    // At migration: a legacy autosave record naming one session with another session's save.
+    const revisions = storedRevisions(LR_SQUEEZED);
+    const misfiled = legacyStorage(null, 'session:footprint-someone-else', [
+      { storageId: 'per_round:session:footprint-someone-else:000000000003:round_boundary', trigger: 'round_boundary', bytes: inputs.fixtures.readText(LR_SQUEEZED) },
+    ]);
+    expect(revisions[0]!.sessionId).not.toBe('session:footprint-someone-else');
+    await expect(IndexedDbBrowserSessionStore.open(new IDBFactory(), misfiled, { databaseName: 'footprint-legacy-misfiled' })).rejects.toMatchObject({
+      operation: 'migration',
+      cause: expect.objectContaining({ message: 'Stored browser autosave identity does not match its session.' }),
+    });
+    // Stored: the mixed session's own-save record, its text replaced by lr-squeezed's save.
+    const { sessionId, sessionBytes, autosaveBytes, S1 } = mixedLegacy();
+    const name = 'footprint-own-save-misfiled';
+    const indexedDb = new IDBFactory();
+    (await IndexedDbBrowserSessionStore.open(indexedDb, legacyStorage(sessionBytes, sessionId, [
+      { storageId: S1, trigger: 'encounter_start', bytes: autosaveBytes },
+    ]), { databaseName: name })).close();
+    const record = await storedSnapshot(indexedDb, name, S1) as Record<string, unknown>;
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDb.open(name);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const write = database.transaction('snapshots', 'readwrite');
+    write.objectStore('snapshots').put({ ...record, restorePoint: { kind: 'own_save', text: inputs.fixtures.readText(LR_SQUEEZED) } }, S1);
+    await done(write);
+    database.close();
+    const store = await openStore(indexedDb, name);
+    expect(() => store.exportedStored(S1, sessionId)).toThrow('Browser autosave save belongs to another session.');
+    await expect(store.restoreStored(S1, sessionId)).rejects.toThrow('Browser autosave save belongs to another session.');
+    expect(archivedSaveOf(store.revisions(sessionId)[0])).toBe(sessionBytes);
+    store.close();
+  });
 });
 
 /** A minimal Storage for the IndexedDB store's legacy localStorage scan. */
 class MemoryStorageLike implements Storage {
   readonly #values = new Map<string, string>();
+  /** A key whose next removal fails once, as an interruption after the IndexedDB commit. */
+  failRemovalOf: string | null = null;
   get length(): number { return this.#values.size; }
   clear(): void { this.#values.clear(); }
   getItem(key: string): string | null { return this.#values.get(key) ?? null; }
   key(index: number): string | null { return [...this.#values.keys()][index] ?? null; }
-  removeItem(key: string): void { this.#values.delete(key); }
+  removeItem(key: string): void {
+    if (key === this.failRemovalOf) {
+      this.failRemovalOf = null;
+      throw new Error('simulated interruption after the IndexedDB commit');
+    }
+    this.#values.delete(key);
+  }
   setItem(key: string, value: string): void { this.#values.set(key, value); }
 }
