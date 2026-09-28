@@ -3413,3 +3413,32 @@ REVIEWS:
 APPROVED, AWAITING A QUIET WINDOW: PATH-ONE (5a2b42e8) and RECORDER-A (a61851fe). Timed pairs run when no workflow agent is running.
 
 Next free id: D931.
+
+## D931 — 2026-09-27 23:51 — wave 7 harvested; FOOTPRINT r2, SRD-BUILDTIME r3 and IMPORT-GUARD r3 REVISE → wave 8
+
+HARVESTED (agent-reported; codex reviews running: PC-EXPORT r3, RULE-INDEX r3):
+- PC-EXPORT fix2, claude/pcexport 2f6b813f on e9316036:
+  - the typed boot reason reaches the main thread;
+  - a recovery screen with Export database and Reset local database; reset asks for confirmation;
+  - 30 mutants killed. Two travel mutants first survived; a v2 travel witness was added and now kills them.
+  - Playwright spec tests/browser/database-recovery.spec.ts is owed to me.
+- RULE-INDEX fix2, claude/ruleindex d91ad996:
+  - "Parts of a Stat Block" spans across the page break;
+  - 5 two-column tables were re-filed;
+  - Deafened / conditions correlated or downgraded;
+  - D923 exclusions typed as excluded_by_owner;
+  - magic-item name-set pin.
+
+REVIEWS → wave 8 (wf_279c01aa-392), all findings accepted:
+- FOOTPRINT r2 REVISE:
+  - P1: the offline replay tool trusts archive metadata for the recorded commit. It must be derived from the revisions' own recordedBy.
+  - P1: legacy autosave migration can overwrite the migrated session head.
+- SRD-BUILDTIME r3 REVISE:
+  - P2: a one-step formula does not survive storage.
+  - P2: exported rule maps are mutable.
+  - P2: the count assertions lack mutants.
+- IMPORT-GUARD r3 REVISE:
+  - P2: computed imports in production paths outside src/ escape R2.
+  - Its round-1 PARTIAL (a duplicate walker in test-affected.mjs) is settled at landing (D919).
+
+Next free id: D932.
