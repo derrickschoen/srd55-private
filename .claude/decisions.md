@@ -3687,5 +3687,45 @@ CONDITION-D20: no owner question now. Q-E waits for measured before and after re
   - SAVE-COMPAT plan (clone dnd-probe-savecompat-8fba).
   - The codex final findings for each r1 review are extracted beside each log as review-r1.final.md.
 
-Next free id: D944.
+## D944 — 2026-09-28 16:28 — wave 11 harvested; supervisor rulings on the plans' questions
+
+WAVE 11 (agent-reported; not yet verified by me):
+- ENV-TRACE flake fix1, claude/envflake 2083fca4..49091ce0 (3 commits). Codex r1 P1 is fixed (a reference into tests/transient-probes fails closed before the directory exception) and P2 is fixed (the directory is excluded from vitest.config.ts; probes run under tests/helpers/transient-probes.vitest.config.ts).
+  - 131/131 in 3 of 3 runs. Mutants: 5 killed, 2 equivalent; the G5 survivor led to deleting a dead line.
+  - The agent's FINDING AGAINST ITS OWN WORK: `vitest list --json <file>` treated the test path as the JSON output path and overwrote tests/unit/test-input-boundary.test.ts. The agent restored it by git checkout; sha256 equals HEAD and nothing was lost. It also first missed that verdict-recorder-inputs runs probes; its own run caught this before the commit.
+- Plans saved (previous versions kept as *.prev.md):
+  - MOVE-COST r2: 837 lines, all codex r1 findings FIXED, no per-rule toggles requested; survival-seeds moves at C2 (591 moves by movers already Prone).
+  - CONDITION-D20 r1: 1190 lines, 10/10 FIXED. It redesigns so that no profile migration is needed: skills and reach are derived from stored bytes.
+  - SAVE-COMPAT r0: .tmp-plans/2026-09-28-save-compat-refusal-migrations-relaxed.md, 575 lines, 5 commits.
+SUPERVISOR RULINGS (recommendations adopted unless stated):
+- SAVE-COMPAT Q1: the refusal says "a different engine build" and names both builds in full. EngineBuild has no ordering, so "earlier" cannot be proven; this keeps D939's intent (clear, typed, never tamper-sounding). The owner may overturn.
+- SAVE-COMPAT Q2–Q10 adopted:
+  - trust mode skips every rules-derived check (the 6 transition kinds plus the pacing reposition); recorded-fact checks still run;
+  - only tests (tests/helpers) may mint the trust grant;
+  - C2 (load surfaces survive one refused save) stays in the unit;
+  - the rewrite is persisted only after a strict replay (MOVE-COST's v13→v14 is the first user);
+  - MOVE-COST owns the D942 migration-report carrier;
+  - replayBundle stays unclassified;
+  - lifecycle import returns {kind:'refused'} for the rules refusal only;
+  - the implementer checks the direct-route render;
+  - each rules unit records its own earlier-build fixtures at its parent commit with provenance.json.
+- MOVE-COST:
+  - OQ1: authorized. A count-checked literal substitution of the two policy-version bumps in the frozen legacy oracles (implicit-advice-v1.json, runner-oracle-main.json, the legacy-capture pin), following DM-BEST-EFFORT-01; identity only, and the report lists each substitution count.
+  - OQ2 confirmed. Only a stated height (cylinder), webs or Web establishes volume; cube, sphere, emanation and line fall back to ground, per D942 "ground if unsure".
+  - OQ3: SAVE-COMPAT fixes the names, and MOVE-COST implementation waits for SAVE-COMPAT's reviewed API.
+  - OQ5 and OQ6 go to CONDITION-D20.
+  - OQ8: the controller clip is deleted.
+- Movement restrictions (MOVE-COST OQ4 against CONDITION-D20 Q-A): CONDITION-D20 owns movement_restrictions (Frightened can't approach, Grappled movable). It is a step-legality rule that comes from conditions, not a D905 cost kind; it builds on MOVE-COST's executor seam.
+- CONDITION-D20:
+  - Q-P goes to a small CONTENT-PACK-MONSTER-STATS follow-up; homebrew Hide and Search are refused by type until then.
+  - Q-Q: keep Touch (C15).
+  - Q-R: yes, the roster lookup by stored statblock id is deterministic (legacyMechanicalSize precedent).
+  - Q-S adopted.
+  - Q-L deferred to ACTIONS-COMPLETE.
+  - The FOOTPRINT fixture may switch to trust-history with a cited reason, and the implementer stops and reports first.
+- Q-E and MOVE-COST OQ7 (new survival-seeds and arena baselines): OWNER, only once the measured attribution packet exists.
+- Empty legacy directory tests/test-input-boundary-probes/ is removed from main after the flake fix lands.
+NEXT: codex reviews (gpt-6-sol xhigh, fresh read-only): flake fix r2; MOVE-COST plan r2; CONDITION-D20 plan r2; SAVE-COMPAT plan r1.
+
+Next free id: D945.
 
