@@ -934,7 +934,7 @@ const SELF_TESTS = [
   },
   {
     rule: 'R2',
-    name: 'tool entries that say removedBy or give no why; db/ and a root config file labelled tooling (fail closed)',
+    name: 'a tool entry that also says removedBy, one with no why; db/ and a root config file labelled tooling (fail closed)',
     expect: 4,
     mentions: [
       'R2 allowlist entry scripts/srd/removed.mjs is tooling',
@@ -945,7 +945,7 @@ const SELF_TESTS = [
     noteMentions: ['R2 2 runtime importer(s) of the SRD text, 2 file reference(s)'],
     policy: {
       srdImporters: [
-        { importer: 'scripts/srd/removed.mjs', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/feats.txt'] },
+        { importer: 'scripts/srd/removed.mjs', tooling: 'a generator', removedBy: SRD_BUILDTIME, files: ['docs/srd/source/feats.txt'] },
         { importer: 'tools/no-why.ts', tooling: ' ', files: ['docs/srd/source/feats.txt'] },
         { importer: 'db/schema/srd.ts', tooling: 'a schema note', files: ['docs/srd/source/feats.txt'] },
         { importer: 'vite.config.ts', tooling: 'a build plugin', files: ['docs/srd/source/feats.txt'] },
