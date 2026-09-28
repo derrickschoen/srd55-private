@@ -10,12 +10,16 @@
  *
  * - `rawSegments`: a raw line cut into its runs of text (two or more spaces
  *   separate runs), each with its character column. No gutter is measured.
- * - `rawColumnRows` and `rawColumnText`: a page's rows, left then right (or one
- *   line's text in one column), a run belonging to the right column when it
- *   starts at character 55 or later. Every two-column
+ * - `rawColumnRows`, `rawColumnRuns` and `rawColumnText`: a page's rows, left
+ *   then right (or one line's runs in one column), a run belonging to the
+ *   right column when it starts at character 55 or later. Every two-column
  *   page these pins read prints its right column from character 56 on, and a
  *   full-width table's cells reach character 54 at most (the Sorcerer
- *   Features table's last column, printed page 66, starts at 50).
+ *   Features table's last column, printed page 66, starts at 50). One
+ *   left-column cell reaches 55: the Cleric Spell List's Special column on
+ *   printed page 40, which the first-span pin reads past run by run. A
+ *   table printed across both columns is owned line by line, whichever
+ *   column a reader files a cell under.
  * - `rawHeadings`: a heading is a row holding ONE Title Case run with no
  *   sentence punctuation, after a finished sentence, a list item, a table row
  *   or another heading, and followed by the row its caller says a heading of

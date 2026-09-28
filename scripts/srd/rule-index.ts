@@ -477,7 +477,7 @@ function deriveDrafts(read: SrdCorpusReader): Derivation {
       }
     });
   };
-  /** The raw line after `line` that ends a table: the first of two blank lines. */
+  /** The last line of the table titled at `line`: the line before its first pair of blank lines. */
   const tableEnd = (line: number): number => {
     let last = line;
     while (last < rawLines.length && !((rawLines[last] ?? '').trim() === '' && (rawLines[last + 1] ?? '').trim() === '')) {
