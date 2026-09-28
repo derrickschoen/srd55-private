@@ -411,6 +411,36 @@ describe('a token anchor is an in-bounds cell in the EncounterState type', () =>
       .toBe(true);
   });
 
+  it('FOOTPRINT fix1: a decoded absent token keeps an edge return origin as absent only, and its own shape is checked', () => {
+    // codex r1 P1. The reference grid is 10 x 7. A Huge (3 x 3) anchored at (9,6), the last cell, would cover columns
+    // 9-11 and rows 6-8: as a board body it leaves the grid; as an absent token it is only a return origin, a cell of
+    // the grid, and its body is checked when it returns (placedToken).
+    const created = createEncounter(referenceEncounterSetup());
+    const huge = { kind: 'normal', actual: 'Huge' } as const;
+    // Combatant 3 made Huge, so its mode and its effective size agree and only the body's extent is in question.
+    const base = json(created) as JsonState & { combatants: Array<{ profile: { id: string; rules: { sizeCategory: string } } }> };
+    const owner = base.combatants.find((combatant) => combatant.profile.id === base.tokens[3]?.['combatantId']);
+    if (owner === undefined) throw new Error('Expected the reference token 3 combatant.');
+    owner.profile.rules.sizeCategory = 'Huge';
+    // Token 3 is banished: off the board, in the absent list only.
+    const withAbsent = (absent: Record<string, unknown>): JsonState => ({ ...base, tokens: base.tokens.slice(0, 3), absentTokens: [absent] });
+    const edge: Record<string, unknown> = { ...base.tokens[3], position: { column: 9, row: 6 }, placementMode: huge };
+    const decoded = accepted(() => decodeEncounterStateV1(withAbsent(edge), 'session'));
+    expect(decoded.absentTokens).toEqual([edge]);
+    expect(decoded.tokens.map((token) => token.combatantId)).toEqual(base.tokens.slice(0, 3).map((token) => token['combatantId']));
+    // The same token as a board token is the Huge body past the edge, refused by the whole-body check.
+    const asBoard = thrown(() => decodeEncounterStateV1({ ...base, tokens: [...base.tokens.slice(0, 3), edge] }, 'session'));
+    expect(offGridBody(asBoard, 'state.tokens[3]', { column: 9, row: 6 }, 3, 'Huge', 10, 7), String(asBoard)).toBe(true);
+    // Its own shape: a squeeze that is not into the next size down, and a token without a combatant id, are refused.
+    const squeezedTwoSizes = thrown(() => decodeEncounterStateV1(withAbsent({ ...edge, placementMode: { kind: 'squeezed', actual: 'Huge', sizedFor: 'Medium' } }), 'session'));
+    expect(squeezedTwoSizes).toBeInstanceOf(TypeError);
+    expect(String(squeezedTwoSizes)).toContain('state.absentTokens[0] placementMode is not a normal placement or a squeeze into the next smaller size.');
+    const { combatantId: _combatantId, ...anonymous } = edge;
+    const noCombatant = thrown(() => decodeEncounterStateV1(withAbsent(anonymous), 'session'));
+    expect(noCombatant).toBeInstanceOf(TypeError);
+    expect(String(noCombatant)).toContain('state.absentTokens[0] has no combatant id.');
+  });
+
   it('the engine round session re-mints anchors after its canonical JSON round trip, and refuses a state spread off its grid', () => {
     const created = createEncounter(referenceEncounterSetup());
     const withAbsent: EncounterState = { ...created, absentTokens: [required(anchoredAt(created, 3, { column: 9, row: 6 }).tokens[3])] };

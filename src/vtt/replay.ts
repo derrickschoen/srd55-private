@@ -5,7 +5,7 @@ import {
   type EncounterConfig,
   type EncounterState,
 } from '../combat/encounter';
-import type { CombatToken } from '../combat/combatant';
+import type { AbsentToken, CombatToken } from '../combat/combatant';
 import {
   assertV13Checkpoints,
   decodeAbsentTokens,
@@ -538,7 +538,7 @@ function revisionTokens(
   context: PlacementContext,
   state: { readonly tokens?: unknown; readonly absentTokens?: unknown },
   index: number,
-): { readonly tokens: readonly CombatToken[]; readonly absentTokens?: readonly CombatToken[] } {
+): { readonly tokens: readonly CombatToken[]; readonly absentTokens?: readonly AbsentToken[] } {
   const label = `Replay revision ${String(index + 1)}`;
   assertV13Checkpoints(Reflect.get(context, 'pendingDecisions'), label);
   return {

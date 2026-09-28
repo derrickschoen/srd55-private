@@ -1,6 +1,6 @@
 import { creatureSizes, type KnownCreatureSize } from '../domain/enums';
 import { CreatureSizeRuleError, effectiveCreatureSize, type SizeLensContext } from './combat-rules';
-import type { CombatToken, TokenFor } from './combatant';
+import type { AbsentToken, CombatToken, TokenFor } from './combatant';
 import type { SerializedPlacementMode } from './creature-space';
 import type { EncounterState } from './encounter';
 import { EncounterRuleError } from './encounter-rule-error';
@@ -167,14 +167,30 @@ export function decodeBoardTokens(context: PlacementContext, tokens: unknown, la
 
 /**
  * The absent-token decoder: a banished creature's token holds its return origin, an anchor cell of the
- * grid, not a placed body (its body is checked when it returns, by placedToken).
+ * grid, not a placed body (its body is checked when it returns, by placedToken). It mints AbsentTokens: their
+ * anchor is a BoardCell, no whole-body proof, so a decoded absent token does not compile into an
+ * EncounterState's `tokens` (FOOTPRINT fix1, codex r1 P1). Each is checked in this order: the anchor is a cell of
+ * the grid (OffGridAnchorError); it has a token id and a combatant id; its placement mode is one
+ * SerializedPlacementMode (TypeError). Every other loaded field is kept, as decodeBoardTokens keeps it, so the
+ * decoded revision still hashes to its checksum.
  */
-export function decodeAbsentTokens(bounds: GridBounds, tokens: unknown, label: string): readonly CombatToken[] {
+export function decodeAbsentTokens(bounds: GridBounds, tokens: unknown, label: string): readonly AbsentToken[] {
   if (!Array.isArray(tokens)) throw new TypeError(`${label} must be an array.`);
-  return tokens.map((token: unknown, index): CombatToken => {
+  return tokens.map((token: unknown, index): AbsentToken => {
+    const at = `${label}[${String(index)}]`;
     const loaded = typeof token === 'object' && token !== null ? token as Readonly<Record<string, unknown>> : {};
-    const position = requireBoardCell(bounds, loaded['position'], `${label}[${String(index)}] anchor`);
-    return { ...loaded, position } as unknown as CombatToken;
+    const position = requireBoardCell(bounds, loaded['position'], `${at} anchor`);
+    const id = loaded['id'];
+    const combatantId = loaded['combatantId'];
+    if (typeof id !== 'string') throw new TypeError(`${at} has no token id.`);
+    if (typeof combatantId !== 'string') throw new TypeError(`${at} has no combatant id.`);
+    const absent: AbsentToken = {
+      id: id as TokenId,
+      combatantId: combatantId as CombatantId,
+      position,
+      placementMode: decodePlacementMode(loaded['placementMode'], `${at} placementMode`),
+    };
+    return { ...loaded, ...absent };
   });
 }
 
@@ -226,13 +242,14 @@ export type DecodedStateRest = Omit<EncounterState, 'tokens' | 'absentTokens'>;
 
 /**
  * The only way a decoder builds an EncounterState: its validated rest plus token lists that came from
- * decodeBoardTokens and decodeAbsentTokens. A raw token list the rest still carries is replaced in place,
+ * decodeBoardTokens (board tokens, each with its whole-body proof) and decodeAbsentTokens (absent tokens, which
+ * carry none and so cannot be passed as `tokens`). A raw token list the rest still carries is replaced in place,
  * and a raw absent list is dropped when none was decoded.
  */
 export function assembleDecodedState(
   rest: DecodedStateRest,
   tokens: readonly CombatToken[],
-  absentTokens: readonly CombatToken[] | undefined,
+  absentTokens: readonly AbsentToken[] | undefined,
 ): EncounterState {
   assertV13Checkpoints(rest.pendingDecisions, 'Decoded encounter state');
   const assembled: Record<string, unknown> = { ...rest, tokens };
