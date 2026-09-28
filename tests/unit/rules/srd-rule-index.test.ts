@@ -13,6 +13,8 @@ import warlockList from '../../../docs/srd/source/warlock-spell-list.txt?raw';
 import wizardList from '../../../docs/srd/source/wizard-spell-list.txt?raw';
 import fullSrd from '../../../docs/srd/full/srd-5.2.1.txt?raw';
 import subclassesText from '../../../docs/srd/source/subclasses.txt?raw';
+import speciesDescriptionsText from '../../../docs/srd/source/species-descriptions.txt?raw';
+import backgroundsText from '../../../docs/srd/source/backgrounds.txt?raw';
 import { srdReadingOrder } from '../../../scripts/srd/srd-columns';
 import {
   contentsEntries,
@@ -28,7 +30,7 @@ import {
   type RawRow,
 } from '../../helpers/srd-raw-reader';
 import { bundledFeatDefinitions } from '../../../src/rules/feats-srd';
-import { parseSrdBackgroundTemplates, parseSrdSpeciesTemplates } from '../../../src/rules/origins-srd';
+import { parseSrdBackgroundTemplates, parseSrdSpeciesTemplates } from '../../../src/rules/origins-srd-reader';
 import { weaponMasteryProperties } from '../../../src/domain/enums';
 import {
   isSrdRuleId,
@@ -277,8 +279,8 @@ function contentsSections(): string[] {
   const others = new Set<string>([
     'Legal Information',
     ...classNames(),
-    ...parseSrdSpeciesTemplates().map(({ name }) => name),
-    ...parseSrdBackgroundTemplates().map(({ name }) => name),
+    ...parseSrdSpeciesTemplates(speciesDescriptionsText).map(({ name }) => name),
+    ...parseSrdBackgroundTemplates(backgroundsText).map(({ name }) => name),
   ]);
   return contents()
     .map(({ title }) => title)
@@ -341,9 +343,9 @@ const DERIVED: { readonly [K in SrdRuleKind]: () => Derivation } = {
     ...headingNames(rawHeadings(sectionRows('Eldritch Invocation Options', 'Warlock Spell List'), (next) => (next.segments[0] ?? '').startsWith('Prerequisite:') || isProse(next))).map((name) => `Warlock/${name}`),
   ]),
   spell_list: () => named(contents().map(({ title }) => title).filter((title) => /^\w+ Spell List$/.test(title))),
-  species: () => named(parseSrdSpeciesTemplates().map(({ name }) => name)),
-  species_trait: () => named(parseSrdSpeciesTemplates().flatMap(({ name, traits }) => traits.map((trait) => `${name}/${trait.name}`))),
-  background: () => named(parseSrdBackgroundTemplates().map(({ name }) => name)),
+  species: () => named(parseSrdSpeciesTemplates(speciesDescriptionsText).map(({ name }) => name)),
+  species_trait: () => named(parseSrdSpeciesTemplates(speciesDescriptionsText).flatMap(({ name, traits }) => traits.map((trait) => `${name}/${trait.name}`))),
+  background: () => named(parseSrdBackgroundTemplates(backgroundsText).map(({ name }) => name)),
   feat: () => named(bundledFeatDefinitions().map(({ name }) => name)),
   weapon: () => named(weaponTableNames()),
   armor: () => named(armorTableNames()),

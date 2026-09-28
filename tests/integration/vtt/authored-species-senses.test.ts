@@ -36,7 +36,7 @@ import { DatabaseContext } from '../../../src/db/database';
 import type { ContentKey } from '../../../src/domain/ids';
 import { StoredCharacterPartyPackExporter } from '../../../src/vtt/stored-character-party-member';
 import { expectOkOutcome } from '../../helpers/outcome';
-import { openSeededTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-seeded-db';
 import { portableElfLibraryDocument } from '../../helpers/species-lineage-portability';
 
 /**
