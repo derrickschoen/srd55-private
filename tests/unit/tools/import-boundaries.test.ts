@@ -257,6 +257,11 @@ describe('the import-boundary guard', () => {
     // An absolute specifier is unproven wherever it points: Vite reads
     // '/docs/srd/...' from the root (2 findings: that one and '/assets/other.js').
     expect(result.stdout).toContain('R2 red   2 finding(s): absolute specifiers on a production path');
+    // A worker started by asset URL runs in production: src/main.ts starting
+    // a listed SRD-reading tool that way reaches the SRD text (1 finding).
+    expect(result.stdout).toContain(
+      'R2 red   1 finding(s): a module that starts a listed SRD-reading tool as a worker (asset URL) reaches the SRD text',
+    );
     // D927: --update raises a budget as well as lowers one, and R5 then holds.
     // Worked by hand in the self-test's witness, at margins of 10% (files) and
     // 30% (bytes): 2 files and 45 bytes are ceil(2.2) = 3 and ceil(58.5) = 59;

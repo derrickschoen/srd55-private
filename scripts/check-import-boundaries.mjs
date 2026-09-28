@@ -25,7 +25,8 @@
  *                         fails, so the list only shrinks; with the runtime
  *                         entries gone the SRD is read by tests and tooling
  *                         only (D915). No production module may reach the
- *                         SRD through a test or a tool either. And every
+ *                         SRD through a test or a tool either, by import or
+ *                         as a worker (asset URL). And every
  *                         production path must be provable (review r3 P2):
  *                         on a production module, or on any test or tool
  *                         one loads or ships, an unresolved reference that
@@ -421,12 +422,13 @@ function ruleR2(graph, srd) {
   }
 
   // Carriers: tests and tools that reach the SRD text. A module that is
-  // neither may not load one (it may load a listed runtime importer, which is
-  // accounted for above and removed by SRD-BUILDTIME).
+  // neither may not load or ship one: an asset URL starts it as a worker, in
+  // production (it may load a listed runtime importer, which is accounted for
+  // above and removed by SRD-BUILDTIME).
   const importersOf = new Map();
   for (const [importer, edges] of graph.edges) {
     for (const edge of edges) {
-      if (!RUNTIME.includes(edge.evaluation)) continue;
+      if (!SHIPS.includes(edge.evaluation)) continue;
       const list = importersOf.get(edge.to) ?? [];
       list.push({ importer, line: edge.line });
       importersOf.set(edge.to, list);
@@ -973,6 +975,20 @@ const SELF_TESTS = [
       'tests/unit/drift.test.ts': "import { text } from '../helpers/srd-text';\nimport { generate } from '../../scripts/srd/generate';\n",
       'docs/srd/source/feats.txt': 'feats',
       'docs/srd/full/srd.txt': 'SRD',
+    },
+  },
+  {
+    rule: 'R2',
+    name: 'a module that starts a listed SRD-reading tool as a worker (asset URL) reaches the SRD text through it',
+    expect: 1,
+    mentions: ['R2 src/main.ts:1: reaches the SRD text (docs/srd/source/feats.txt) through tools/srd-worker.ts'],
+    policy: {
+      srdImporters: [{ importer: 'tools/srd-worker.ts', tooling: 'a worker that reads the SRD', files: ['docs/srd/source/feats.txt'] }],
+    },
+    files: {
+      'src/main.ts': "export const worker = new URL('../tools/srd-worker.ts', import.meta.url);\n",
+      'tools/srd-worker.ts': "import feats from '../docs/srd/source/feats.txt?raw';\nexport const f = feats;\n",
+      'docs/srd/source/feats.txt': 'feats',
     },
   },
   {
