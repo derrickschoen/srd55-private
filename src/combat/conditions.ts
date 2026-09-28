@@ -1,5 +1,5 @@
 import type { Ability } from '../domain/enums';
-import type { ConditionName } from '../domain/srd-vocabulary';
+import type { CONDITION_NAMES, ConditionName } from '../domain/srd-vocabulary';
 import type { RollMode } from './resolution';
 import type { CombatantId } from './values';
 
@@ -22,136 +22,153 @@ export type AppliedCondition =
     }
   | { readonly name: 'Exhaustion'; readonly level: ExhaustionLevel };
 
-type ConditionMechanics =
-  | {
-      readonly kind: 'blinded';
-      readonly cannotSee: true;
-      readonly automaticallyFailsSightChecks: true;
-      readonly attacksBy: 'disadvantage';
-      readonly attacksAgainst: 'advantage';
-    }
-  | {
-      readonly kind: 'charmed';
-      readonly cannotHarmSource: true;
-      readonly sourceSocialChecks: 'advantage';
-    }
-  | {
-      readonly kind: 'deafened';
-      readonly cannotHear: true;
-      readonly automaticallyFailsHearingChecks: true;
-    }
-  | {
-      readonly kind: 'exhaustion';
-      readonly cumulative: true;
-      readonly deathLevel: 6;
-      readonly d20PenaltyPerLevel: -2;
-      readonly speedPenaltyFeetPerLevel: -5;
-      readonly longRestLevelsRemoved: 1;
-    }
-  | {
-      readonly kind: 'frightened';
-      readonly checksAndAttacksWhileSourceVisible: 'disadvantage';
-      readonly cannotWillinglyApproachSource: true;
-    }
-  | {
-      readonly kind: 'grappled';
-      readonly speed: 0;
-      readonly attacksAgainstNonSource: 'disadvantage';
-      readonly grapplerExtraMovementCostPerFoot: 1;
-      readonly tinyOrTwoSizesSmallerExempt: true;
-    }
-  | {
-      readonly kind: 'incapacitated';
-      readonly actions: false;
-      readonly bonusActions: false;
-      readonly reactions: false;
-      readonly breaksConcentration: true;
-      readonly canSpeak: false;
-      readonly initiative: 'disadvantage';
-    }
-  | {
-      readonly kind: 'invisible';
-      readonly initiative: 'advantage';
-      readonly cannotBeTargetedBySightRequirement: true;
-      readonly carriedEquipmentConcealed: true;
-      readonly attacksBy: 'advantage';
-      readonly attacksAgainst: 'disadvantage';
-      readonly seenCreatureIgnoresAttackBenefit: true;
-    }
-  | {
-      readonly kind: 'paralyzed';
-      readonly incapacitated: true;
-      readonly speed: 0;
-      readonly automaticallyFailsSaves: readonly ['strength', 'dexterity'];
-      readonly attacksAgainst: 'advantage';
-      readonly hitsWithinFeetAreCritical: 5;
-    }
-  | {
-      readonly kind: 'petrified';
-      readonly inanimateTransformation: true;
-      readonly nonmagicalEquipmentTransformed: true;
-      readonly weightMultiplier: 10;
-      readonly stopsAging: true;
-      readonly incapacitated: true;
-      readonly speed: 0;
-      readonly attacksAgainst: 'advantage';
-      readonly automaticallyFailsSaves: readonly ['strength', 'dexterity'];
-      readonly allDamage: 'resistant';
-      readonly conditionImmunity: 'Poisoned';
-    }
-  | {
-      readonly kind: 'poisoned';
-      readonly attacksAndAbilityChecks: 'disadvantage';
-    }
-  | {
-      readonly kind: 'prone';
-      readonly movement: 'crawl_or_spend_half_speed_to_end';
-      readonly cannotRiseAtSpeedZero: true;
-      readonly attacksBy: 'disadvantage';
-      readonly attacksAgainstWithinFeet: 'advantage';
-      readonly attacksAgainstBeyondFeet: 'disadvantage';
-      readonly distanceFeet: 5;
-    }
-  | {
-      readonly kind: 'restrained';
-      readonly speed: 0;
-      readonly attacksBy: 'disadvantage';
-      readonly attacksAgainst: 'advantage';
-      readonly dexteritySaves: 'disadvantage';
-    }
-  | {
-      readonly kind: 'stunned';
-      readonly incapacitated: true;
-      readonly automaticallyFailsSaves: readonly ['strength', 'dexterity'];
-      readonly attacksAgainst: 'advantage';
-    }
-  | {
-      readonly kind: 'unconscious';
-      readonly incapacitated: true;
-      readonly prone: true;
-      readonly dropsHeldItems: true;
-      readonly remainsProneWhenEnded: true;
-      readonly speed: 0;
-      readonly attacksAgainst: 'advantage';
-      readonly automaticallyFailsSaves: readonly ['strength', 'dexterity'];
-      readonly hitsWithinFeetAreCritical: 5;
-      readonly unaware: true;
-    };
-
-export interface ConditionManifestRow {
-  readonly condition: ConditionName;
-  readonly inventorySource: 'docs/srd/source/domain-vocabularies.txt:30-54';
-  readonly mechanicsSource: string;
-  readonly mechanicalClauseCount: number;
-  readonly mechanics: ConditionMechanics;
+/**
+ * THE MECHANICS EACH CONDITION CARRIES, KEYED BY ITS NAME. A manifest row
+ * whose `condition` is 'Deafened' can carry only the member under
+ * `Deafened`: the compiler ties each name to its own mechanics, where a row
+ * that typed the two independently could pair any name with any mechanics
+ * (RULE-INDEX review r2). A condition without a key here fails
+ * `ConditionManifestRow` to compile.
+ */
+interface ConditionMechanicsOf {
+  readonly Blinded: {
+    readonly kind: 'blinded';
+    readonly cannotSee: true;
+    readonly automaticallyFailsSightChecks: true;
+    readonly attacksBy: 'disadvantage';
+    readonly attacksAgainst: 'advantage';
+  };
+  readonly Charmed: {
+    readonly kind: 'charmed';
+    readonly cannotHarmSource: true;
+    readonly sourceSocialChecks: 'advantage';
+  };
+  readonly Deafened: {
+    readonly kind: 'deafened';
+    readonly cannotHear: true;
+    readonly automaticallyFailsHearingChecks: true;
+  };
+  readonly Exhaustion: {
+    readonly kind: 'exhaustion';
+    readonly cumulative: true;
+    readonly deathLevel: 6;
+    readonly d20PenaltyPerLevel: -2;
+    readonly speedPenaltyFeetPerLevel: -5;
+    readonly longRestLevelsRemoved: 1;
+  };
+  readonly Frightened: {
+    readonly kind: 'frightened';
+    readonly checksAndAttacksWhileSourceVisible: 'disadvantage';
+    readonly cannotWillinglyApproachSource: true;
+  };
+  readonly Grappled: {
+    readonly kind: 'grappled';
+    readonly speed: 0;
+    readonly attacksAgainstNonSource: 'disadvantage';
+    readonly grapplerExtraMovementCostPerFoot: 1;
+    readonly tinyOrTwoSizesSmallerExempt: true;
+  };
+  readonly Incapacitated: {
+    readonly kind: 'incapacitated';
+    readonly actions: false;
+    readonly bonusActions: false;
+    readonly reactions: false;
+    readonly breaksConcentration: true;
+    readonly canSpeak: false;
+    readonly initiative: 'disadvantage';
+  };
+  readonly Invisible: {
+    readonly kind: 'invisible';
+    readonly initiative: 'advantage';
+    readonly cannotBeTargetedBySightRequirement: true;
+    readonly carriedEquipmentConcealed: true;
+    readonly attacksBy: 'advantage';
+    readonly attacksAgainst: 'disadvantage';
+    readonly seenCreatureIgnoresAttackBenefit: true;
+  };
+  readonly Paralyzed: {
+    readonly kind: 'paralyzed';
+    readonly incapacitated: true;
+    readonly speed: 0;
+    readonly automaticallyFailsSaves: readonly ['strength', 'dexterity'];
+    readonly attacksAgainst: 'advantage';
+    readonly hitsWithinFeetAreCritical: 5;
+  };
+  readonly Petrified: {
+    readonly kind: 'petrified';
+    readonly inanimateTransformation: true;
+    readonly nonmagicalEquipmentTransformed: true;
+    readonly weightMultiplier: 10;
+    readonly stopsAging: true;
+    readonly incapacitated: true;
+    readonly speed: 0;
+    readonly attacksAgainst: 'advantage';
+    readonly automaticallyFailsSaves: readonly ['strength', 'dexterity'];
+    readonly allDamage: 'resistant';
+    readonly conditionImmunity: 'Poisoned';
+  };
+  readonly Poisoned: {
+    readonly kind: 'poisoned';
+    readonly attacksAndAbilityChecks: 'disadvantage';
+  };
+  readonly Prone: {
+    readonly kind: 'prone';
+    readonly movement: 'crawl_or_spend_half_speed_to_end';
+    readonly cannotRiseAtSpeedZero: true;
+    readonly attacksBy: 'disadvantage';
+    readonly attacksAgainstWithinFeet: 'advantage';
+    readonly attacksAgainstBeyondFeet: 'disadvantage';
+    readonly distanceFeet: 5;
+  };
+  readonly Restrained: {
+    readonly kind: 'restrained';
+    readonly speed: 0;
+    readonly attacksBy: 'disadvantage';
+    readonly attacksAgainst: 'advantage';
+    readonly dexteritySaves: 'disadvantage';
+  };
+  readonly Stunned: {
+    readonly kind: 'stunned';
+    readonly incapacitated: true;
+    readonly automaticallyFailsSaves: readonly ['strength', 'dexterity'];
+    readonly attacksAgainst: 'advantage';
+  };
+  readonly Unconscious: {
+    readonly kind: 'unconscious';
+    readonly incapacitated: true;
+    readonly prone: true;
+    readonly dropsHeldItems: true;
+    readonly remainsProneWhenEnded: true;
+    readonly speed: 0;
+    readonly attacksAgainst: 'advantage';
+    readonly automaticallyFailsSaves: readonly ['strength', 'dexterity'];
+    readonly hitsWithinFeetAreCritical: 5;
+    readonly unaware: true;
+  };
 }
+
+/** A manifest row: its mechanics are its own condition's (a union over the fifteen). */
+export type ConditionManifestRow<C extends ConditionName = ConditionName> = C extends ConditionName
+  ? {
+      readonly condition: C;
+      readonly inventorySource: 'docs/srd/source/domain-vocabularies.txt:30-54';
+      readonly mechanicsSource: string;
+      readonly mechanicalClauseCount: number;
+      readonly mechanics: ConditionMechanicsOf[C];
+    }
+  : never;
+
+/** The manifest in the vocabulary's order: row i is condition i, so a row missing, doubled or out of place fails to compile. */
+export type ConditionManifest<Names extends readonly ConditionName[] = typeof CONDITION_NAMES> = {
+  readonly [I in keyof Names]: Names[I] extends ConditionName ? ConditionManifestRow<Names[I]> : never;
+};
 
 /**
  * Complete SRD 5.2.1 condition inventory. The readable inventory is the
  * registered source extract; mechanics locators point into the bundled full
  * text where each glossary entry is printed.
  */
-export const conditionCoverageManifest: readonly ConditionManifestRow[] = [
+export const conditionCoverageManifest = [
   {
     condition: 'Blinded',
     inventorySource: 'docs/srd/source/domain-vocabularies.txt:30-54',
@@ -356,7 +373,7 @@ export const conditionCoverageManifest: readonly ConditionManifestRow[] = [
       unaware: true,
     },
   },
-];
+] as const satisfies ConditionManifest;
 
 export type MechanicalClause =
   | { readonly kind: 'cannot_see'; readonly autoFailSightChecks: true }

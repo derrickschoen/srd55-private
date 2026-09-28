@@ -4,6 +4,8 @@ import {
   conditionMechanicalState,
   conditionNames,
   type AppliedCondition,
+  type ConditionManifest,
+  type ConditionManifestRow,
   type ConditionName,
   type ExhaustionLevel,
   type MechanicalClause,
@@ -270,6 +272,19 @@ describe('SRD condition coverage manifest', () => {
           row.mechanicalClauseCount > 0,
       ),
     ).toBe(true);
+  });
+
+  it('ties each row to its own condition\'s mechanics and place, at compile time', () => {
+    const [blinded, charmed, deafened, ...rest] = conditionCoverageManifest;
+    // @ts-expect-error a row named Deafened cannot carry the Blinded mechanics.
+    const blindDeaf: ConditionManifestRow = { ...deafened, mechanics: blinded.mechanics };
+    // @ts-expect-error a row named Deafened cannot weaken a fact of its own mechanics.
+    const hearing: ConditionManifestRow = { ...deafened, mechanics: { kind: 'deafened', cannotHear: true, automaticallyFailsHearingChecks: false } };
+    const inOrder: ConditionManifest = [blinded, charmed, deafened, ...rest];
+    // @ts-expect-error the manifest is the vocabulary's fifteen rows in its order.
+    const reordered: ConditionManifest = [deafened, charmed, blinded, ...rest];
+    expect([blindDeaf.condition, hearing.condition, inOrder.length, reordered.length]).toEqual(['Deafened', 'Deafened', 15, 15]);
+    expect(deafened).toMatchObject({ condition: 'Deafened', mechanics: { kind: 'deafened', cannotHear: true, automaticallyFailsHearingChecks: true } });
   });
 
   it.each(conditionNames)(

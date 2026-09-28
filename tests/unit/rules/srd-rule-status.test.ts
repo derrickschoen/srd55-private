@@ -9,7 +9,7 @@ import {
 } from '../../helpers/srd-rule-evidence';
 import { existsSync, readFileSync } from '../../helpers/test-filesystem';
 import { formatRuleCoverage, nextOwner, ruleCoverage } from '../../../src/rules/srd/rule-coverage';
-import { SRD_RULE_IDS, type SrdRuleId } from '../../../src/rules/srd/rule-index';
+import { SRD_RULE_IDS, SRD_RULE_INDEX, type SrdRuleId } from '../../../src/rules/srd/rule-index';
 import { RULE_STATUS } from '../../../src/rules/srd/rule-status';
 import {
   CAPABILITIES,
@@ -104,8 +104,16 @@ function witnessFault({ test, asserts }: Witness, root = ROOT): string | null {
   return found.expects.includes(compact(asserts)) ? null : 'the assertion is not a statement of that test';
 }
 
-/** Why a typed clause is not typed where it says, or null when it is. */
-function typedFault({ typedAt, fact }: TypedClause, root = ROOT): string | null {
+/**
+ * Why a typed clause is not typed where it says, or null when it is. The fact
+ * must be text of the named declaration AND name its rule: the rule's printed
+ * name is a key (`Deafened:`) or a literal (`'Deafened'`) of the quoted text,
+ * so the type holding the fact is the rule's own. A fact found in a union
+ * whose members any name could carry (the RULE-INDEX r2 P2: a manifest row
+ * typing `condition` and `mechanics` independently) proves nothing about the
+ * rule.
+ */
+function typedFault(rule: SrdRuleId, { typedAt, fact }: TypedClause, root = ROOT): string | null {
   const [file = '', name = ''] = typedAt.split('#');
   if (!existsSync(`${root}/${file}`)) {
     return 'no such source file';
@@ -114,7 +122,12 @@ function typedFault({ typedAt, fact }: TypedClause, root = ROOT): string | null 
   if (declaration === null) {
     return 'no declaration with that name';
   }
-  return compact(declaration).includes(compact(fact)) ? null : 'the fact is not in that declaration';
+  if (!compact(declaration).includes(compact(fact))) {
+    return 'the fact is not in that declaration';
+  }
+  const printed = compact(SRD_RULE_INDEX[rule].name);
+  const quoted = compact(fact);
+  return [`${printed}:`, `'${printed}'`, `"${printed}"`].some((form) => quoted.includes(form)) ? null : 'the fact does not name its rule';
 }
 
 const CLAIMING = SRD_RULE_IDS.filter((id) => quotesOf(STATUS[id]).length > 0);
@@ -148,7 +161,7 @@ describe('RULE_STATUS', () => {
     const typed = SRD_RULE_IDS.flatMap((id) => typedClausesOf(STATUS[id]).map((clause) => ({ id, clause })));
     expect(typed.length).toBeGreaterThan(0);
     for (const { id, clause } of typed) {
-      expect({ id, typedAt: clause.typedAt, fault: typedFault(clause) }).toEqual({ id, typedAt: clause.typedAt, fault: null });
+      expect({ id, typedAt: clause.typedAt, fault: typedFault(id, clause) }).toEqual({ id, typedAt: clause.typedAt, fault: null });
     }
   });
 
@@ -219,10 +232,18 @@ describe('RULE_STATUS', () => {
       .toEqual({ found: true, runs: true, expects: ['expect(n).toBe(1)'] });
   });
 
-  it('refuses a typed fact its declaration does not hold', () => {
-    expect(typedFault({ clause: 'x', typedAt: 'src/combat/conditions.ts#ConditionMechanics', fact: "readonly kind: 'deafened'; readonly cannotHear: false;" }))
+  it('refuses a typed fact its declaration does not hold, or one not tied to its rule', () => {
+    const deafened = 'condition.deafened' as const;
+    expect(typedFault(deafened, { clause: 'x', typedAt: 'src/combat/conditions.ts#ConditionMechanicsOf', fact: "readonly Deafened: { readonly kind: 'deafened'; readonly cannotHear: false; };" }))
       .toBe('the fact is not in that declaration');
-    expect(typedFault({ clause: 'x', typedAt: 'src/combat/conditions.ts#NoSuchDeclaration', fact: 'x' })).toBe('no declaration with that name');
+    expect(typedFault(deafened, { clause: 'x', typedAt: 'src/combat/conditions.ts#NoSuchDeclaration', fact: 'x' })).toBe('no declaration with that name');
+    // Round 1's quotation: the member's text, found, but not the member any
+    // row named Deafened must carry.
+    expect(typedFault(deafened, { clause: 'x', typedAt: 'src/combat/conditions.ts#ConditionMechanicsOf', fact: "readonly kind: 'deafened'; readonly cannotHear: true; readonly automaticallyFailsHearingChecks: true;" }))
+      .toBe('the fact does not name its rule');
+    // Another rule's member does not type this one.
+    expect(typedFault('condition.blinded', { clause: 'x', typedAt: 'src/combat/conditions.ts#ConditionMechanicsOf', fact: "readonly Deafened: { readonly kind: 'deafened'; readonly cannotHear: true; readonly automaticallyFailsHearingChecks: true; };" }))
+      .toBe('the fact does not name its rule');
   });
 
   it('is exhaustive over SrdRuleId, and refuses an unproven status, at compile time', () => {

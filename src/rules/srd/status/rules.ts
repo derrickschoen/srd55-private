@@ -302,15 +302,19 @@ export const RULES_STATUS = {
   'glossary.weapon-attack': UNREPRESENTED_RULES_CORE,
   'condition.blinded': UNREPRESENTED_CONDITION_D20,
   'condition.charmed': UNREPRESENTED_CONDITION_D20,
-  // Both facts of the one clause are literals of the condition's type; nothing
-  // reads them (the 'cannot_hear' clause built at conditions.ts is consumed by
-  // no check), so no check fails for want of hearing.
+  // Both facts of the one clause are literals of the member keyed `Deafened`,
+  // and the manifest row named Deafened can carry only that member (its type
+  // is `ConditionMechanicsOf[C]` for its own name C; a compile-time probe in
+  // tests/unit/combat/conditions.test.ts refuses a Deafened row with the
+  // Blinded mechanics). Nothing reads the facts (the 'cannot_hear' clause built
+  // at conditions.ts is consumed by no check), so no check fails for want of
+  // hearing: that is the capability awaited.
   'condition.deafened': {
     status: 'typed_only',
     clauses: [{
       clause: 'Can’t Hear. You can’t hear and automatically fail any ability check that requires hearing.',
-      typedAt: 'src/combat/conditions.ts#ConditionMechanics',
-      fact: "readonly kind: 'deafened'; readonly cannotHear: true; readonly automaticallyFailsHearingChecks: true;",
+      typedAt: 'src/combat/conditions.ts#ConditionMechanicsOf',
+      fact: "readonly Deafened: { readonly kind: 'deafened'; readonly cannotHear: true; readonly automaticallyFailsHearingChecks: true; };",
     }],
     awaiting: ['perception_filters'],
   },

@@ -72,8 +72,12 @@ export type TypedAt = `src/${string}.ts#${string}`;
 
 /**
  * A clause whose every stated fact is a type: `fact` is text of the named
- * declaration, verbatim up to whitespace (for a union, the member together
- * with its discriminant). The status test finds the declaration and the text.
+ * declaration, verbatim up to whitespace, and it NAMES ITS RULE: the rule's
+ * printed name is a key or a literal of the quoted text (`readonly Deafened:
+ * { … }`), so the type that holds the fact is the rule's own. A member of a
+ * union any row could carry types nothing about one rule (RULE-INDEX r2: a
+ * manifest row that typed `condition` and `mechanics` independently). The
+ * status test finds the declaration, the text and the name.
  */
 export interface TypedClause {
   readonly clause: ClauseQuote;
