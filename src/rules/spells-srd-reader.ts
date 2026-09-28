@@ -64,8 +64,15 @@ export class SrdSpellError extends Error {
   }
 }
 
-/** A bundled spell's version key: the edition, then the name's slug. */
-export type SrdSpellContentKey = `${typeof BUNDLED_SPELL_RULES_EDITION}:${string}`;
+/**
+ * A spell version key AS THE PARSER PRINTS IT: the edition, then the name's
+ * slug. This is what a parse of any extract can produce, so it is open; it is
+ * NOT the bundled spell key type. The artifact is checked against the closed
+ * union the generator records beside it (`BundledSrdSpellContentKeyText` in
+ * `generated/spells-srd.ts`), and the runtime key is that union carrying the
+ * `ContentKey` brand (`BundledSpellContentKey` in `spells-srd.ts`).
+ */
+export type SrdSpellContentKeyText = `${typeof BUNDLED_SPELL_RULES_EDITION}:${string}`;
 
 export const SRD_SPELL_LEVELS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 /** 0 is a cantrip. */
@@ -136,10 +143,17 @@ export type SrdSpellDuration =
   | { readonly kind: 'until_dispelled'; readonly or_triggered: boolean }
   | { readonly kind: 'special' };
 
-export interface SrdSpellDescription {
+/**
+ * One parsed spell. `Key` is the type its version key has: the open parse-time
+ * text by default, the generated closed union in the artifact's contract, and
+ * the branded bundled key at runtime.
+ */
+export interface SrdSpellDescription<
+  Key extends SrdSpellContentKeyText = SrdSpellContentKeyText,
+> {
   readonly name: string;
   readonly identity_key: string;
-  readonly content_key: SrdSpellContentKey;
+  readonly content_key: Key;
   readonly level: SrdSpellLevel;
   readonly school: KnownSpellSchool;
   readonly ritual: boolean;
@@ -397,7 +411,7 @@ export function parseSrdSpellRange(
   return range;
 }
 
-function isSrdSpellContentKey(value: string): value is SrdSpellContentKey {
+function isSrdSpellContentKey(value: string): value is SrdSpellContentKeyText {
   return value.startsWith(`${BUNDLED_SPELL_RULES_EDITION}:`);
 }
 
@@ -640,9 +654,14 @@ export function parseSrdSpellListMemberships(
   );
 }
 
-/** What the build records: the parsed catalog, in extract order. */
-export interface SrdSpellCatalogArtifact {
-  readonly descriptions: readonly SrdSpellDescription[];
+/**
+ * What the build records: the parsed catalog, in extract order. The generated
+ * artifact instantiates `Key` with the closed union of the keys it records.
+ */
+export interface SrdSpellCatalogArtifact<
+  Key extends SrdSpellContentKeyText = SrdSpellContentKeyText,
+> {
+  readonly descriptions: readonly SrdSpellDescription<Key>[];
   readonly memberships: readonly SrdSpellListMembership[];
 }
 

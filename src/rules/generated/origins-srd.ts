@@ -13,6 +13,25 @@
  */
 import type { SrdOriginsArtifact } from '../origins-srd-reader';
 
+/** Every species template key this artifact records: the closed set the runtime mints `ContentKey` from. */
+export type BundledSrdSpeciesContentKeyText =
+  | "2024:species:dragonborn"
+  | "2024:species:dwarf"
+  | "2024:species:elf"
+  | "2024:species:gnome"
+  | "2024:species:goliath"
+  | "2024:species:halfling"
+  | "2024:species:human"
+  | "2024:species:orc"
+  | "2024:species:tiefling";
+
+/** Every background template key this artifact records: the closed set the runtime mints `ContentKey` from. */
+export type BundledSrdBackgroundContentKeyText =
+  | "2024:background:acolyte"
+  | "2024:background:criminal"
+  | "2024:background:sage"
+  | "2024:background:soldier";
+
 export const BUNDLED_SRD_ORIGINS = {
   "species": [
     {
@@ -635,4 +654,4 @@ export const BUNDLED_SRD_ORIGINS = {
       ]
     }
   ]
-} as const satisfies SrdOriginsArtifact;
+} as const satisfies SrdOriginsArtifact<BundledSrdSpeciesContentKeyText, BundledSrdBackgroundContentKeyText>;

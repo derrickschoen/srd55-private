@@ -13,6 +13,47 @@
  */
 import type { SrdWeaponsArtifact } from '../weapons-srd-reader';
 
+/** Every weapon template key this artifact records: the closed set the runtime mints `ContentKey` from. */
+export type BundledSrdWeaponContentKeyText =
+  | "2024:weapon:club"
+  | "2024:weapon:dagger"
+  | "2024:weapon:greatclub"
+  | "2024:weapon:handaxe"
+  | "2024:weapon:javelin"
+  | "2024:weapon:light-hammer"
+  | "2024:weapon:mace"
+  | "2024:weapon:quarterstaff"
+  | "2024:weapon:sickle"
+  | "2024:weapon:spear"
+  | "2024:weapon:dart"
+  | "2024:weapon:light-crossbow"
+  | "2024:weapon:shortbow"
+  | "2024:weapon:sling"
+  | "2024:weapon:battleaxe"
+  | "2024:weapon:flail"
+  | "2024:weapon:glaive"
+  | "2024:weapon:greataxe"
+  | "2024:weapon:greatsword"
+  | "2024:weapon:halberd"
+  | "2024:weapon:lance"
+  | "2024:weapon:longsword"
+  | "2024:weapon:maul"
+  | "2024:weapon:morningstar"
+  | "2024:weapon:pike"
+  | "2024:weapon:rapier"
+  | "2024:weapon:scimitar"
+  | "2024:weapon:shortsword"
+  | "2024:weapon:trident"
+  | "2024:weapon:warhammer"
+  | "2024:weapon:war-pick"
+  | "2024:weapon:whip"
+  | "2024:weapon:blowgun"
+  | "2024:weapon:hand-crossbow"
+  | "2024:weapon:heavy-crossbow"
+  | "2024:weapon:longbow"
+  | "2024:weapon:musket"
+  | "2024:weapon:pistol";
+
 export const BUNDLED_SRD_WEAPONS = {
   "templates": [
     {
@@ -1133,4 +1174,4 @@ export const BUNDLED_SRD_WEAPONS = {
       ]
     }
   ]
-} as const satisfies SrdWeaponsArtifact;
+} as const satisfies SrdWeaponsArtifact<BundledSrdWeaponContentKeyText>;

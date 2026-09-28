@@ -29,7 +29,12 @@ import type { ArmorCategory, ArmorDexBonus } from '../domain/enums';
 
 export const BUNDLED_ARMOR_RULES_EDITION = '2024';
 
-/** A bundled armour's content key: the edition, the kind, then a slug. */
+/**
+ * An armour's content key AS THE PARSER PRINTS IT: the edition, the kind, then
+ * a slug. Open, because a parse of any extract produces it; the artifact is
+ * checked against the closed union it records (`BundledSrdArmorContentKeyText`)
+ * and the runtime key is that union branded (`BundledArmorContentKey`).
+ */
 export type SrdArmorContentKey =
   `${typeof BUNDLED_ARMOR_RULES_EDITION}:armor:${string}`;
 
@@ -44,8 +49,10 @@ export class SrdArmorError extends Error {
  * One parsed row. Field names are the `armor_templates` column names so the
  * seeder can insert the object column-wise, exactly as the weapon seeder does.
  */
-export interface SrdArmorTemplate {
-  readonly content_key: SrdArmorContentKey;
+export interface SrdArmorTemplate<
+  Key extends SrdArmorContentKey = SrdArmorContentKey,
+> {
+  readonly content_key: Key;
   readonly name: string;
   readonly category: ArmorCategory;
   /** Base AC for armour; the ADDITIVE BONUS for the Shield row. See the schema. */

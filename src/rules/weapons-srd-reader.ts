@@ -63,7 +63,12 @@ import type { WritableWeaponRange } from '../domain/weapon-range';
 /** The rules edition every bundled weapon belongs to. */
 export const BUNDLED_WEAPON_RULES_EDITION = '2024';
 
-/** A bundled weapon's content key: the edition, the kind, then a slug. */
+/**
+ * A weapon's content key AS THE PARSER PRINTS IT: the edition, the kind, then
+ * a slug. Open, because a parse of any extract produces it; the artifact is
+ * checked against the closed union it records (`BundledSrdWeaponContentKeyText`)
+ * and the runtime key is that union branded (`BundledWeaponContentKey`).
+ */
 export type SrdWeaponContentKey =
   `${typeof BUNDLED_WEAPON_RULES_EDITION}:weapon:${string}`;
 
@@ -75,8 +80,10 @@ export type SrdWeaponContentKey =
  * pre-fill copies the same names into `character_weapons`. Keeping the three
  * lists identical is what makes the copy need no mapping table.
  */
-export interface SrdWeaponTemplate {
-  readonly content_key: SrdWeaponContentKey;
+export interface SrdWeaponTemplate<
+  Key extends SrdWeaponContentKey = SrdWeaponContentKey,
+> {
+  readonly content_key: Key;
   readonly name: string;
   readonly srd_group: SrdWeaponGroup;
   readonly damage: WeaponDamageAmount;
@@ -497,8 +504,10 @@ export interface SrdMasteryProgressionRecord {
 }
 
 /** WHAT THE BUILD RECORDS: the weapon table and the mastery progressions. */
-export interface SrdWeaponsArtifact {
-  readonly templates: readonly SrdWeaponTemplate[];
+export interface SrdWeaponsArtifact<
+  Key extends SrdWeaponContentKey = SrdWeaponContentKey,
+> {
+  readonly templates: readonly SrdWeaponTemplate<Key>[];
   readonly mastery_progressions: readonly SrdMasteryProgressionRecord[];
 }
 

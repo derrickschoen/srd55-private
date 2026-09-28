@@ -92,10 +92,15 @@ import {
 import { weaponContentKey } from './weapons-srd-reader';
 import { BUNDLED_ORIGIN_RULES_EDITION } from './origin-rules-edition';
 
-/** A bundled species' content key: the edition, the kind, then a slug. */
+/**
+ * A species' and a background's content keys AS THE PARSER PRINTS THEM: the
+ * edition, the kind, then a slug. Open, because a parse of any extract
+ * produces them; the artifact is checked against the closed unions it records
+ * (`BundledSrdSpeciesContentKeyText`, `BundledSrdBackgroundContentKeyText`)
+ * and the runtime keys are those unions branded.
+ */
 export type SrdSpeciesContentKey =
   `${typeof BUNDLED_ORIGIN_RULES_EDITION}:species:${string}`;
-/** A bundled background's content key: the edition, the kind, then a slug. */
 export type SrdBackgroundContentKey =
   `${typeof BUNDLED_ORIGIN_RULES_EDITION}:background:${string}`;
 
@@ -136,8 +141,10 @@ export interface SrdSpeciesTrait {
   readonly effects: readonly SrdTraitEffect[];
 }
 
-export interface SrdSpeciesTemplate {
-  readonly content_key: SrdSpeciesContentKey;
+export interface SrdSpeciesTemplate<
+  Key extends SrdSpeciesContentKey = SrdSpeciesContentKey,
+> {
+  readonly content_key: Key;
   readonly name: string;
   readonly creature_type: KnownCreatureType;
   readonly size: KnownCreatureSize;
@@ -146,8 +153,10 @@ export interface SrdSpeciesTemplate {
   readonly traits: readonly SrdSpeciesTrait[];
 }
 
-export interface SrdBackgroundTemplate {
-  readonly content_key: SrdBackgroundContentKey;
+export interface SrdBackgroundTemplate<
+  Key extends SrdBackgroundContentKey = SrdBackgroundContentKey,
+> {
+  readonly content_key: Key;
   readonly name: string;
   readonly ability_score_1: string;
   readonly ability_score_2: string;
@@ -1099,10 +1108,16 @@ function slug(name: string): string {
   return name.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-');
 }
 
-/** WHAT THE BUILD RECORDS: both catalogs, in extract order. */
-export interface SrdOriginsArtifact {
-  readonly species: readonly SrdSpeciesTemplate[];
-  readonly backgrounds: readonly SrdBackgroundTemplate[];
+/**
+ * WHAT THE BUILD RECORDS: both catalogs, in extract order. The generated
+ * artifact instantiates the key types with the closed unions it records.
+ */
+export interface SrdOriginsArtifact<
+  SpeciesKey extends SrdSpeciesContentKey = SrdSpeciesContentKey,
+  BackgroundKey extends SrdBackgroundContentKey = SrdBackgroundContentKey,
+> {
+  readonly species: readonly SrdSpeciesTemplate<SpeciesKey>[];
+  readonly backgrounds: readonly SrdBackgroundTemplate<BackgroundKey>[];
 }
 
 export function deriveSrdOriginsArtifact(

@@ -12,6 +12,22 @@
  */
 import type { SrdArmorTemplate } from '../armor-srd-reader';
 
+/** Every armour template key this artifact records: the closed set the runtime mints `ContentKey` from. */
+export type BundledSrdArmorContentKeyText =
+  | "2024:armor:padded-armor"
+  | "2024:armor:leather-armor"
+  | "2024:armor:studded-leather-armor"
+  | "2024:armor:hide-armor"
+  | "2024:armor:chain-shirt"
+  | "2024:armor:scale-mail"
+  | "2024:armor:breastplate"
+  | "2024:armor:half-plate-armor"
+  | "2024:armor:ring-mail"
+  | "2024:armor:chain-mail"
+  | "2024:armor:splint-armor"
+  | "2024:armor:plate-armor"
+  | "2024:armor:shield";
+
 export const BUNDLED_SRD_ARMOR_TEMPLATES = [
   {
     "content_key": "2024:armor:padded-armor",
@@ -143,4 +159,4 @@ export const BUNDLED_SRD_ARMOR_TEMPLATES = [
     "strength_requirement": null,
     "stealth_disadvantage": false
   }
-] as const satisfies readonly SrdArmorTemplate[];
+] as const satisfies readonly SrdArmorTemplate<BundledSrdArmorContentKeyText>[];

@@ -12,6 +12,10 @@ import { ensureBundledStableContentIdentity } from '../catalog/content-registry'
 import { CasterContribution } from './caster-contribution';
 import { contributesToSharedSlots } from './progression-type';
 import {
+  bundledClassContentKey,
+  type BundledClassContentKey,
+} from './srd-class-names';
+import {
   maxPreparableLevelForClass,
   pactMagic,
   slots,
@@ -237,13 +241,16 @@ export function classContentKey(name: string): string {
 
 /**
  * Content keys of every class this module bundles. The seeder writes exactly
- * these; `hasBundledClassContent` reads exactly these.
+ * these; `hasBundledClassContent` reads exactly these. Each is minted through
+ * `bundledClassContentKey`, so a seeded class the SRD does not print is refused.
  */
 export function bundledClassContentKeys(): {
-  readonly classes: readonly string[];
+  readonly classes: readonly BundledClassContentKey[];
 } {
   return {
-    classes: Object.keys(classSeeds()).map(classContentKey),
+    classes: Object.keys(classSeeds()).map((name) =>
+      bundledClassContentKey(classContentKey(name)),
+    ),
   };
 }
 

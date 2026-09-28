@@ -55,10 +55,14 @@ import {
  * one literal, `as const satisfies <DomainType>`: the literals keep their
  * literal types (a spell's key, a class level, a closed vocabulary member)
  * and tsc checks every generated value against the domain type the moment it
- * is written, without widening it to that type. Where a bare literal cannot
- * satisfy a brand (a class content key, a feat key), the domain type states the
- * closed set of printed keys and the runtime module mints the brand through
- * its validating constructor.
+ * is written, without widening it to that type. A bare literal cannot carry a
+ * brand, so a content key is recorded as text from a CLOSED set: the class and
+ * feat keys from their vocabularies, and every other recorded key set (spells,
+ * weapons, armour, species, backgrounds) from a literal union the generator
+ * emits beside the literal (`keyUnions`), which the artifact's `satisfies`
+ * type is instantiated with. The runtime module mints the `ContentKey` brand
+ * by membership in that set (`src/domain/recorded-content-keys.ts`), never by
+ * a cast.
  *
  * EVERY BYTE OF EVERY SOURCE IS PINNED. The header records each source
  * corpus's sha256, so an edit the parse ignores (a preamble line, an
@@ -139,7 +143,27 @@ export interface SrdArtifact {
     readonly names: readonly string[];
     readonly module: string;
   };
+  /**
+   * The closed key sets the artifact records, each emitted above the literal
+   * as a literal union type that `type.satisfies` names. The artifact's own
+   * contract then refuses a key the SRD text does not print, and the runtime
+   * mints the `ContentKey` brand by membership in the same set.
+   */
+  readonly keyUnions?: readonly SrdArtifactKeyUnion[];
   derive(read: SrdCorpusReader): unknown;
+}
+
+/** One closed key set an artifact records (see {@link SrdArtifact.keyUnions}). */
+export interface SrdArtifactKeyUnion {
+  /** The exported literal union type's name. */
+  readonly name: string;
+  /** What one member is, for the type's doc comment. */
+  readonly member: string;
+  /**
+   * The path from the derived value to an array of rows, each with a string
+   * `content_key` (`[]` when the value itself is that array).
+   */
+  readonly rows: readonly string[];
 }
 
 /** The drift test every artifact without a dedicated one is checked by. */
@@ -193,10 +217,13 @@ export const SRD_ARTIFACTS: readonly SrdArtifact[] = [
     driftTest: 'tests/unit/rules/spells-srd-generation.test.ts',
     exportName: 'BUNDLED_SRD_SPELL_CATALOG',
     type: {
-      satisfies: 'SrdSpellCatalogArtifact',
+      satisfies: 'SrdSpellCatalogArtifact<BundledSrdSpellContentKeyText>',
       names: ['SrdSpellCatalogArtifact'],
       module: '../spells-srd-reader',
     },
+    keyUnions: [
+      { name: 'BundledSrdSpellContentKeyText', member: 'spell version key', rows: ['descriptions'] },
+    ],
     derive: (read) => deriveSrdSpellCatalogArtifact(
       read(SRD_CORPUS_PATHS.spellDescriptions),
       spellListTexts(read),
@@ -240,10 +267,13 @@ export const SRD_ARTIFACTS: readonly SrdArtifact[] = [
     driftTest: ARTIFACTS_DRIFT_TEST,
     exportName: 'BUNDLED_SRD_ARMOR_TEMPLATES',
     type: {
-      satisfies: 'readonly SrdArmorTemplate[]',
+      satisfies: 'readonly SrdArmorTemplate<BundledSrdArmorContentKeyText>[]',
       names: ['SrdArmorTemplate'],
       module: '../armor-srd-reader',
     },
+    keyUnions: [
+      { name: 'BundledSrdArmorContentKeyText', member: 'armour template key', rows: [] },
+    ],
     derive: (read) => parseSrdArmorTemplates(read(SRD_CORPUS_PATHS.armorTable)),
   },
   {
@@ -379,10 +409,14 @@ export const SRD_ARTIFACTS: readonly SrdArtifact[] = [
     driftTest: ARTIFACTS_DRIFT_TEST,
     exportName: 'BUNDLED_SRD_ORIGINS',
     type: {
-      satisfies: 'SrdOriginsArtifact',
+      satisfies: 'SrdOriginsArtifact<BundledSrdSpeciesContentKeyText, BundledSrdBackgroundContentKeyText>',
       names: ['SrdOriginsArtifact'],
       module: '../origins-srd-reader',
     },
+    keyUnions: [
+      { name: 'BundledSrdSpeciesContentKeyText', member: 'species template key', rows: ['species'] },
+      { name: 'BundledSrdBackgroundContentKeyText', member: 'background template key', rows: ['backgrounds'] },
+    ],
     derive: (read) => deriveSrdOriginsArtifact(
       read(SRD_CORPUS_PATHS.speciesDescriptions),
       read(SRD_CORPUS_PATHS.backgrounds),
@@ -441,10 +475,13 @@ export const SRD_ARTIFACTS: readonly SrdArtifact[] = [
     driftTest: ARTIFACTS_DRIFT_TEST,
     exportName: 'BUNDLED_SRD_WEAPONS',
     type: {
-      satisfies: 'SrdWeaponsArtifact',
+      satisfies: 'SrdWeaponsArtifact<BundledSrdWeaponContentKeyText>',
       names: ['SrdWeaponsArtifact'],
       module: '../weapons-srd-reader',
     },
+    keyUnions: [
+      { name: 'BundledSrdWeaponContentKeyText', member: 'weapon template key', rows: ['templates'] },
+    ],
     derive: (read) => deriveSrdWeaponsArtifact(
       read(SRD_CORPUS_PATHS.weaponsTable),
       read(SRD_CORPUS_PATHS.weaponMasteryProgression),
@@ -508,6 +545,60 @@ function assertJsonFaithful(value: unknown, at: string): void {
   throw new SrdArtifactError(`${at} is a ${typeof value}, which JSON cannot carry.`);
 }
 
+/** The recorded keys at `union.rows`, checked: an array of rows, each with a distinct string key. */
+function recordedKeys(
+  artifact: SrdArtifact,
+  union: SrdArtifactKeyUnion,
+  value: unknown,
+): readonly string[] {
+  const at = [artifact.exportName, ...union.rows].join('.');
+  let rows: unknown = value;
+  for (const field of union.rows) {
+    if (typeof rows !== 'object' || rows === null || !Object.hasOwn(rows, field)) {
+      throw new SrdArtifactError(`${at} is not in the derived value.`);
+    }
+    rows = Reflect.get(rows, field);
+  }
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new SrdArtifactError(`${at} is not a non-empty array of rows.`);
+  }
+  const keys = rows.map((row: unknown, index): string => {
+    const key: unknown = typeof row === 'object' && row !== null
+      ? Reflect.get(row, 'content_key')
+      : undefined;
+    if (typeof key !== 'string') {
+      throw new SrdArtifactError(`${at}[${String(index)}] has no string content_key.`);
+    }
+    return key;
+  });
+  if (new Set(keys).size !== keys.length) {
+    throw new SrdArtifactError(`${at} records a content_key twice.`);
+  }
+  return keys;
+}
+
+/** The literal union type of one recorded key set, one member per line. */
+function keyUnionLines(
+  artifact: SrdArtifact,
+  union: SrdArtifactKeyUnion,
+  value: unknown,
+): readonly string[] {
+  if (!artifact.type.satisfies.includes(union.name)) {
+    throw new SrdArtifactError(
+      `${artifact.path} emits ${union.name}, which its satisfies type does not name.`,
+    );
+  }
+  const keys = recordedKeys(artifact, union, value);
+  return [
+    `/** Every ${union.member} this artifact records: the closed set the runtime mints \`ContentKey\` from. */`,
+    `export type ${union.name} =`,
+    ...keys.map((key, index) =>
+      `  | ${JSON.stringify(key)}${index === keys.length - 1 ? ';' : ''}`,
+    ),
+    '',
+  ];
+}
+
 /**
  * A corpus's whole-text fingerprint: the sha256 of its UTF-8 bytes. The text
  * must not hold U+FFFD, the one character a decoder substitutes for bytes it
@@ -561,6 +652,7 @@ export function composeSrdArtifact(
     ' */',
     `import type { ${artifact.type.names.join(', ')} } from '${artifact.type.module}';`,
     '',
+    ...(artifact.keyUnions ?? []).flatMap((union) => keyUnionLines(artifact, union, value)),
     `export const ${artifact.exportName} = ${JSON.stringify(value, null, 2)} as const satisfies ${artifact.type.satisfies};`,
     '',
   ].join('\n');

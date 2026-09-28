@@ -683,7 +683,7 @@ describe('SRD subclass manifest', () => {
   });
 
   it('resolves every explicit subclass spell key in the bundled spell catalog', () => {
-    const catalogContentKeys = new Set(
+    const catalogContentKeys = new Set<string>(
       bundledSrdSpellDescriptions().map((spell) => spell.content_key),
     );
     const unresolved = srdSubclassSpellVersionKeyEntries.filter(

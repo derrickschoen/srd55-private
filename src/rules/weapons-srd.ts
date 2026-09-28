@@ -21,6 +21,10 @@ import { ensureBundledStableContentIdentity } from '../catalog/content-registry'
 import type { WeaponMasteryGrant } from '../domain/enums';
 import { rowContractError } from '../domain/contracts/rows';
 import { deepFreeze } from '../domain/deep-freeze';
+import {
+  recordedContentKeys,
+  type RecordedContentKey,
+} from '../domain/recorded-content-keys';
 import type {
   VersatileWeaponDamage,
   WeaponDamageAmount,
@@ -31,12 +35,37 @@ import {
   type SrdMasteryProgression,
   type SrdWeaponTemplate,
 } from './weapons-srd-reader';
-import { BUNDLED_SRD_WEAPONS } from './generated/weapons-srd';
+import {
+  BUNDLED_SRD_WEAPONS,
+  type BundledSrdWeaponContentKeyText,
+} from './generated/weapons-srd';
 
-const ARTIFACT = deepFreeze(BUNDLED_SRD_WEAPONS);
+/** A bundled weapon's key: one the build recorded, earned as a `ContentKey`. */
+export type BundledWeaponContentKey =
+  RecordedContentKey<BundledSrdWeaponContentKeyText>;
+
+/** A bundled weapon template, keyed by a bundled weapon key. */
+export type BundledWeaponTemplate = SrdWeaponTemplate<BundledWeaponContentKey>;
+
+const WEAPON_KEYS = recordedContentKeys(
+  'weapon',
+  BUNDLED_SRD_WEAPONS.templates.map((template) => template.content_key),
+);
+
+/** Mints a bundled weapon key; refuses a key the build did not record. */
+export function bundledWeaponContentKey(value: string): BundledWeaponContentKey {
+  return WEAPON_KEYS.key(value);
+}
+
+const TEMPLATES: readonly BundledWeaponTemplate[] = deepFreeze(
+  BUNDLED_SRD_WEAPONS.templates.map((template) => ({
+    ...template,
+    content_key: bundledWeaponContentKey(template.content_key),
+  })),
+);
 
 const MASTERY_PROGRESSIONS: readonly SrdMasteryProgression[] = Object.freeze(
-  ARTIFACT.mastery_progressions.map((progression) => Object.freeze({
+  BUNDLED_SRD_WEAPONS.mastery_progressions.map((progression) => Object.freeze({
     class_name: progression.class_name,
     counts: new Map<number, number>(
       progression.counts.map((count, index) => [index + 1, count] as const),
@@ -116,8 +145,8 @@ function assertRow(
  * in the TEST, where a human counted the four groups of the source table by
  * hand.
  */
-export function bundledWeaponTemplates(): readonly SrdWeaponTemplate[] {
-  return ARTIFACT.templates;
+export function bundledWeaponTemplates(): readonly BundledWeaponTemplate[] {
+  return TEMPLATES;
 }
 
 function sqlBool(value: boolean): number {

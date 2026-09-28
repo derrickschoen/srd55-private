@@ -28,13 +28,16 @@ import type { ClassLevel, ContentKey } from '../domain/ids';
 import { rowContractError } from '../domain/contracts/rows';
 import { deepFreeze } from '../domain/deep-freeze';
 import {
-  BUNDLED_CONTENT_KEYS,
-  bundledClassContentKey,
   level,
   SrdClassResourcesError,
   type SrdClassResourceFormulaManifest,
   type SrdClassResourceManifestEntry,
 } from './class-resources-srd-reader';
+import {
+  BUNDLED_CLASS_CONTENT_KEYS,
+  bundledClassContentKey,
+  isBundledClassContentKey,
+} from './srd-class-names';
 import { BUNDLED_SRD_CLASS_RESOURCES } from './generated/class-resources-srd';
 
 const BUNDLED_MANIFEST: readonly SrdClassResourceManifestEntry[] = deepFreeze(
@@ -132,7 +135,7 @@ function hasExpectedBundledClassResourceContent(
   db: DatabaseContext,
   expected: BundledClassResourceExpectation,
 ): boolean {
-  const placeholders = BUNDLED_CONTENT_KEYS.map(() => '?').join(', ');
+  const placeholders = BUNDLED_CLASS_CONTENT_KEYS.map(() => '?').join(', ');
   const actualLadders = db.all(
     `SELECT definition.content_key, resource.resource_kind,
             resource.class_level, resource.maximum
@@ -140,7 +143,7 @@ function hasExpectedBundledClassResourceContent(
        JOIN class_definitions AS definition
          ON definition.id = resource.class_definition_id
       WHERE definition.content_key IN (${placeholders})`,
-    [...BUNDLED_CONTENT_KEYS],
+    [...BUNDLED_CLASS_CONTENT_KEYS],
     (row) => ({
       content_key: String(row.content_key),
       resource_kind: String(row.resource_kind),
@@ -177,7 +180,7 @@ function hasExpectedBundledClassResourceContent(
        JOIN class_definitions AS definition
          ON definition.id = formula.class_definition_id
       WHERE definition.content_key IN (${placeholders})`,
-    [...BUNDLED_CONTENT_KEYS],
+    [...BUNDLED_CLASS_CONTENT_KEYS],
   );
   if (actualFormulaRows.length !== expected.formulas.length) {
     return false;
@@ -216,11 +219,11 @@ export function hasBundledClassResourceContent(db: DatabaseContext): boolean {
 }
 
 function classIds(db: DatabaseContext): ReadonlyMap<string, number> {
-  const placeholders = BUNDLED_CONTENT_KEYS.map(() => '?').join(', ');
+  const placeholders = BUNDLED_CLASS_CONTENT_KEYS.map(() => '?').join(', ');
   const rows = db.all(
     `SELECT id, content_key FROM class_definitions
       WHERE content_key IN (${placeholders})`,
-    [...BUNDLED_CONTENT_KEYS],
+    [...BUNDLED_CLASS_CONTENT_KEYS],
     (row) => ({ id: Number(row.id), content_key: String(row.content_key) }),
   );
   const result = new Map(rows.map((row) => [row.content_key, row.id]));
@@ -260,7 +263,7 @@ function seedExpectedClassResources(
     );
     for (const row of existingLadders) {
       if (
-        BUNDLED_CONTENT_KEYS.includes(row.content_key as ContentKey) &&
+        isBundledClassContentKey(row.content_key) &&
         !expectedLadderKeys.has(ladderKey(row.content_key, row.resource_kind, row.class_level))
       ) {
         db.exec('DELETE FROM class_resources WHERE id = ?', [row.id]);
@@ -306,7 +309,7 @@ function seedExpectedClassResources(
     );
     for (const row of existingFormulas) {
       if (
-        BUNDLED_CONTENT_KEYS.includes(row.content_key as ContentKey) &&
+        isBundledClassContentKey(row.content_key) &&
         !expectedFormulaKeys.has(formulaKey(row.content_key, row.resource_kind))
       ) {
         db.exec('DELETE FROM class_resource_formulas WHERE id = ?', [row.id]);

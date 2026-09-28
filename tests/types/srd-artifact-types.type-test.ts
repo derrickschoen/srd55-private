@@ -21,22 +21,47 @@ import type {
   ClassResourceFormulaRecord,
 } from '../../src/domain/class-resources';
 import type { Ability, CharacterLevel, Skill } from '../../src/domain/enums';
+import type { ContentKey } from '../../src/domain/ids';
 import type { PerCharacterLevel } from '../../src/domain/per-level';
+import type { RecordedContentKey } from '../../src/domain/recorded-content-keys';
 import type { SpellRange } from '../../src/domain/spell-range';
+import type { BundledArmorContentKey } from '../../src/rules/armor-srd';
 import type { SrdArmorContentKey } from '../../src/rules/armor-srd-reader';
-import type { BundledClassContentKeyText } from '../../src/rules/class-resources-srd-reader';
+import type {
+  BundledBackgroundContentKey,
+  BundledSpeciesContentKey,
+} from '../../src/rules/origins-srd';
 import type { SrdSkillAbilitiesArtifact } from '../../src/rules/skills-reader';
+import type { BundledSpellContentKey } from '../../src/rules/spells-srd';
 import type {
   SrdCastingOption,
   SrdSpellActionType,
+  SrdSpellCatalogArtifact,
   SrdSpellComponents,
+  SrdSpellContentKeyText,
   SrdSpellDuration,
   SrdSpellLevel,
 } from '../../src/rules/spells-srd-reader';
-import type { SrdClassName } from '../../src/rules/srd-class-names';
-import type { BUNDLED_SRD_ARMOR_TEMPLATES } from '../../src/rules/generated/armor-srd';
+import type { BundledClassContentKeyText, SrdClassName } from '../../src/rules/srd-class-names';
+import type { BundledWeaponContentKey } from '../../src/rules/weapons-srd';
+import type {
+  BUNDLED_SRD_ARMOR_TEMPLATES,
+  BundledSrdArmorContentKeyText,
+} from '../../src/rules/generated/armor-srd';
 import type { BUNDLED_SRD_CLASS_RESOURCES } from '../../src/rules/generated/class-resources-srd';
-import type { BUNDLED_SRD_SPELL_CATALOG } from '../../src/rules/generated/spells-srd';
+import type {
+  BUNDLED_SRD_ORIGINS,
+  BundledSrdBackgroundContentKeyText,
+  BundledSrdSpeciesContentKeyText,
+} from '../../src/rules/generated/origins-srd';
+import type {
+  BUNDLED_SRD_SPELL_CATALOG,
+  BundledSrdSpellContentKeyText,
+} from '../../src/rules/generated/spells-srd';
+import type {
+  BUNDLED_SRD_WEAPONS,
+  BundledSrdWeaponContentKeyText,
+} from '../../src/rules/generated/weapons-srd';
 
 /** Compiles only when `T` is exactly `true`. `false` is a TS2344. */
 type Assert<T extends true> = T;
@@ -207,3 +232,61 @@ type _ActionSurgeIsTheTwoPrintedSteps = Assert<Exact<
     ];
   }
 >>;
+
+/**
+ * A BUNDLED KEY IS A RECORDED LITERAL THAT EARNED THE BRAND (fix round 2, P2).
+ * Each artifact's key union is exactly the keys it records; the runtime key is
+ * that union branded, so unbranded text, a bare `ContentKey`, and a key the
+ * SRD does not print are all refused. The refused names were checked absent
+ * from their extracts by hand: Aasimar (`species-descriptions.txt` header),
+ * a fifth background (`backgrounds.txt` header: four), Katana and "Splint
+ * Mail" (the armour table prints `Splint Armor`, line 24).
+ */
+type _TheParseTimeSpellKeyIsOpen = Assert<Accepts<'2024:chronal-shift', SrdSpellContentKeyText>>;
+type _SpellKeyUnionIsExactlyTheRecordedKeys = Assert<Exact<
+  BundledSrdSpellContentKeyText,
+  Spells[number]['content_key']
+>>;
+type _SpellKeyIsTheRecordedUnionBranded = Assert<Exact<
+  BundledSpellContentKey,
+  RecordedContentKey<BundledSrdSpellContentKeyText>
+>>;
+type _SpellKeyAcceptsARecordedBrandedKey = Assert<Accepts<'2024:acid-arrow' & ContentKey, BundledSpellContentKey>>;
+type _SpellKeyRefusesAnUnrecordedKey = Assert<Refuses<'2024:chronal-shift' & ContentKey, BundledSpellContentKey>>;
+type _SpellKeyRefusesUnbrandedText = Assert<Refuses<'2024:acid-arrow', BundledSpellContentKey>>;
+type _SpellKeyRefusesABareContentKey = Assert<Refuses<ContentKey, BundledSpellContentKey>>;
+type SpellContractRow =
+  SrdSpellCatalogArtifact<BundledSrdSpellContentKeyText>['descriptions'][number];
+type _SpellContractAcceptsARecordedRow = Assert<Accepts<Spells[0], SpellContractRow>>;
+type _SpellContractRefusesAnUnrecordedKey = Assert<Refuses<
+  Omit<Spells[0], 'content_key'> & { readonly content_key: '2024:chronal-shift' },
+  SpellContractRow
+>>;
+
+type _WeaponKeyUnionIsExactlyTheRecordedKeys = Assert<Exact<
+  BundledSrdWeaponContentKeyText,
+  (typeof BUNDLED_SRD_WEAPONS)['templates'][number]['content_key']
+>>;
+type _WeaponKeyAcceptsLongsword = Assert<Accepts<'2024:weapon:longsword' & ContentKey, BundledWeaponContentKey>>;
+type _WeaponKeyRefusesKatana = Assert<Refuses<'2024:weapon:katana' & ContentKey, BundledWeaponContentKey>>;
+
+type _ArmorKeyUnionIsExactlyTheRecordedKeys = Assert<Exact<
+  BundledSrdArmorContentKeyText,
+  (typeof BUNDLED_SRD_ARMOR_TEMPLATES)[number]['content_key']
+>>;
+type _ArmorKeyAcceptsSplintArmor = Assert<Accepts<'2024:armor:splint-armor' & ContentKey, BundledArmorContentKey>>;
+type _ArmorKeyRefusesSplintMail = Assert<Refuses<'2024:armor:splint-mail' & ContentKey, BundledArmorContentKey>>;
+
+type _SpeciesKeyUnionIsExactlyTheRecordedKeys = Assert<Exact<
+  BundledSrdSpeciesContentKeyText,
+  (typeof BUNDLED_SRD_ORIGINS)['species'][number]['content_key']
+>>;
+type _SpeciesKeyAcceptsTiefling = Assert<Accepts<'2024:species:tiefling' & ContentKey, BundledSpeciesContentKey>>;
+type _SpeciesKeyRefusesAasimar = Assert<Refuses<'2024:species:aasimar' & ContentKey, BundledSpeciesContentKey>>;
+
+type _BackgroundKeyUnionIsExactlyTheRecordedKeys = Assert<Exact<
+  BundledSrdBackgroundContentKeyText,
+  (typeof BUNDLED_SRD_ORIGINS)['backgrounds'][number]['content_key']
+>>;
+type _BackgroundKeyAcceptsSage = Assert<Accepts<'2024:background:sage' & ContentKey, BundledBackgroundContentKey>>;
+type _BackgroundKeyRefusesNoble = Assert<Refuses<'2024:background:noble' & ContentKey, BundledBackgroundContentKey>>;

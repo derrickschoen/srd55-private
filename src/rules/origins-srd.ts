@@ -21,6 +21,10 @@ import { rowContractError } from '../domain/contracts/rows';
 import { backgroundFeatBaseName } from '../domain/background-feat-name';
 import { deepFreeze } from '../domain/deep-freeze';
 import {
+  recordedContentKeys,
+  type RecordedContentKey,
+} from '../domain/recorded-content-keys';
+import {
   bundledFeatDefinitions,
   ensureBundledFeatContent,
 } from './feats-srd';
@@ -29,7 +33,11 @@ import {
   type SrdBackgroundTemplate,
   type SrdSpeciesTemplate,
 } from './origins-srd-reader';
-import { BUNDLED_SRD_ORIGINS } from './generated/origins-srd';
+import {
+  BUNDLED_SRD_ORIGINS,
+  type BundledSrdBackgroundContentKeyText,
+  type BundledSrdSpeciesContentKeyText,
+} from './generated/origins-srd';
 
 /**
  * The rules edition every bundled species and background belongs to.
@@ -40,7 +48,50 @@ import { BUNDLED_SRD_ORIGINS } from './generated/origins-srd';
 import { BUNDLED_ORIGIN_RULES_EDITION } from './origin-rules-edition';
 export { BUNDLED_ORIGIN_RULES_EDITION };
 
-const ARTIFACT = deepFreeze(BUNDLED_SRD_ORIGINS);
+/** A bundled species' key: one the build recorded, earned as a `ContentKey`. */
+export type BundledSpeciesContentKey =
+  RecordedContentKey<BundledSrdSpeciesContentKeyText>;
+/** A bundled background's key: one the build recorded, earned as a `ContentKey`. */
+export type BundledBackgroundContentKey =
+  RecordedContentKey<BundledSrdBackgroundContentKeyText>;
+
+export type BundledSpeciesTemplate = SrdSpeciesTemplate<BundledSpeciesContentKey>;
+export type BundledBackgroundTemplate =
+  SrdBackgroundTemplate<BundledBackgroundContentKey>;
+
+const SPECIES_KEYS = recordedContentKeys(
+  'species',
+  BUNDLED_SRD_ORIGINS.species.map((template) => template.content_key),
+);
+const BACKGROUND_KEYS = recordedContentKeys(
+  'background',
+  BUNDLED_SRD_ORIGINS.backgrounds.map((template) => template.content_key),
+);
+
+/** Mints a bundled species key; refuses a key the build did not record. */
+export function bundledSpeciesContentKey(value: string): BundledSpeciesContentKey {
+  return SPECIES_KEYS.key(value);
+}
+
+/** Mints a bundled background key; refuses a key the build did not record. */
+export function bundledBackgroundContentKey(
+  value: string,
+): BundledBackgroundContentKey {
+  return BACKGROUND_KEYS.key(value);
+}
+
+const SPECIES: readonly BundledSpeciesTemplate[] = deepFreeze(
+  BUNDLED_SRD_ORIGINS.species.map((template) => ({
+    ...template,
+    content_key: bundledSpeciesContentKey(template.content_key),
+  })),
+);
+const BACKGROUNDS: readonly BundledBackgroundTemplate[] = deepFreeze(
+  BUNDLED_SRD_ORIGINS.backgrounds.map((template) => ({
+    ...template,
+    content_key: bundledBackgroundContentKey(template.content_key),
+  })),
+);
 
 /* ==========================================================================
  * SEEDING
@@ -62,13 +113,13 @@ function assertRow(
 }
 
 /** The nine parsed species, in extract order, shared and deeply frozen. */
-export function bundledSpeciesTemplates(): readonly SrdSpeciesTemplate[] {
-  return ARTIFACT.species;
+export function bundledSpeciesTemplates(): readonly BundledSpeciesTemplate[] {
+  return SPECIES;
 }
 
 /** The four parsed backgrounds, in extract order, shared and deeply frozen. */
-export function bundledBackgroundTemplates(): readonly SrdBackgroundTemplate[] {
-  return ARTIFACT.backgrounds;
+export function bundledBackgroundTemplates(): readonly BundledBackgroundTemplate[] {
+  return BACKGROUNDS;
 }
 
 /**

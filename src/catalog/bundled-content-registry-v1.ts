@@ -8,6 +8,7 @@ import { bundledFeatDefinitions } from '../rules/feats-srd';
 import { bundledSpeciesDefinitions } from '../rules/origin-definitions-srd';
 import {
   bundledBackgroundTemplates,
+  bundledSpeciesContentKey,
   bundledSpeciesTemplates,
 } from '../rules/origins-srd';
 import { bundledArmorTemplates } from '../rules/armor-srd';
@@ -139,49 +140,55 @@ class BundledRegistryEntryRefusal extends Error {}
 
 /**
  * The stable-key manifest is constructed from the exact exported collections
- * consumed by the production seeders. It never hand-lists a key. Species and
- * background deliberately union their definition/template halves into one
- * aggregate key; item has no bundled source collection today.
+ * consumed by the production seeders. It never hand-lists a key, and it never
+ * casts one: every key arrives already branded by its kind's recorded-key
+ * constructor, and the species definitions' hand-written keys are minted here
+ * through `bundledSpeciesContentKey`, so a definition naming a species the
+ * build did not record is refused. Species and background deliberately union
+ * their definition/template halves into one aggregate key; item has no
+ * bundled source collection today.
  */
 export function bundledContentManifestV1(): readonly BundledManifestEntryV1[] {
   staticManifest ??= Object.freeze([
     ...bundledWeaponTemplates().map((row) => ({
       kind: 'weapon' as const,
-      contentKey: row.content_key as ContentKey,
+      contentKey: row.content_key,
     })),
     ...bundledArmorTemplates().map((row) => ({
       kind: 'armor' as const,
-      contentKey: row.content_key as ContentKey,
+      contentKey: row.content_key,
     })),
     ...bundledSrdSpellDescriptions().map((row) => ({
       kind: 'spell' as const,
-      contentKey: row.content_key as ContentKey,
+      contentKey: row.content_key,
     })),
     ...bundledClassContentKeys().classes.map((contentKey) => ({
       kind: 'class' as const,
-      contentKey: contentKey as ContentKey,
+      contentKey,
     })),
     ...bundledFeatDefinitions().map((row) => ({
       kind: 'feat' as const,
-      contentKey: row.content_key as ContentKey,
+      contentKey: row.content_key,
     })),
     ...bundledSubclassDefinitionContentKeys().map((contentKey) => ({
       kind: 'subclass' as const,
-      contentKey: contentKey as ContentKey,
+      contentKey,
     })),
     ...[
-      ...bundledSpeciesDefinitions(),
-      ...bundledSpeciesTemplates(),
-    ].map((row) => ({
+      ...bundledSpeciesDefinitions().map((row) =>
+        bundledSpeciesContentKey(row.content_key),
+      ),
+      ...bundledSpeciesTemplates().map((row) => row.content_key),
+    ].map((contentKey) => ({
       kind: 'species' as const,
-      contentKey: row.content_key as ContentKey,
+      contentKey,
     })),
     ...[
       ...bundledBackgroundDefinitions(),
       ...bundledBackgroundTemplates(),
     ].map((row) => ({
       kind: 'background' as const,
-      contentKey: row.content_key as ContentKey,
+      contentKey: row.content_key,
     })),
   ].filter(
     (entry, index, entries) => entries.findIndex((candidate) =>

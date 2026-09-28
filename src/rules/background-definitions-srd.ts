@@ -45,6 +45,7 @@ import { GrantRule } from '../grants/grant-rule';
 import {
   bundledBackgroundTemplates,
   BUNDLED_ORIGIN_RULES_EDITION,
+  type BundledBackgroundContentKey,
 } from './origins-srd';
 
 type GrantRuleSeed = Readonly<Record<string, unknown>>;
@@ -79,7 +80,7 @@ function originFeatRule(backgroundSlug: string): GrantRuleSeed {
 }
 
 export interface BundledBackgroundDefinition {
-  readonly content_key: string;
+  readonly content_key: BundledBackgroundContentKey;
   readonly name: string;
   readonly grant_rules: readonly GrantRuleSeed[];
 }

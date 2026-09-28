@@ -35,7 +35,14 @@ import {
   type PerCharacterLevel,
 } from '../domain/per-level';
 import { parseSrdClassLevelFeatures } from './class-level-features-srd-reader';
-import { SRD_CLASS_NAMES, type SrdClassName } from './srd-class-names';
+import {
+  bundledClassContentKey,
+  bundledClassContentKeyText,
+  SRD_CLASS_NAMES,
+  type BundledClassContentKey,
+  type BundledClassContentKeyText,
+  type SrdClassName,
+} from './srd-class-names';
 
 export class SrdClassResourcesError extends Error {
   constructor(message: string) {
@@ -48,54 +55,8 @@ const CLASS_NAMES = SRD_CLASS_NAMES;
 
 export type BundledClassName = SrdClassName;
 
-/** A bundled class's content key as the build records it: one of twelve literals. */
-export type BundledClassContentKeyText = `2024:class:${Lowercase<SrdClassName>}`;
-
-/**
- * Each class's key, checked PER CLASS by the compiler: the mapped type admits
- * only the lower-cased name of the class it is keyed by.
- */
-const BUNDLED_CLASS_CONTENT_KEY_TEXT = {
-  Barbarian: '2024:class:barbarian',
-  Bard: '2024:class:bard',
-  Cleric: '2024:class:cleric',
-  Druid: '2024:class:druid',
-  Fighter: '2024:class:fighter',
-  Monk: '2024:class:monk',
-  Paladin: '2024:class:paladin',
-  Ranger: '2024:class:ranger',
-  Rogue: '2024:class:rogue',
-  Sorcerer: '2024:class:sorcerer',
-  Warlock: '2024:class:warlock',
-  Wizard: '2024:class:wizard',
-} as const satisfies {
-  readonly [Name in SrdClassName]: `2024:class:${Lowercase<Name>}`;
-};
-
-/** The recorded key of one bundled class. */
-export function bundledClassContentKeyText(
-  className: SrdClassName,
-): BundledClassContentKeyText {
-  return BUNDLED_CLASS_CONTENT_KEY_TEXT[className];
-}
-
-function contentKey(className: BundledClassName): ContentKey {
-  return BUNDLED_CLASS_CONTENT_KEY_TEXT[className] as string as ContentKey;
-}
-
-/** The twelve bundled class content keys, in source order. */
-export const BUNDLED_CONTENT_KEYS: readonly ContentKey[] = CLASS_NAMES.map(contentKey);
-
-/**
- * The runtime's constructor for a class content key the build recorded as
- * text: it must be one of the twelve bundled keys.
- */
-export function bundledClassContentKey(value: string): ContentKey {
-  const key = BUNDLED_CONTENT_KEYS.find((candidate) => candidate === value);
-  if (key === undefined) {
-    throw new SrdClassResourcesError(`${value} is not a bundled class content key.`);
-  }
-  return key;
+function contentKey(className: BundledClassName): BundledClassContentKey {
+  return bundledClassContentKey(bundledClassContentKeyText(className));
 }
 
 interface LadderConfiguration {

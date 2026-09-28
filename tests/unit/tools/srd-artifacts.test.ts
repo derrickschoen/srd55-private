@@ -157,6 +157,61 @@ describe('the SRD artifact composer', () => {
   });
 });
 
+describe('the recorded key unions', () => {
+  function keyed(value: unknown, satisfies = 'Probe<ProbeKey>'): SrdArtifact {
+    return {
+      ...syntheticArtifact('src/generated/probe.ts', () => value),
+      type: { satisfies, names: ['Probe'], module: '../probe-reader' },
+      keyUnions: [{ name: 'ProbeKey', member: 'probe key', rows: ['rows'] }],
+    };
+  }
+
+  it('emits the recorded keys, in record order, as a literal union the satisfies type names', () => {
+    const text = composeSrdArtifact(
+      keyed({ rows: [{ content_key: '2024:beta' }, { content_key: '2024:alpha' }] }),
+      probeCorpus,
+    );
+    expect(text).toContain([
+      "import type { Probe } from '../probe-reader';",
+      '',
+      '/** Every probe key this artifact records: the closed set the runtime mints `ContentKey` from. */',
+      'export type ProbeKey =',
+      '  | "2024:beta"',
+      '  | "2024:alpha";',
+      '',
+      'export const PROBE = {',
+    ].join('\n'));
+    expect(text).toMatch(/\n\} as const satisfies Probe<ProbeKey>;\n$/u);
+  });
+
+  it.each([
+    ['a key recorded twice', { rows: [{ content_key: 'a' }, { content_key: 'a' }] }, 'PROBE.rows records a content_key twice.'],
+    ['a row without a string key', { rows: [{ content_key: 1 }] }, 'PROBE.rows[0] has no string content_key.'],
+    ['no rows', { rows: [] }, 'PROBE.rows is not a non-empty array of rows.'],
+    ['a path the value does not have', { other: [] }, 'PROBE.rows is not in the derived value.'],
+  ])('refuses %s', (_label, value, message) => {
+    expect(() => composeSrdArtifact(keyed(value), probeCorpus)).toThrow(new SrdArtifactError(message));
+  });
+
+  it('refuses a union its satisfies type does not name, which would leave the contract open', () => {
+    expect(() => composeSrdArtifact(keyed({ rows: [{ content_key: 'a' }] }, 'Probe'), probeCorpus)).toThrow(
+      new SrdArtifactError('src/generated/probe.ts emits ProbeKey, which its satisfies type does not name.'),
+    );
+  });
+
+  it('records the five key sets the runtime brands, each instantiating its artifact contract', () => {
+    expect(SRD_ARTIFACTS.flatMap((artifact) =>
+      (artifact.keyUnions ?? []).map((union) => [artifact.path, union.name, artifact.type.satisfies]),
+    )).toEqual([
+      ['src/rules/generated/spells-srd.ts', 'BundledSrdSpellContentKeyText', 'SrdSpellCatalogArtifact<BundledSrdSpellContentKeyText>'],
+      ['src/rules/generated/armor-srd.ts', 'BundledSrdArmorContentKeyText', 'readonly SrdArmorTemplate<BundledSrdArmorContentKeyText>[]'],
+      ['src/rules/generated/origins-srd.ts', 'BundledSrdSpeciesContentKeyText', 'SrdOriginsArtifact<BundledSrdSpeciesContentKeyText, BundledSrdBackgroundContentKeyText>'],
+      ['src/rules/generated/origins-srd.ts', 'BundledSrdBackgroundContentKeyText', 'SrdOriginsArtifact<BundledSrdSpeciesContentKeyText, BundledSrdBackgroundContentKeyText>'],
+      ['src/rules/generated/weapons-srd.ts', 'BundledSrdWeaponContentKeyText', 'SrdWeaponsArtifact<BundledSrdWeaponContentKeyText>'],
+    ]);
+  });
+});
+
 describe('the SRD artifact writer', () => {
   it('writes each artifact freshly composed over a stale file, reading only the corpora', () => {
     const artifacts = [

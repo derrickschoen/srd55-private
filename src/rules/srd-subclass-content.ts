@@ -21,6 +21,11 @@ import {
   type SrdSubclassClassName,
 } from './srd-subclasses-reader';
 import type { Ability } from '../domain/enums';
+import type { ContentKey } from '../domain/ids';
+import {
+  recordedContentKeys,
+  type RecordedContentKeys,
+} from '../domain/recorded-content-keys';
 import type { CharacterLevel } from '../domain/enums';
 import {
   HEADING_ONLY_DESCRIPTION,
@@ -180,9 +185,19 @@ function srdSubclassSeeds(): readonly BundledSubclassSeed[] {
   return cachedSeeds;
 }
 
-/** The twelve inherit-parent subclass keys derived from SC-2's manifest. */
-export function bundledSrdSubclassDefinitionContentKeys(): readonly string[] {
-  return Object.freeze(srdSubclassSeeds().map((seed) => seed.content_key));
+let cachedKeys: RecordedContentKeys<string> | undefined;
+
+/**
+ * The twelve inherit-parent subclass keys derived from SC-2's manifest, each
+ * earning the `ContentKey` brand by membership in the set the generated
+ * subclass artifact's names derive.
+ */
+export function bundledSrdSubclassDefinitionContentKeys(): readonly ContentKey[] {
+  cachedKeys ??= recordedContentKeys(
+    'subclass',
+    srdSubclassSeeds().map((seed) => seed.content_key),
+  );
+  return cachedKeys.keys;
 }
 
 function canonicalValue(value: unknown): unknown {

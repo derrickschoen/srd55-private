@@ -36,22 +36,54 @@ import { encodeSpellRange } from '../domain/spell-range';
 import type { ContentKey } from '../domain/ids';
 import { deepFreeze } from '../domain/deep-freeze';
 import {
+  recordedContentKeys,
+  type RecordedContentKey,
+} from '../domain/recorded-content-keys';
+import {
   BUNDLED_SPELL_RULES_EDITION,
   BUNDLED_SPELL_SEED_VERSION,
   SrdSpellError,
   type SrdSpellDescription,
   type SrdSpellListMembership,
 } from './spells-srd-reader';
-import { BUNDLED_SRD_SPELL_CATALOG } from './generated/spells-srd';
+import {
+  BUNDLED_SRD_SPELL_CATALOG,
+  type BundledSrdSpellContentKeyText,
+} from './generated/spells-srd';
 
-const BUNDLED_SPELL_DESCRIPTIONS: readonly SrdSpellDescription[] = deepFreeze(
-  BUNDLED_SRD_SPELL_CATALOG.descriptions,
+/**
+ * THE BUNDLED SPELL KEY TYPE: one of the version keys the build recorded (the
+ * generated literal union), carrying the `ContentKey` brand it earns by
+ * membership in that set through {@link bundledSpellContentKey}.
+ */
+export type BundledSpellContentKey =
+  RecordedContentKey<BundledSrdSpellContentKeyText>;
+
+/** A bundled spell: its parsed description, keyed by a bundled spell key. */
+export type BundledSrdSpellDescription =
+  SrdSpellDescription<BundledSpellContentKey>;
+
+const SPELL_KEYS = recordedContentKeys(
+  'spell',
+  BUNDLED_SRD_SPELL_CATALOG.descriptions.map((spell) => spell.content_key),
 );
+
+/** Mints a bundled spell key; refuses a key the build did not record. */
+export function bundledSpellContentKey(value: string): BundledSpellContentKey {
+  return SPELL_KEYS.key(value);
+}
+
+function bundledSpell(spell: SrdSpellDescription): BundledSrdSpellDescription {
+  return { ...spell, content_key: bundledSpellContentKey(spell.content_key) };
+}
+
+const BUNDLED_SPELL_DESCRIPTIONS: readonly BundledSrdSpellDescription[] =
+  deepFreeze(BUNDLED_SRD_SPELL_CATALOG.descriptions.map(bundledSpell));
 const BUNDLED_SPELL_LIST_MEMBERSHIPS: readonly SrdSpellListMembership[] =
   deepFreeze(BUNDLED_SRD_SPELL_CATALOG.memberships);
 
 /** All enumerated SRD spell descriptions, in extract order. */
-export function bundledSrdSpellDescriptions(): readonly SrdSpellDescription[] {
+export function bundledSrdSpellDescriptions(): readonly BundledSrdSpellDescription[] {
   return BUNDLED_SPELL_DESCRIPTIONS;
 }
 
@@ -104,7 +136,9 @@ function hasBundledSpellCardinality(
 /**
  * What one seed pass installs. Absent fields mean the bundled catalog; tests
  * pass a re-parsed or edited catalog to model a build that ships different
- * source text.
+ * source text. A re-parsed spell keeps its bundled key: each key is minted
+ * through {@link bundledSpellContentKey}, so a key the build did not record is
+ * refused rather than seeded.
  */
 export interface BundledSpellSeedSources {
   readonly descriptions?: readonly SrdSpellDescription[];
@@ -137,7 +171,7 @@ export interface BundledSpellSeedResult {
 }
 
 interface ValidatedBundledSpellSource {
-  readonly spells: readonly SrdSpellDescription[];
+  readonly spells: readonly BundledSrdSpellDescription[];
   readonly memberships: readonly SrdSpellListMembership[];
   readonly membershipsByName: ReadonlyMap<
     string,
@@ -155,12 +189,13 @@ class BundledSpellSeedEntryRefusal extends Error {
 function bundledSpellSource(
   sources: BundledSpellSeedSources = Object.freeze({}),
 ): ValidatedBundledSpellSource {
-  const parsedSpells = sources.descriptions ?? BUNDLED_SPELL_DESCRIPTIONS;
+  const parsedSpells = sources.descriptions?.map(bundledSpell) ??
+    BUNDLED_SPELL_DESCRIPTIONS;
   const parsedMemberships = sources.memberships ?? BUNDLED_SPELL_LIST_MEMBERSHIPS;
   const byName = new Map(parsedSpells.map((spell) => [spell.name, spell]));
   const includedNames = new Set(parsedSpells
     .filter((spell) =>
-      sources.includedContentKeys?.has(spell.content_key as ContentKey) ?? true
+      sources.includedContentKeys?.has(spell.content_key) ?? true
     )
     .map((spell) => spell.name));
   const membershipsByName = new Map<string, SrdSpellListMembership[]>();
@@ -427,11 +462,11 @@ function repairBundledSpellIdentityRegistrations(
 
 function reconcileBundledSpellEntry(
   db: DatabaseContext,
-  spell: SrdSpellDescription,
+  spell: BundledSrdSpellDescription,
   memberships: readonly SrdSpellListMembership[],
   storedProjection: BundledStoredProjectionV1 | undefined,
 ): BundledSpellSeedEntryOutcome {
-  const contentKey = spell.content_key as ContentKey;
+  const contentKey = spell.content_key;
   try {
     return db.transaction(() => {
       const root = db.oneRaw(
@@ -587,7 +622,7 @@ export function ensureBundledSpellContent(
     db,
     spell,
     source.membershipsByName.get(spell.name) ?? Object.freeze([]),
-    storedByKey.get(spell.content_key as ContentKey),
+    storedByKey.get(spell.content_key),
   ));
   return Object.freeze({
     outcomes: Object.freeze(outcomes),
