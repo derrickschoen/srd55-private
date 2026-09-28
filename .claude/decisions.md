@@ -3577,3 +3577,38 @@ TIMED PAIR, label b2-0928-5dcff9e4 (new label; report folders empty before the r
 - Fix dispatched (wf_9da352c6-a75): a linear, bounded scan keeping every offence it catches today; an exclusion is allowed only with proof that artifacts are pure data. Batch 2 is NOT landed.
 
 Next free id: D938.
+
+## D938 — 2026-09-28 07:20 — LANDING BATCH 2 LANDED (RULE-INDEX, PC-EXPORT-TRUTH, FOOTPRINT + the codec-scan fix); a flaky ENV-TRACE test from batch 1 found (a finding against my batch-1 landing)
+
+CODEC-SCAN FIX, 7d94c706 (test file only; agent-reported: 9/9 mutants).
+- Root cause: patterns P4 and P5's unbounded `(?::[^)]*)?` started at every name tail followed by ':' in rule-index.ts's single 406 KB initialiser (about 11,000 'txt:' spans), which is quadratic.
+- The fix bounds the annotation to 1,024 chars and starts at whole names only. No file is excluded. The whole-name narrowing drops only false positives; accepted.
+- VERIFIED BY ME:
+  - the test's tree scan takes 1,024 / 1,018 / 1,018 ms solo on batch 2 (20,785 before);
+  - hand mutant MAX_ANNOTATION_CHARS 1024 → 100_000 is KILLED by the exact-bound test; restored 0f52a853; 7/7.
+
+TIMED PAIR RE-RUN, label b2r2-0928-6ec7d23c (new). A = main 5dcff9e4, B = + batch 2 with the fix, 6ec7d23c. Both arms tsc 0 and check 0. All four runs VALID and passed:
+- A prewarm 188.5 s, timed 189.1 s;
+- B prewarm 237.5 s, timed 198.5 s (+9.4 s), inside the +30 s guard;
+- inventory A 676 / 12,002, B 701 / 12,314, consistent between prewarm and timed.
+- Retry victims in B: js-round-plan-integration 5,099 ms, replay OWN-BUNDLE 5,076 ms, d583 Git seam 5,751 ms (all timeout-watch items), plus the ENV-TRACE flake below.
+
+BROWSER (run by me on arm B):
+- 11 affected spec files, 29/29 passed (PLAYWRIGHT_PORT 4660): database-recovery, the homebrew/library/purge/replacement/superseded set, planner, homebrew-draft-save-truth, sharing.
+- Save-related specs, 7/7 passed (port 4670): vtt-save-manager, vtt-long-rest, character-list.
+
+LANDED: main = a6525a47, 53 commits cherry-picked onto e20d1e0a. The tree equals the timed B arm except .claude/decisions.md (D937). Mirror verified.
+- On main now:
+  - the whole-body placement type with session v13, the history archive and the offline replay tool (FOOTPRINT);
+  - PC export truth (skills, senses, Draconic ancestry, masteries), the recovery screen and authored senses (PC-EXPORT-TRUTH);
+  - SRD_RULE_INDEX (1,766 rules) with the exhaustive RULE_STATUS and the SRD vocabulary incl. d3 (RULE-INDEX);
+  - 20 generated SRD artifacts from one command.
+- Pins now: blind-rows c5c13584 and d569-cells 5d17e63b (FOOTPRINT C1, D928); survival-seeds f10cc246 (pcac, D913); the other four as D880.
+
+FINDING AGAINST MY BATCH-1 LANDING (D936), full length:
+- tests/unit/verdict-recorder-inputs.test.ts "ENV-TRACE … does not reuse a green recorded with DND_LANE_INTEL_MODE unset…" failed in B's timed initial phase by ASSERTION at :179 (97 ms: `expected undefined to be 1`), then passed on retry.
+- Mechanism (read by me): the test stores a verdict and immediately reads it back, and both call globalSalt(). The salt includes an inventory of file names under tests/, so a concurrent test file creating or deleting files there changes the salt between the two calls.
+- The batch-1 fix agent named this race in its report ("another test file adding a path under tests/ between the two globalSalt() calls"). I did not treat it as a flake risk before landing.
+- It is on main now. A root-cause fix is dispatched: salt stability under concurrent test writes, plus a witness.
+
+Next free id: D939.
