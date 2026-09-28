@@ -1,14 +1,6 @@
 /** The verdict cache `npm run test:affected` keeps; tests pass their own `cacheRoot`. */
 export const CACHE_ROOT: string;
 
-/**
- * The one directory below a module inventory root that tests write probes into
- * while they run, each in a directory of its own. The module inventory leaves
- * it out, a module outside it that reaches into it fails closed, and
- * test:affected neither runs nor caches a test file in it.
- */
-export const TRANSIENT_PROBES: 'tests/transient-probes';
-
 /** A test file's static module closure (repository paths) and the references that make it fail closed. */
 export interface ClosureGraph {
   readonly closure: readonly string[];

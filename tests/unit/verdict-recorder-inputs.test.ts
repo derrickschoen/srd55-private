@@ -10,9 +10,9 @@ import {
   observationRecord,
   storeVerdict,
   testFiles,
-  TRANSIENT_PROBES,
   type ObservationRecord,
 } from '../../scripts/test-affected.mjs';
+import { TRANSIENT_PROBES } from '../../scripts/transient-probes.mjs';
 import { ENGINE_CHILD_BUNDLE_ENV, engineChildSealedReads } from '../../tools/engine-child-bundle';
 import {
   existsSync,
@@ -125,6 +125,8 @@ beforeAll(() => {
     process.execPath,
     [
       vitestExecutable, 'run', '--configLoader', 'runner', '--reporter=default', '--maxWorkers=1',
+      // The regular config leaves TRANSIENT_PROBES out.
+      '--config', 'tests/helpers/transient-probes.vitest.config.ts',
       ...Object.keys(PROBES).map((probe) => probePath(probe as Probe)),
     ],
     { cwd: repositoryRoot, encoding: 'utf8', env },

@@ -1,6 +1,7 @@
 import { configDefaults, defineConfig } from 'vitest/config';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { TRANSIENT_PROBES } from './scripts/transient-probes.mjs';
 
 /**
  * `tests/live/*.live-test.ts` probe the real `claude` CLI to check that the
@@ -32,7 +33,10 @@ export default defineConfig({
     // Run BOTH unit and integration .test.ts under vitest. Browser tests are
     // .spec.ts under tests/browser and belong to Playwright (npm run test:browser).
     include: ['tests/**/*.test.ts', ...liveInclusions],
-    exclude: [...configDefaults.exclude, 'tests/integration-supervisor/**'],
+    // TRANSIENT_PROBES holds probes tests write while they run; one a killed
+    // run leaves behind is no test of this suite. A test runs its probes
+    // under tests/helpers/transient-probes.vitest.config.ts.
+    exclude: [...configDefaults.exclude, 'tests/integration-supervisor/**', `${TRANSIENT_PROBES}/**`],
     setupFiles: verdictRecorderSetup,
     // Builds the seeded database images once, before any worker is forked
     // (tests/helpers/seeded-database-image-cache.ts).

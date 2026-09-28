@@ -7,10 +7,10 @@ import {
   globalSalt,
   moduleInventory,
   storeVerdict,
-  TRANSIENT_PROBES,
   walkerSources,
   type ObservationRecord,
 } from '../../scripts/test-affected.mjs';
+import { TRANSIENT_PROBES } from '../../scripts/transient-probes.mjs';
 import {
   mkdirSync,
   mkdtempSync,
@@ -634,8 +634,12 @@ describe('the global salt keys the bytes of the walker and of every module it lo
     });
   });
 
-  it('the runner\'s sources are itself and the shared classifier, which it imports', () => {
-    expect(walkerSources()).toEqual(['scripts/test-affected.mjs', 'scripts/runtime-import-edges.mjs']);
+  it('the runner\'s sources are itself and the two modules it imports, the shared classifier and TRANSIENT_PROBES', () => {
+    expect(walkerSources()).toEqual([
+      'scripts/test-affected.mjs',
+      'scripts/runtime-import-edges.mjs',
+      'scripts/transient-probes.mjs',
+    ]);
   });
 });
 
