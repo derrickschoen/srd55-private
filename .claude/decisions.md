@@ -4079,5 +4079,46 @@ SHA-NI's contribution, measured by masking OPENSSL_ia32cap bit 29: node createHa
 - Sessions already running keep their model: SQLITE-PERF, the SHA-SPLIT review r1 (01a0ee87-7b12-74f2-b1b0-4d304a4b296a), and GATE-REVIEW astra.
 - The owner-named astra and Fable reviewers (D960) are unchanged.
 
-Next free id: D963.
+### D963 — 2026-09-29 15:08 — GATE-REVIEW results (astra xhigh + fable xhigh)
+
+Reports: .tmp/runs/gate-review/astra/final.md (codex gpt-6-astra, session 01a0ee7c-d058-7442-b7fb-d57a786e4df2) and .tmp/runs/gate-review/fable/final.md (claude-fable-5-1 via claude -p).
+
+**Where both agree.**
+- The gate is work-bound (utilisation 98.4% at w4), so scheduling order and pool changes won't help.
+- No expensive whole-test pair is a proven duplicate by the same-subject, same-assertion, same-mutant bar, except the challenge-feasibility twin below.
+- Vitest `--changed` is unsafe as a gate. It misses fixture reads by path, engine child bundles, generated data, directory enumeration, and worker sharing under isolate:false. It is usable only for a dev loop, with the full gate at landing.
+- Module-scope work runs outside budgets (Part A:86): d569-v5 10.6 s, legacy-invariance 10.5 s, blind-turn-context 8.4 s, arena 3.3 s, arena-interleave 2.8 s, source-binding 2.7 s. Fixing it saves nothing, but makes the cost budgeted.
+- The renderer-profile preparation is independent of the cap: 91 cases (13 seeds × 7 caps) take 73 s, and one build per seed would take about 10.5 s (fable's estimate).
+- d583's index build overruns its budget. Fable says it failed the initial phase in 54 of 90 reports.
+
+**VERIFIED by me in code.**
+- die-sizes, dice and type-contract each spawn tsc. tests/fixtures/compiler-probe/tsconfig.json already compiles src plus three probes for declaration-emit.
+- Both challenge-feasibility files call runChallengeReducerFeasibility(fixture) in beforeAll (production :35, main :440).
+- The production assertions are conditional on `report.verdict === 'GO'` (:39).
+- The default runtime reads process heapUsed (src/vtt/challenge-feasibility.ts:178) with a wall limit of 90_000 ms (:57).
+- source-is-greppable nulLines walks every byte in JS (:99-107).
+- tests/helpers/seeded-database-image-cache.ts cacheKey hashes profile, build key, schema and migrations, but not seed implementation code (astra's stale-image finding is plausible).
+- scripts/test-affected.mjs exists (42 KB) and /tmp/dnd-verdict-cache does not exist.
+
+**PLAUSIBLE from code, not executed (fable).** tools/gate-vitest.mjs accepts --changed (VALUE_OPTIONS :17). When no requested list is given, gate-verdict's discovery check compares requested against scheduled files, and requested defaults to scheduled (tools/gate-verdict.mjs:368), so a filtered run could report "passed". I recorded this but have not confirmed it.
+
+**No-decision candidates for a GATE-TRIM unit** (savings are estimates in file-seconds unless marked measured; at w8, 1 file-second ≈ 1/8 s wall):
+- the three tsc probes into the shared probe project (40.5 s, fable, measured cost);
+- the D306 seeded clone in four non-seed suites (~40 s, fable). This needs the image cache key fixed first (astra);
+- renderer-profile builds the context once per seed and trims at the 7 caps (8–62 s);
+- d583 index: drop parent pointers and cache resolution (about 5 s, plus a ~12 s retry avoided on most gates);
+- a native NUL prefilter (4.4 s);
+- d569 manifest validated once instead of twice (4–10 s, astra);
+- the conversation smoke in-process, keeping the stdio smoke (8–20 s, astra);
+- the two installer tests narrowed to the relevant catalog entry (4–9 s, astra);
+- challenge-feasibility with a fixed FeasibilityRuntime and an unconditional GO assertion (removes the heap/wall-dependent branch behind the 186 s stall, D957);
+- module-scope work moved into timed code.
+
+**Owner decisions raised:**
+- (1) Tiering: whether the survival 30-seed sweep (84.8 s, kills no named mutant per fable), the migration prefix family (48.8 s) and the 3×3 smoke (34.7 s) should drop out of lane gates and run at landing plus nightly.
+- (2) Whether lanes and the dev loop may use the existing verdict cache (scripts/test-affected.mjs), with the full gate kept at landing (Part A:77).
+- (3) Whether to delete the challenge-feasibility twin exploration: 5 identical tests plus 4 subsets, flagged by the room-d-land review F1.
+- (4) Whether the installer may share one installed image across four tests (D306 scope).
+
+Next free id: D964.
 
