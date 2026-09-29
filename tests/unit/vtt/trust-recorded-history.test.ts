@@ -10,6 +10,7 @@ import {
   MemoryBrowserSessionStore,
   TRUST_RECORDED_HISTORY_KEY_SHA256,
   type LoadedRelaxedStamp,
+  type RelaxedSessionResume,
 } from '../../../src/vtt/session-persistence';
 import { composeStoredCharacterEncounter } from '../../../src/vtt/stored-character-encounter';
 import {
@@ -53,7 +54,12 @@ const stampOf = (purpose: string, trustedRevisions: readonly number[]): LoadedRe
 describe('SAVE-COMPAT C5: trust-recorded-history', () => {
   it('W23: a relaxed load resumes from the recorded state and is stamped with the recording build', () => {
     const plain = e1(recordS2(BUILD_A, overhang()).plain);
-    const resume = loadSaveTrustingRecordedHistory(bundle(plain), BUILD_B, 'W23');
+    // A strict load refuses this save (W1); trusting its recorded history loads it.
+    let loaded: RelaxedSessionResume | undefined;
+    expect(() => {
+      loaded = loadSaveTrustingRecordedHistory(bundle(plain), BUILD_B, 'W23');
+    }).not.toThrow();
+    const resume = loaded!;
     expect(canonicalJson(resume.encounterState)).toBe(canonicalJson(plain[1]!.encounterState));
     // Revision 2 (reducer_applied) is the one derived kind: trusted, not re-derived.
     expect(resume.loaded).toEqual(stampOf('W23', [2]));
