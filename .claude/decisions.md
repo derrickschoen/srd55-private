@@ -4029,5 +4029,26 @@ SHA-NI's contribution, measured by masking OPENSSL_ia32cap bit 29: node createHa
 
 **GATE-OTEL.** The traced gate started 14:34:12 at --maxWorkers=4, with no quiet wait (owner). It holds fan-out slots 2–8, and outside load is logged. The runner is .tmp/runs/otel/run-traced-gate.sh.
 
-Next free id: D960.
+### D960 — 2026-09-29 14:46 — GATE-OTEL results; GATE-REVIEW by astra xhigh and fable xhigh
+
+**GATE-OTEL results. VERIFIED by me** from the spans and the analyzer (the analyzer is codex-written; I reran it and totalled its per-file table myself).
+- Traced gate at --maxWorkers=4, exit 0. Initial phase 373.6 s; total 386.0 s wall; d583 passed on retry.
+- Busy 1,471.0 file-seconds; achieved parallelism 3.94 of 4 (98.4%). So at 4 workers the gate is work-bound, not scheduling-bound.
+- Split: test bodies 1,274.4 s (86.6%), setup hooks 110.8 s, import/transform 78.2 s, collect 4.1 s, teardown 2.0 s.
+- Module-scope work at import (Part A:86 candidates): d569-v5 10.6 s, ai-dm-legacy-invariance 10.5 s, blind-turn-context 8.4 s.
+- Longest files: arena 89.7 s, survival-policy 85.7 s, renderer-profile 75.6 s.
+- Tracing overhead is +2.7%, codex-measured on 2 files × 3 runs each (medians 36.22 s traced vs 35.26 s untraced).
+- Caveats: the analyzer's idle-gap table keys on Vitest's per-file worker id, so it is meaningless. 711 trace roots against 707 reporter files, unexplained. Outside python test load was high during the run.
+- Codex harness session: 01a0ee6a-58f8-7fb0-9a68-b918640e41de.
+
+**GATE-REVIEW.** The owner's words, verbatim: "have astra-xhigh and fable on xhigh comb through the finished full telemetry results and trace what is slowing us down the most and what is actually not necessary to run (ex logically duplicated or obvious or something i didn't think of) , look for things that don't need to run every time or better ways to only test the code that changed. also look for more efficient ways to do things".
+- Brief: .tmp/runs/gate-review/brief.md. Both reviewers are read-only, run no tests, and are independent of each other.
+- Codex gpt-6-astra xhigh, session 01a0ee7c-d058-7442-b7fb-d57a786e4df2.
+- Fable runs as `claude -p --model claude-fable-5-1 --effort xhigh`, limited to read, grep, glob, git log/show, python3, jq, wc and rg, with Edit, Write, Agent and Task disallowed.
+- The Agent-tool hook blocks Fable subagents because that needs the owner's ask; this is the owner's explicit request, so the CLI route is used.
+- I verify and synthesise both reports before anything is proposed for implementation.
+
+**The async-conversion report is still in progress.** Community research is done (codex session 01a0ee6d-80da-7ee3-9bfd-045be1c03e6d). The call-graph cost analysis is running (01a0ee6d-809c-7c53-b807-fafd37015576).
+
+Next free id: D961.
 
