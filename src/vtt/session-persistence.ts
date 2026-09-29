@@ -4176,20 +4176,25 @@ export function exportSessionHistoryArchive(root: SessionRevision): readonly str
   return archivedTexts(verifySessionHistoryArchive(root).source).map((archived) => archived.text);
 }
 
-export function exportSavedSession(
-  store: SessionStore,
-  sessionId: EncounterSessionId,
-): string {
-  const revisions = store.revisions(sessionId);
-  if (revisions.length === 0) throw new Error('Encounter session does not exist.');
-  replaySessionRevisions(revisions, store.recordingEngine);
-  const encoded = encodeJournalDag(revisions);
-  const body: JournalDagBundleBody = {
+/** The journal-DAG body of `revisions` as recorded: what an export writes and fingerprints. */
+function journalDagBody(sessionId: EncounterSessionId, revisions: readonly SessionRevision[]): JournalDagBundleBody {
+  return {
     format: JOURNAL_DAG_FORMAT,
     schemaVersion: VTT_SESSION_SCHEMA_VERSION,
     sessionId,
-    ...encoded,
+    ...encodeJournalDag(revisions),
   };
+}
+
+/**
+ * `revisions` as a save exactly as recorded (a journal DAG with its session record): the revision sequence is checked,
+ * NOTHING is replayed. What a refused entry exports, so the recording build can replay what the refusal names.
+ */
+export function encodeRecordedSession(revisions: readonly SessionRevision[]): string {
+  const first = revisions[0];
+  if (first === undefined) throw new Error('Encounter session does not exist.');
+  verifyRevisionSequence(revisions, first.sessionId);
+  const body = journalDagBody(first.sessionId, revisions);
   return canonicalJson({
     ...body,
     fingerprint: sha256(canonicalJson(body)),
@@ -4197,16 +4202,94 @@ export function exportSavedSession(
   } satisfies JournalDagBundle);
 }
 
+/** The strict export: the session's revisions replayed under the store's build, then encoded as recorded. */
+export function exportSavedSession(
+  store: SessionStore,
+  sessionId: EncounterSessionId,
+): string {
+  const revisions = store.revisions(sessionId);
+  if (revisions.length === 0) throw new Error('Encounter session does not exist.');
+  replaySessionRevisions(revisions, store.recordingEngine);
+  return encodeRecordedSession(revisions);
+}
+
 /**
- * Decodes, fingerprints, and replays a save without importing it. A save that migrates by archive gets a root
- * recorded by `recordingEngine`: pass a store's own to fingerprint what that store would import.
+ * A listing's summary of `revisions` as recorded, without a replay: the fingerprint of their as-recorded export (a
+ * journal DAG, what a listing has always reported) and the recorded last revision.
  */
-export function decodeSavedSessionFingerprint(
-  bytes: string,
-  recordingEngine: EngineBuild = RUNNING_ENGINE_BUILD,
-): DecodedSavedSessionFingerprint {
-  const bundle = migrateSavedBundle(bytes, recordingEngine);
-  const latest = replaySessionRevisions(bundle.revisions, recordingEngine);
+export function recordedSessionSummary(revisions: readonly SessionRevision[]): DecodedSavedSessionFingerprint {
+  const first = revisions[0];
+  const latest = revisions.at(-1);
+  if (first === undefined || latest === undefined) throw new Error('Encounter session does not exist.');
+  return {
+    sessionId: first.sessionId,
+    fingerprint: sha256(canonicalJson(journalDagBody(first.sessionId, revisions))),
+    revisionCount: revisions.length,
+    room: latest.partyState?.room ?? null,
+    round: latest.encounterState.round,
+    initialSeed: latest.rngState.initialSeed,
+  };
+}
+
+/**
+ * What a stored stream's own texts are as a save, for an entry whose migration is not persisted or that does not
+ * decode (SAVE-COMPAT §6.6): every text at one schema version -> a revision bundle at that version of the texts as
+ * parsed (their checksums untouched, the fingerprint computed), which every build whose chain reads that version
+ * imports; mixed versions (only a pre-v13 stream) -> the D919 history-archive document of the stored stream, byte for
+ * byte, which tools/session-archive-replay.ts --archive reads. Never a migration's output.
+ */
+export function exportStoredSessionSource(texts: readonly string[]): string {
+  const revisions: readonly unknown[] = texts.map((text): unknown => JSON.parse(text));
+  const { sessionId, groups } = schemaVersionGroups(revisions);
+  const [only, ...others] = groups;
+  if (only !== undefined && others.length === 0) {
+    return canonicalJson(revisionBundleOf(sessionId, only.schemaVersion, revisions));
+  }
+  return sessionHistoryArchiveDocument(sessionHistoryArchiveOf({ kind: 'stored_stream', texts }));
+}
+
+/** Why a save does not load, as every load surface shows it (SAVE-COMPAT §6.4). `message` is what the player reads. */
+export type SessionLoadRefusal =
+  | { readonly kind: 'recorded_by_other_build'; readonly refusal: RecordedByOtherBuild; readonly message: string }
+  | { readonly kind: 'integrity'; readonly fault: SessionIntegrityFault; readonly message: string }
+  /** Any other throw (a structural replay fault, another module's decoder, an unexpected error): its own name and message. */
+  | { readonly kind: 'load_failed'; readonly errorName: string; readonly message: string };
+
+export interface LoadableSavedSession { readonly kind: 'loadable' }
+export interface RefusedSavedSession { readonly kind: 'refused'; readonly refusal: SessionLoadRefusal }
+export type SavedSessionLoadability = LoadableSavedSession | RefusedSavedSession;
+
+/** Any throw of a load as the refusal a surface shows: the typed kinds by class, everything else load_failed. */
+export function sessionLoadRefusalOf(error: unknown): SessionLoadRefusal {
+  if (error instanceof SessionRecordedByOtherBuildError) {
+    return { kind: 'recorded_by_other_build', refusal: error.refusal, message: error.message };
+  }
+  if (error instanceof SessionIntegrityError) return { kind: 'integrity', fault: error.fault, message: error.message };
+  if (error instanceof SessionHistoryArchiveError || error instanceof SessionHistoryArchiveMetadataError) {
+    const typed = new SessionIntegrityError({ kind: 'archive_refused', detail: error.message });
+    return { kind: 'integrity', fault: typed.fault, message: typed.message };
+  }
+  const errorName = error instanceof Error ? error.name : 'thrown value';
+  const detail = error instanceof Error ? error.message : String(error);
+  return { kind: 'load_failed', errorName, message: `Save could not be loaded: ${errorName}: ${detail}` };
+}
+
+/** Whether `revisions` load (a strict replay under `running`), and if not, why. */
+export function savedSessionLoadability(
+  revisions: readonly SessionRevision[],
+  running: EngineBuild,
+): SavedSessionLoadability {
+  try {
+    replaySessionRevisions(revisions, running);
+    return { kind: 'loadable' };
+  } catch (error) {
+    return { kind: 'refused', refusal: sessionLoadRefusalOf(error) };
+  }
+}
+
+function bundleSummary(bundle: SavedSessionBundleV2): DecodedSavedSessionFingerprint {
+  const latest = bundle.revisions.at(-1);
+  if (latest === undefined) throw schemaViolation('Saved VTT session revisions are malformed.');
   return {
     sessionId: bundle.sessionId,
     fingerprint: bundle.fingerprint,
@@ -4218,6 +4301,37 @@ export function decodeSavedSessionFingerprint(
 }
 
 /**
+ * Decodes, fingerprints, and replays a save without importing it. A save that migrates by archive gets a root
+ * recorded by `recordingEngine`: pass a store's own to fingerprint what that store would import.
+ */
+export function decodeSavedSessionFingerprint(
+  bytes: string,
+  recordingEngine: EngineBuild = RUNNING_ENGINE_BUILD,
+): DecodedSavedSessionFingerprint {
+  const bundle = migrateSavedBundle(bytes, recordingEngine);
+  replaySessionRevisions(bundle.revisions, recordingEngine);
+  return bundleSummary(bundle);
+}
+
+/** A save decoded as recorded, NO replay: its summary (its own fingerprint, its recorded last revision) and revisions. */
+export function decodeSavedSession(
+  bytes: string,
+  recordingEngine: EngineBuild = RUNNING_ENGINE_BUILD,
+): { readonly summary: DecodedSavedSessionFingerprint; readonly revisions: readonly SessionRevision[] } {
+  const bundle = migrateSavedBundle(bytes, recordingEngine);
+  verifyRevisionSequence(bundle.revisions, bundle.sessionId);
+  return { summary: bundleSummary(bundle), revisions: bundle.revisions };
+}
+
+/** A save's summary as recorded (decode, migrate, hashes, schema, sequence), NO replay. */
+export function savedSessionSummary(
+  bytes: string,
+  recordingEngine: EngineBuild = RUNNING_ENGINE_BUILD,
+): DecodedSavedSessionFingerprint {
+  return decodeSavedSession(bytes, recordingEngine).summary;
+}
+
+/**
  * A saved session's revisions as recorded: decoded and migrated, every hash, the schema and the revision sequence
  * checked, and NOT replayed (no rule re-derives anything). A save that migrates by archive gets a root
  * `recordingEngine` records. What the offline replay decodes before it replays a save at its recording build.
@@ -4226,9 +4340,7 @@ export function decodeSavedSessionRevisions(
   bytes: string,
   recordingEngine: EngineBuild = RUNNING_ENGINE_BUILD,
 ): readonly SessionRevision[] {
-  const bundle = migrateSavedBundle(bytes, recordingEngine);
-  verifyRevisionSequence(bundle.revisions, bundle.sessionId);
-  return bundle.revisions;
+  return decodeSavedSession(bytes, recordingEngine).revisions;
 }
 
 export function importSavedSession(

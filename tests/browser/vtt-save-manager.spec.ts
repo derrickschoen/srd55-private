@@ -107,3 +107,62 @@ test('DM sees browser and folder saves and loads through the resumable encounter
   // Restoring an unpaused autosave preserves its history and appends the resumable interruption.
   await expect(page.locator('[data-revision]')).toHaveCount(perRoundRevisionCount + 1);
 });
+
+test('SAVE-COMPAT: a refused save is listed with its refusal, offers no Load, and exports what the browser holds', async ({
+  page,
+}) => {
+  // A stored stream that does not decode (a revision record missing every field but its header): the store opens,
+  // the other saves still load, and this one is listed refused with its typed message (owner D939, SAVE-COMPAT C2).
+  test.setTimeout(120_000);
+  await page.goto('/vtt?encounter=reference&view=dm&session=savemgr-refusal-host');
+  await expect(page.getByRole('heading', { name: 'DM controls' })).toBeVisible({ timeout: 60_000 });
+  await page.evaluate(async () => {
+    const text = JSON.stringify({ sessionId: 'session:savemgr-refused', revision: 1, schemaVersion: 13, checksum: '0'.repeat(64) });
+    const zipped = await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
+    await new Promise<void>((resolve, reject) => {
+      const opening = indexedDB.open('srd55-vtt-sessions', 1);
+      opening.addEventListener('error', () => reject(opening.error), { once: true });
+      opening.addEventListener('success', () => {
+        const database = opening.result;
+        const write = database.transaction(['revisions', 'sessions'], 'readwrite');
+        write.objectStore('revisions').put(zipped, `session:savemgr-refused\u0000${'1'.padStart(12, '0')}`);
+        write.objectStore('sessions').put({
+          sessionId: 'session:savemgr-refused', name: 'Refused campaign', updatedAt: '2026-09-20T10:00:00.000Z',
+          retention: { kind: 'named' }, migrationStatus: 'native',
+        }, 'session:savemgr-refused');
+        write.addEventListener('complete', () => {
+          database.close();
+          resolve();
+        }, { once: true });
+        write.addEventListener('error', () => reject(write.error), { once: true });
+      }, { once: true });
+    });
+  });
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'DM controls' })).toBeVisible({ timeout: 60_000 });
+
+  const manager = page.locator('.dm-save-manager');
+  const refused = manager.locator('.dm-save-row').filter({ has: page.getByRole('heading', { name: 'Refused campaign' }) });
+  await expect(refused).toHaveCount(1);
+  await expect(refused).toHaveAttribute('data-load', 'refused');
+  await expect(refused.locator('.dm-save-summary')).toHaveText('Unreadable save');
+  await expect(refused.locator('.dm-save-refusal')).toHaveText(
+    'Save refused: Malformed VTT session revision. The save does not match the session format this build reads: it '
+      + 'was altered after it was written, or written by a build whose format this build does not read.',
+  );
+  await expect(refused.getByRole('button', { name: 'Load', exact: true })).toHaveCount(0);
+  await expect(manager.locator('.dm-save-row[data-source="browser"]').getByRole('button', { name: 'Load', exact: true }))
+    .not.toHaveCount(0);
+
+  const pendingDownload = page.waitForEvent('download');
+  await refused.getByRole('button', { name: 'Export copy', exact: true }).click();
+  const download = await pendingDownload;
+  expect(download.suggestedFilename()).toBe('Refused campaign.vtt.json');
+  expect(await download.failure()).toBeNull();
+
+  // D944: the direct route to the refused session renders its typed refusal (the host finds a stream it cannot
+  // decode and never creates a session over it), not a blank page.
+  await page.goto('/vtt?encounter=reference&view=dm&session=session%3Asavemgr-refused');
+  await expect(page.getByRole('alert')).toContainText('Save refused: Malformed VTT session revision.', { timeout: 60_000 });
+  await expect(page.getByRole('heading', { name: 'DM controls' })).toHaveCount(0);
+});

@@ -1,5 +1,9 @@
+import { encounterSessionId, type EncounterSessionId } from '../combat/values';
+import { RUNNING_ENGINE_BUILD, type EngineBuild } from './engine-build';
 import {
-  decodeSavedSessionFingerprint,
+  decodeSavedSession,
+  savedSessionLoadability,
+  sessionLoadRefusalOf,
 } from './session-persistence';
 import type { SaveManagerEntry, SaveManagerMode } from './save-manager';
 
@@ -89,6 +93,17 @@ export class IndexedDbDirectoryHandlePersistence implements DirectoryHandlePersi
   }
 }
 
+/** The session id a save file states, when it states one as JSON; null otherwise. */
+function statedSessionId(bytes: string): EncounterSessionId | null {
+  try {
+    const value: unknown = JSON.parse(bytes);
+    const sessionId = typeof value === 'object' && value !== null ? Reflect.get(value, 'sessionId') : undefined;
+    return typeof sessionId === 'string' ? encounterSessionId(sessionId) : null;
+  } catch {
+    return null;
+  }
+}
+
 export class SaveFolderRepository {
   #handle: FileSystemDirectoryHandle | null = null;
   #mode: SaveManagerMode;
@@ -128,7 +143,12 @@ export class SaveFolderRepository {
     return this.#mode;
   }
 
-  async list(): Promise<readonly SaveManagerEntry[]> {
+  /**
+   * Every save file, each with its own loadability under `running` (SAVE-COMPAT C2): a file that decodes carries its
+   * recorded summary and a strict replay's verdict; a file that does not decode is listed refused with why. One file
+   * never hides another.
+   */
+  async list(running: EngineBuild = RUNNING_ENGINE_BUILD): Promise<readonly SaveManagerEntry[]> {
     if (this.#handle === null) return [];
     const saves: SaveManagerEntry[] = [];
     for await (const [filename, handle] of (
@@ -137,15 +157,24 @@ export class SaveFolderRepository {
       if (handle.kind !== 'file' || !filename.endsWith(SAVE_SUFFIX)) continue;
       const file = await (handle as FileSystemFileHandle).getFile();
       const bytes = await file.text();
-      const decoded = decodeSavedSessionFingerprint(bytes);
-      saves.push({
-        ...decoded,
+      const fields = {
         id: `folder:${filename}`,
         source: 'folder',
         name: filename.slice(0, -SAVE_SUFFIX.length),
         updatedAt: new Date(file.lastModified).toISOString(),
         bytes,
-      });
+      } as const;
+      try {
+        const { summary, revisions } = decodeSavedSession(bytes, running);
+        saves.push({ ...summary, ...fields, contents: 'decoded', load: savedSessionLoadability(revisions, running) });
+      } catch (error) {
+        saves.push({
+          ...fields,
+          contents: 'undecodable',
+          sessionId: statedSessionId(bytes),
+          load: { kind: 'refused', refusal: sessionLoadRefusalOf(error) },
+        });
+      }
     }
     return saves;
   }

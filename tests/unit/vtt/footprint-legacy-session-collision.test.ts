@@ -155,6 +155,10 @@ describe('FOOTPRINT fix3: a legacy localStorage session never writes over the se
         updatedAt: '2026-08-20T10:00:00.000Z',
         retention: { kind: 'named' },
         migrationStatus: 'complete',
+        // SAVE-COMPAT C2: every listed save carries its contents and its own loadability; the kept copy is the
+        // legacy save's own honest history, so it loads.
+        contents: 'decoded',
+        load: { kind: 'loadable' },
       });
       expect(store.exportedStored(keptId, SESSION)).toBe(legacyBytes);
     };

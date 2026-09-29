@@ -1,4 +1,10 @@
 import type { EncounterSessionId } from '../combat/values';
+import type {
+  LoadableSavedSession,
+  RefusedSavedSession,
+  SavedSessionLoadability,
+  SessionLoadRefusal,
+} from './session-persistence';
 
 export function downloadBrowserFile(
   filename: string,
@@ -48,31 +54,69 @@ export type SaveManagerMode =
       readonly reason: 'unsupported' | 'not_selected' | 'permission_denied';
     };
 
-export interface SaveManagerEntry {
+interface SaveManagerEntryFields {
   readonly id: string;
   readonly storageId?: string;
-  readonly source: SaveSource;
   readonly name: string;
   readonly updatedAt: string;
-  readonly sessionId: EncounterSessionId;
-  readonly fingerprint: string;
-  readonly revisionCount: number;
-  readonly room: number | null;
-  readonly round: number;
   /** Folder saves carry bytes; browser saves export their immutable revision prefix on demand. */
   readonly bytes?: string;
   /** Missing browser retention is the pre-D377.9 single autosave pool. */
   readonly retention?: SaveRetention;
 }
 
-export interface SaveManagerRow extends SaveManagerEntry {
+/** A save whose contents decode: its recorded summary and whether it loads under the build running now. */
+export interface DecodedSaveManagerEntry extends SaveManagerEntryFields {
+  readonly contents: 'decoded';
+  readonly source: SaveSource;
+  readonly sessionId: EncounterSessionId;
+  readonly fingerprint: string;
+  readonly revisionCount: number;
+  readonly room: number | null;
+  readonly round: number;
+  readonly load: SavedSessionLoadability;
+}
+
+/**
+ * A save whose contents do not decode (SAVE-COMPAT C2): always refused, with why. A browser save names its session; a
+ * folder file names one only when it states one.
+ */
+export type UndecodableSaveManagerEntry = SaveManagerEntryFields & {
+  readonly contents: 'undecodable';
+  readonly load: RefusedSavedSession;
+} & (
+  | { readonly source: 'browser'; readonly sessionId: EncounterSessionId }
+  | { readonly source: 'folder'; readonly sessionId: EncounterSessionId | null }
+);
+
+export type SaveManagerEntry = DecodedSaveManagerEntry | UndecodableSaveManagerEntry;
+
+/** The only entry a load operation takes: decoded, and loadable under the build running now. */
+export type LoadableSaveManagerEntry = DecodedSaveManagerEntry & { readonly load: LoadableSavedSession };
+
+interface SaveManagerRowFields {
   readonly badge: SaveSource;
   readonly summary: string;
   readonly timestampLabel: string;
-  readonly actions: readonly ['load', 'rename', 'delete', 'export_copy'];
   readonly retention: SaveRetention;
   readonly poolLabel: 'Per-round autosave' | 'Encounter-boundary autosave' | 'Named save' | 'File save';
 }
+
+/** A row offers Load only when its save loads; a refused row shows why instead (owner D939). */
+export type SaveManagerRow = SaveManagerEntry & SaveManagerRowFields & (
+  | { readonly actions: readonly ['load', 'rename', 'delete', 'export_copy'] }
+  | { readonly actions: readonly ['rename', 'delete', 'export_copy']; readonly refusalMessage: string }
+);
+
+/** A load intent on a refused save: refused by type, the load operation never called. */
+export class SaveLoadRefusedError extends Error {
+  override readonly name = 'SaveLoadRefusedError' as const;
+
+  constructor(readonly refusal: SessionLoadRefusal) {
+    super(refusal.message);
+  }
+}
+
 
 function normalizedRetention(save: SaveManagerEntry): SaveRetention {
   if (save.source === 'folder') return { kind: 'file' };
@@ -177,17 +221,25 @@ export function buildSaveManagerViewModel(input: {
     })
     .map((save): SaveManagerRow => {
       const retention = normalizedRetention(save);
-      return {
-        ...save,
+      const fields: SaveManagerRowFields = {
         retention,
         poolLabel: poolLabel(retention),
         badge: save.source,
-        summary: save.room === null
-          ? `Round ${String(save.round)}`
-          : `Room ${String(save.room)} · Round ${String(save.round)}`,
+        summary: save.contents === 'undecodable'
+          ? 'Unreadable save'
+          : save.room === null
+            ? `Round ${String(save.round)}`
+            : `Room ${String(save.room)} · Round ${String(save.round)}`,
         timestampLabel: new Date(save.updatedAt).toLocaleString('en-US'),
-        actions: ['load', 'rename', 'delete', 'export_copy'],
       };
+      switch (save.load.kind) {
+        case 'loadable':
+          return { ...save, ...fields, actions: ['load', 'rename', 'delete', 'export_copy'] };
+        case 'refused':
+          return {
+            ...save, ...fields, actions: ['rename', 'delete', 'export_copy'], refusalMessage: save.load.refusal.message,
+          };
+      }
     });
   const lastAutosaveAt = input.browser
     .filter((save) => normalizedRetention(save).kind === 'autosave')
@@ -225,7 +277,7 @@ export type SaveManagerNavigationInstruction = {
 };
 
 export interface SaveManagerOperations {
-  load(save: SaveManagerEntry): void | Promise<void>;
+  load(save: LoadableSaveManagerEntry): void | Promise<void>;
   rename(save: SaveManagerEntry, name: string): void | Promise<void>;
   delete(save: SaveManagerEntry): void | Promise<void>;
   exportCopy(save: SaveManagerEntry): void | Promise<void>;
@@ -248,9 +300,13 @@ export class SaveManagerController {
 
   async dispatch(intent: SaveManagerIntent): Promise<void> {
     switch (intent.kind) {
-      case 'load':
-        await this.operations.load(this.#save(intent.saveId));
+      case 'load': {
+        const save = this.#save(intent.saveId);
+        if (save.contents === 'undecodable') throw new SaveLoadRefusedError(save.load.refusal);
+        if (save.load.kind === 'refused') throw new SaveLoadRefusedError(save.load.refusal);
+        await this.operations.load({ ...save, load: save.load });
         return;
+      }
       case 'rename':
         await this.operations.rename(this.#save(intent.saveId), intent.name);
         return;

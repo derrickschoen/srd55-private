@@ -12,6 +12,7 @@ import {
   SaveManagerController,
   autosavePoolForTrigger,
   buildSaveManagerViewModel,
+  type DecodedSaveManagerEntry,
   type SaveManagerEntry,
   type SaveManagerOperations,
 } from '../../../src/vtt/save-manager';
@@ -49,10 +50,10 @@ const PARTY_STATE: PartySessionState = {
 };
 
 function browserFixture(): {
-  readonly saves: readonly SaveManagerEntry[];
+  readonly saves: readonly DecodedSaveManagerEntry[];
 } {
   const store = new MemoryBrowserSessionStore();
-  const saves: SaveManagerEntry[] = [];
+  const saves: DecodedSaveManagerEntry[] = [];
   for (const [session, name, updatedAt] of [
     ['session:browser-old', 'Browser old', '2042-08-24T10:00:00.000Z'],
     ['session:browser-new', 'Browser new', '2042-08-24T12:00:00.000Z'],
@@ -66,6 +67,8 @@ function browserFixture(): {
     const bytes = exportSavedSession(store, sessionId);
     saves.push({
       ...decodeSavedSessionFingerprint(bytes),
+      contents: 'decoded',
+      load: { kind: 'loadable' },
       id: `browser:encounter_boundary:${session}`,
       storageId: `encounter_boundary:${session}`,
       source: 'browser',
@@ -79,10 +82,10 @@ function browserFixture(): {
 }
 
 function folderSave(
-  source: SaveManagerEntry,
+  source: DecodedSaveManagerEntry,
   name: string,
   updatedAt: string,
-): SaveManagerEntry {
+): DecodedSaveManagerEntry {
   return {
     ...source,
     id: `folder:${name}.vtt.json`,
@@ -125,7 +128,7 @@ describe('DM save manager', () => {
       'Room 1 · Round 0',
     ]);
     expect(model.lastAutosaveAt).toBe('2042-08-24T12:00:00.000Z');
-    expect(model.rows.every((row) => row.fingerprint.length === 64)).toBe(true);
+    expect(model.rows.every((row) => row.contents === 'decoded' && row.fingerprint.length === 64)).toBe(true);
   });
 
   it('foreign_source_badge: keeps folder and browser provenance visible on unified rows', () => {
@@ -151,6 +154,8 @@ describe('DM save manager', () => {
   it('migrates legacy single-pool browser autosave metadata into the per-round pool', () => {
     const fixture = browserFixture();
     const legacy = fixture.saves.map((save): SaveManagerEntry => ({
+      contents: 'decoded',
+      load: save.load,
       id: save.id,
       source: save.source,
       name: save.name,

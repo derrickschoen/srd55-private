@@ -171,7 +171,8 @@ describe('FOOTPRINT fix1: autosave restore points survive a migration by archive
 
     // S3, the head: the migrated root itself, a one-revision live point.
     expect(exportOf(store, S3, sessionId)).toBe(store.exported(sessionId));
-    expect(store.savedSessions().find((save) => save.storageId === S3)?.revisionCount).toBe(1);
+    const s3Listed = store.savedSessions().find((save) => save.storageId === S3);
+    expect(s3Listed?.contents === 'decoded' ? s3Listed.revisionCount : undefined).toBe(1);
 
     // S2: its own save, the first two stored texts archived, the state of r2 repaired: the PC still at (0,0).
     const s2 = revisionsOf(exportOf(store, S2, sessionId));

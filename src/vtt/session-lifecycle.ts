@@ -3,7 +3,12 @@ import type {
   IndexedDbBrowserSessionStore,
   StoredBrowserSave,
 } from './local-session-store';
-import { decodeSavedSessionFingerprint } from './session-persistence';
+import {
+  decodeSavedSessionFingerprint,
+  sessionLoadRefusalOf,
+  type DecodedSavedSessionFingerprint,
+  type SessionLoadRefusal,
+} from './session-persistence';
 import type { SaveManagerNavigationInstruction } from './save-manager';
 
 export type SessionLifecycleIntent =
@@ -45,11 +50,27 @@ export type SessionLifecycleResult =
   | {
       readonly kind: 'conflict';
       readonly sessionId: EncounterSessionId;
-      readonly existingFingerprint: string;
+      /** Null: the session the store holds under this id does not decode. */
+      readonly existingFingerprint: string | null;
       readonly importedFingerprint: string;
     }
+  /** The save was refused as the player should see it: another build recorded it (D939, D944, D947 SQ6). */
+  | { readonly kind: 'refused'; readonly refusal: ReturnedImportRefusal }
   | { readonly kind: 'exported'; readonly bytes: string }
   | { readonly kind: 'flushed' };
+
+/** The refusals an import returns as a result; every other refusal (integrity, load_failed) still throws. */
+export type ReturnedImportRefusal = Extract<SessionLoadRefusal, { readonly kind: 'recorded_by_other_build' }>;
+
+export function returnedImportRefusal(refusal: SessionLoadRefusal): ReturnedImportRefusal | null {
+  switch (refusal.kind) {
+    case 'recorded_by_other_build':
+      return refusal;
+    case 'integrity':
+    case 'load_failed':
+      return null;
+  }
+}
 
 export interface ActiveSessionBinding {
   sessionId(): EncounterSessionId | null;
@@ -66,9 +87,8 @@ export type SessionLifecycleStore = Pick<
   | 'renameStored'
   | 'removeStored'
   | 'restoreStored'
-  | 'revisions'
+  | 'heldSession'
   | 'import'
-  | 'exported'
   | 'exportedStored'
   | 'flush'
   | 'recordingEngine'
@@ -126,13 +146,16 @@ export class IndexedDbSessionLifecycle implements SessionLifecyclePort {
   }
 
   async #import(bytes: string): Promise<SessionLifecycleResult> {
-    const decoded = decodeSavedSessionFingerprint(bytes, this.store.recordingEngine);
-    const existing = this.store.revisions(decoded.sessionId);
-    if (existing.length !== 0) {
-      const existingFingerprint = decodeSavedSessionFingerprint(
-        this.store.exported(decoded.sessionId),
-        this.store.recordingEngine,
-      ).fingerprint;
+    let decoded: DecodedSavedSessionFingerprint;
+    try {
+      decoded = decodeSavedSessionFingerprint(bytes, this.store.recordingEngine);
+    } catch (error) {
+      return this.#refusedImport(error);
+    }
+    // The session already held is compared by its recorded summary, without replaying it (it may be refused itself).
+    const held = this.store.heldSession(decoded.sessionId);
+    if (held !== null) {
+      const existingFingerprint = held.kind === 'decoded' ? held.summary.fingerprint : null;
       return existingFingerprint === decoded.fingerprint
         ? { kind: 'duplicate', sessionId: decoded.sessionId }
         : {
@@ -142,8 +165,20 @@ export class IndexedDbSessionLifecycle implements SessionLifecyclePort {
             importedFingerprint: decoded.fingerprint,
           };
     }
-    const sessionId = this.store.import(bytes);
+    let sessionId: EncounterSessionId;
+    try {
+      sessionId = this.store.import(bytes);
+    } catch (error) {
+      return this.#refusedImport(error);
+    }
     await this.store.flush();
     return { kind: 'imported', sessionId };
+  }
+
+  /** A refusal the player should see is returned; any other failure is rethrown as it is. */
+  #refusedImport(error: unknown): SessionLifecycleResult {
+    const refusal = returnedImportRefusal(sessionLoadRefusalOf(error));
+    if (refusal === null) throw error;
+    return { kind: 'refused', refusal };
   }
 }

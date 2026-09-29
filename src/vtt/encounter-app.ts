@@ -73,9 +73,11 @@ import {
   SaveFolderRepository,
 } from './save-folder';
 import {
+  SaveLoadRefusedError,
   SaveManagerController,
   buildSaveManagerViewModel,
   downloadBrowserFile,
+  type LoadableSaveManagerEntry,
   type SaveManagerEntry,
   type SaveManagerViewModel,
 } from './save-manager';
@@ -1565,7 +1567,7 @@ class DmEncounterView {
   async #refreshBrowserSaves(): Promise<void> {
     const result = await this.#lifecycle.dispatch({ kind: 'list' });
     if (result.kind !== 'listed') throw new Error('Session lifecycle returned an invalid list result.');
-    this.#browserSaveEntries = result.saves.map((save) => ({
+    this.#browserSaveEntries = result.saves.map((save): SaveManagerEntry => ({
       ...save,
       id: `browser:${save.storageId}`,
       source: 'browser',
@@ -1821,7 +1823,7 @@ class DmEncounterView {
     );
   }
 
-  async #loadSave(save: SaveManagerEntry): Promise<void> {
+  async #loadSave(save: LoadableSaveManagerEntry): Promise<void> {
     if (save.source === 'browser') {
       const restored = await this.#lifecycle.dispatch({
         kind: 'restore',
@@ -1833,6 +1835,7 @@ class DmEncounterView {
     if (save.source === 'folder') {
       if (save.bytes === undefined) throw new Error('Folder save has no file contents.');
       const imported = await this.#lifecycle.dispatch({ kind: 'import', bytes: save.bytes });
+      if (imported.kind === 'refused') throw new SaveLoadRefusedError(imported.refusal);
       if (imported.kind === 'conflict') {
         throw new Error(
           'This folder save has the same session ID as a different browser autosave. Rename or export the autosave before deleting it; it will not be overwritten.',
@@ -1873,6 +1876,8 @@ class DmEncounterView {
       void this.#runSaveManagerAction(async () => {
         const bytes = await file.text();
         const result = await this.#lifecycle.dispatch({ kind: 'import', bytes });
+        // SAVE-COMPAT (owner D939): a save another build recorded is refused with its own message, never loaded.
+        if (result.kind === 'refused') throw new SaveLoadRefusedError(result.refusal);
         if (result.kind === 'duplicate' || result.kind === 'conflict') {
           throw new Error('That uploaded session already exists in browser autosaves.');
         }
@@ -1973,6 +1978,13 @@ class DmEncounterView {
         element('time', { text: row.timestampLabel }),
         element('p', { className: 'dm-save-summary', text: row.summary }),
       );
+      if ('refusalMessage' in row) {
+        // A refused save is listed with why, and offers no Load (owner D939).
+        item.dataset.load = 'refused';
+        const refusal = element('p', { className: 'dm-save-refusal', text: row.refusalMessage });
+        refusal.setAttribute('role', 'note');
+        item.append(refusal);
+      }
       const actions = element('div', { className: 'dm-save-row-actions' });
       actions.dataset.renderKey = stableRenderKey('dm', 'save-manager', 'save', row.id, 'actions');
       for (const action of row.actions) {
