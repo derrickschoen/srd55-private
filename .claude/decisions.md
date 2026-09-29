@@ -4160,5 +4160,34 @@ The reviewer confirmed:
 - runtime selection is correct in the Vite client, both workers, Vitest, vite-node and the engine child bundle;
 - no byte-identity issue, and nothing added beyond the plan.
 
-Next free id: D966.
+### D966 — 2026-09-29 15:43 — SHA-SPLIT redesigned to one module; a finding against my own plan
+
+**Finding against my own work (plan design).** My SHA-SPLIT brief (D959) chose a package.json "imports" entry '#sha256' and a rename of every importer. That design had two costs I did not check before dispatching:
+- **(1) Frozen migration sources.** src/catalog/catalog-data-migrations.ts pins the exact bytes of frozen source files through `sources` (?raw). Renaming their import line changed those bytes, so the full gate on 0ceb6ed4 failed 37 files in its initial phase. 159 assertions fail with CatalogDataMigrationChecksumMismatchError on "reconcile_species_lineage_content_v2" (VERIFIED by me from the initial report).
+  - Neither codex's smoke files nor the seven pins exercise that check.
+  - I killed the gate by PID during its retry phase.
+- **(2) The import walkers resolve relative imports only.** scripts/runtime-import-edges.mjs documents "relative paths only; there are no aliases".
+  - Review r1 found three walkers that treat '#' as external; review r2 found three more (d583 and d584 inventories, engine-mcp-proof). I VERIFIED the lines.
+  - At least six more tools resolve only '.'-prefixed specifiers.
+The rename plan was mine, not codex's.
+
+**Redesign (supervisor-authored; needs independent review, dispatched as round 3).**
+- src/crypto/sha256.ts keeps its path and `sha256(value: string): string`. It selects node:crypto through `process.getBuiltinModule('node:crypto')` when `typeof process === 'object'`, and otherwise `bytesToHex(nobleSha256(utf8ToBytes(value)))` from @noble/hashes 2.4.0.
+- This follows the precedent in src/db/query-log.ts:29-40: it keeps node builtins out of the bundler, and the database worker is an iife build.
+- `browserSha256` is exported so the differential test pins the noble path.
+- Files: package.json, package-lock.json, src/crypto/sha256.ts, tests/unit/crypto/sha256.test.ts, and one doc anchor. 5 files, +35 −123, commit be6c3b99 on claude/sha-split-v2 from main cc6fef1c.
+- No importer or walker changes.
+
+**VERIFIED by me on be6c3b99.**
+- tsc -b passes.
+- The sha256 and content-identity tests pass (28).
+- The latin-1 truncation mutant fails 3 of the 12 differential tests; the file was restored and checked byte-equal with cmp.
+- npm run build passes (bundled digest and dist-clean checks).
+- dist has no static node:crypto import.
+
+**Running.** Pins, the full gate and check-command-outcomes (.tmp/runs/sha-split/gate2.sh). Codex gpt-6.1-sol review round 3, session 01a0eeb0-f401-7061-88b9-3975fb817d98.
+
+**Superseded.** The '#sha256' branch claude/sha-split (up to 0ceb6ed4) is superseded and will not land. Its seven pins were byte-identical, but its gate fails.
+
+Next free id: D967.
 
