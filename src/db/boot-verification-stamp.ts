@@ -169,9 +169,9 @@ function toHex(bytes: Uint8Array): string {
 /**
  * SHA-256 over the image via WebCrypto, NOT via `src/crypto/sha256.ts`.
  *
- * The in-repo implementation hashes a string a byte at a time in JavaScript;
- * over a multi-megabyte image that would cost more than the verification the
- * stamp exists to skip. The native digest is a few tens of milliseconds
+ * That function hashes a string synchronously, and in the browser it runs in
+ * pure JavaScript (@noble/hashes); over a multi-megabyte image that would cost
+ * more than the verification the stamp exists to skip. The native digest is a few tens of milliseconds
  * against the ~4s saved, which is the only reason this trade is worth making.
  */
 export async function databaseImageDigest(
