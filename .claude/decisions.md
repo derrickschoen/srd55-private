@@ -4068,5 +4068,16 @@ SHA-NI's contribution, measured by masking OPENSSL_ia32cap bit 29: node createHa
 - I resumed the same codex session (full UUID 01a0ee77-090f-7503-8c8a-d7af0a422cc8) with resume1.md: revert unplanned WIP edits, tsc, build, resolution proof, differential test and mutant, and smoke files.
 - The resumed session reports `network access enabled` from user config. The brief says no network is needed.
 
-Next free id: D962.
+### D962 — 2026-09-29 15:05 — codex gpt-6.1-sol replaces gpt-6-sol for new dispatches
+
+**Owner (verbatim):** "codex now has gpt-6.1-sol".
+
+**VERIFIED by me:** `codex exec -m gpt-6.1-sol -c model_reasoning_effort=xhigh --sandbox read-only` answered correctly (session 01a0ee8e-2d61-7311-babf-9750fe5b2de5, exit 0).
+
+**From now on:**
+- Every new codex dispatch that D951 and D860 route to sol uses gpt-6.1-sol at xhigh: implementation first drafts, independent reviews, and research.
+- Sessions already running keep their model: SQLITE-PERF, the SHA-SPLIT review r1 (01a0ee87-7b12-74f2-b1b0-4d304a4b296a), and GATE-REVIEW astra.
+- The owner-named astra and Fable reviewers (D960) are unchanged.
+
+Next free id: D963.
 
