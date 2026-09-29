@@ -225,8 +225,8 @@ export class SaveFolderRepository {
     if (await this.#fileExists(requestedFilename)) {
       throw new Error(`A folder save named ${name.trim()} already exists.`);
     }
-    const newFilename = await this.write(name, save.bytes);
-    if (newFilename !== oldFilename) await this.#requireHandle().removeEntry(oldFilename);
+    await this.write(name, save.bytes);
+    await this.#requireHandle().removeEntry(oldFilename);
   }
 
   async delete(save: SaveManagerEntry): Promise<void> {
