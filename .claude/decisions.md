@@ -3822,5 +3822,20 @@ RULINGS (recommendations adopted):
 - Cross-unit: the not_migratable message names both builds (D939). Both this and the generic fingerprint check go to the final SAVE-COMPAT review (r3, FINAL, launched), then its final sync.
 - MOVE-COST keeps chain key 13 and the MOVEMENT_STOP_REASONS union (CONDITION-D20 depends on both).
 
-Next free id: D948.
+## D948 — 2026-09-28 22:21 — owner: delete the SQLite session store; SAVE-COMPAT plan APPROVED (codex r3)
+
+CONTEXT given to the owner, who asked "Do we not use SQLite anymore? What is indexedb?":
+- SQLite (sqlite-wasm on OPFS, in a worker) remains the main app database: catalog, spells, characters, content, with 67 migrations.
+- VTT encounter saves live in IndexedDB (local-session-store.ts:440, database srd55-vtt-sessions).
+- SqliteBrowserSessionStore (session-persistence.ts:504, added 21a40c0c on 2026-08-19) and its tables from migrations 0052–0055 have no production caller; only two test files use them.
+- Likely reason saves went to IndexedDB (inferred, not recorded anywhere): the OPFS pool is exclusive per origin (storage-pool-lock.ts), while the VTT runs in several windows.
+QUESTION (AskUserQuestion; recommendation "Delete"). OWNER chose: "Delete (Recommended)".
+- SAVE-COMPAT deletes SqliteBrowserSessionStore and its test cases, and drops the unused vtt_session_* tables with a new forward migration. It does not edit the old migrations, because their checksums are pinned.
+- This removes defect WR15 by deletion and removes the store from the persist-after-verify census. Test coverage of the other stores must not drop.
+SAVE-COMPAT plan review r3 (FINAL): codex APPROVE, with no P1/P2 remaining and all six r2 findings resolved. P3: make the supervisor additions explicit in the final sync.
+- The not_migratable message fragment names both builds and is frozen.
+- The generic driver check: every RevisionRewriteStep leaves the branch RNG-state fingerprint byte-identical.
+NEXT: SAVE-COMPAT implementation. Step 0 is the final plan sync (the two P3 additions plus this deletion), which the supervisor verifies, then C1…C6. The flake pair is re-run when the machine is quiet.
+
+Next free id: D949.
 
