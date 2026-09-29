@@ -3976,5 +3976,22 @@ Three commits rebased onto 76fc01e4. The tree outside .claude is identical to th
 
 **Correction against my own work (sha256 share).** I told the owner sha256 was 21.1 s of 1,295 s sampled, "about 1.6%". That denominator was wrong. Of the 81 profiles, 52 are vitest main processes and 29 are workers by URL. The main-process profiles are about 95% `(idle)`: they sit waiting while the worker runs the file. Counting only the 64 profiles that are under 50% idle (the processes actually running tests), the total is 506.4 s, of which 51.2 s is idle, and sha256 is 21.1 s = 4.2%. Checked afterwards: the perf-03 report's "engine 57%, SQLite 26%" shares were already computed over active worker samples, with idle and the vitest controller excluded (make_report.py:131, summarize_profiles.py:82). They stand; only my ad-hoc denominator was wrong.
 
-Next free id: D958.
+### D958 — 2026-09-29 14:27 — SHA-FAST research and plan draft; GATE-OTEL wall-time telemetry track
+
+**SHA-FAST.** The owner's words, verbatim: "find examples of sha256 that takes advantage of cpu built in (C,Rust,C++) native sha256 to really quickly hash. then see if any can be used in wasm. do \"Hash before the transaction opens, and re-check inside it\" and \"Some callers don't need a cryptographic hash at all\" . This seems like it should be a solved problem".
+- Codex gpt-6-sol xhigh, read-only, web search on, session 01a0ee68-238e-7140-9add-4b1695aa1fcb. Brief: .tmp/runs/sha-fast/brief.md.
+- Its three parts: (A) native SHA-extension implementations and what WASM can use; (B) an audit of every sha256 call site, classed KEEP / NONCRYPTO / PRECOMPUTE, including pinned outputs a change would alter; (C) a minimal plan draft for both owner items.
+- The plan goes through consensus (§8A minimality) before any implementation.
+- VERIFIED by me: this CPU (Ryzen 9 7900X) has sha_ni; Node's OpenSSL is 3.5.4.
+- A benchmark is written and waits for the timed queue to finish. It compares main's JS, PERF-SHA, @noble/hashes, hash-wasm (sync after init), node:crypto and awaited WebCrypto at 64 B, 1 KB, 64 KB and 1 MB, each checked against node:crypto.
+
+**GATE-OTEL.** The owner's words, verbatim: "build a full telemetry run based on your research and recommendations in parallel".
+- Codex gpt-6-sol xhigh, workspace-write scoped to /home/vagrant/PhpstormProjects/dnd-probe-otel-06b78812, no network, session 01a0ee6a-58f8-7fb0-9a68-b918640e41de. Brief: .tmp/runs/otel/brief.md.
+- It builds Vitest 4.1.10 experimental.openTelemetry tracing with a JSON-lines exporter, proves it on two files, and writes the analysis tool (per-worker Gantt, utilisation, tail, per-file split, import times).
+- Then I run the full traced gate under run-gate-arm.sh.
+- The clone has its own node_modules: npm ci, plus OpenTelemetry packages installed with --no-save by me. Main's node_modules is untouched.
+
+**Finding against my own work.** My first GATE-OTEL dispatch set codex's working root and --add-dir to all of /home/vagrant/PhpstormProjects, with network access, so that codex could create its own clone and run npm ci. That would have given one agent write access to every project on the machine. The auto-mode classifier blocked it, rightly. The redispatch keeps the agent inside one clone: I did the clone and install steps myself, and codex has no network.
+
+Next free id: D959.
 
