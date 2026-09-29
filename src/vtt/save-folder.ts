@@ -203,7 +203,6 @@ export class SaveFolderRepository {
         const incoming = decodeSavedSession(bytes, running);
         const previous = decodeSavedSession(existingBytes, running);
         safeToOverwrite = incoming.summary.sessionId === previous.summary.sessionId &&
-          savedSessionLoadability(incoming.revisions, running).kind === 'loadable' &&
           savedSessionLoadability(previous.revisions, running).kind === 'loadable';
       } catch {
         // A save this build cannot decode cannot authorize overwriting the file.
@@ -223,7 +222,7 @@ export class SaveFolderRepository {
     const oldFilename = save.id.slice('folder:'.length);
     const requestedFilename = this.#filename(name);
     if (requestedFilename === oldFilename) return;
-    if (requestedFilename !== oldFilename && await this.#fileExists(requestedFilename)) {
+    if (await this.#fileExists(requestedFilename)) {
       throw new Error(`A folder save named ${name.trim()} already exists.`);
     }
     const newFilename = await this.write(name, save.bytes);

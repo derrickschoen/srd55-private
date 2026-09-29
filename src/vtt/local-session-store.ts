@@ -579,7 +579,6 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
     }
     const previous = stream.at(-1);
     const key = revisionKey(revision.sessionId, revision.revision);
-    this.#assertRevisionKeysAvailable(revision.sessionId, [key]);
     if (held === undefined) this.#held.set(revision.sessionId, { kind: 'stored', revisions: [revision], keys: [key] });
     else {
       stream.push(revision);
@@ -619,7 +618,6 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
     this.#requireWritable();
     if (this.#held.has(first.sessionId)) throw new Error('Browser store import target already exists.');
     const keys = revisions.map((revision) => revisionKey(revision.sessionId, revision.revision));
-    this.#assertRevisionKeysAvailable(first.sessionId, keys);
     // The memory store checks the stream (in order, known parents) exactly as a single append would.
     const checked = new MemoryBrowserSessionStore(this.recordingEngine);
     checked.appendAll(revisions);
@@ -683,16 +681,6 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
       case 'unpersisted':
       case 'undecodable':
         return held.keys;
-    }
-  }
-
-  /** A canonical write must not replace a record that #preload attributed to another stream. */
-  #assertRevisionKeysAvailable(sessionId: EncounterSessionId, keys: readonly string[]): void {
-    for (const [owner] of this.#held) {
-      if (owner === sessionId) continue;
-      if (this.#heldKeys(owner).some((heldKey) => typeof heldKey === 'string' && keys.includes(heldKey))) {
-        throw new Error(`Browser store revision key belongs to another session (${owner}).`);
-      }
     }
   }
 
@@ -1120,7 +1108,12 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
   ): Promise<void> {
     const sessionId = metadata.sessionId;
     const currentKeys = this.#heldKeys(sessionId);
-    this.#assertRevisionKeysAvailable(sessionId, restored.map((revision) => revisionKey(sessionId, revision.revision)));
+    const replacementKeys = new Set(restored.map((revision) => revisionKey(sessionId, revision.revision)));
+    for (const [owner, held] of this.#held) {
+      if (owner !== sessionId && held.keys.some((key) => typeof key === 'string' && replacementKeys.has(key))) {
+        throw new Error(`Browser store revision key belongs to another session (${owner}).`);
+      }
+    }
     const encoded = await Promise.all(restored.map(async (revision) => ({
       key: revisionKey(sessionId, revision.revision),
       value: await encodedStoredRevision(revision),
@@ -1271,7 +1264,6 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
     const bySession = new Map<EncounterSessionId, {
       keys: IDBValidKey[]; records: { key: IDBValidKey; stored: StoredRevisionRecord }[]; errors: unknown[];
     }>();
-    const unreadableKeys = new Map<EncounterSessionId, IDBValidKey>();
     for (const [index, key] of (revisionKeys as IDBValidKey[]).entries()) {
       let stored: StoredRevisionRecord;
       try {
@@ -1284,7 +1276,6 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
         current.errors.push(parsed === null
           ? new TypeError(`Stored VTT revision key ${String(key)} is malformed.`, { cause: error })
           : error);
-        if (parsed === null) unreadableKeys.set(sessionId, key);
         bySession.set(sessionId, current);
         continue;
       }
@@ -1356,12 +1347,6 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
     this.#loadability.clear();
     this.#metadata.clear();
     for (const value of metadata as BrowserSaveMetadata[]) this.#metadata.set(value.sessionId, value);
-    for (const [sessionId, key] of unreadableKeys) {
-      this.#metadata.set(sessionId, {
-        sessionId, name: `Unreadable revision key (${String(key)})`, updatedAt: new Date(0).toISOString(),
-        retention: { kind: 'named' }, migrationStatus: 'native',
-      });
-    }
     for (const [sessionId, held] of nextHeld) {
       if (held.kind !== 'undecodable' || this.#metadata.has(sessionId)) continue;
       this.#metadata.set(sessionId, {

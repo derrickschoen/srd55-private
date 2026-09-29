@@ -200,7 +200,7 @@ describe('SAVE-COMPAT branch review fixes', () => {
     await putRawRecord(indexedDb, name, badKey, bytes);
     const store = await openStore(indexedDb, name, BUILD_B);
     expect(store.savedSessions()).toEqual([expect.objectContaining({
-      name: `Unreadable revision key (${badKey})`, contents: 'undecodable',
+      name: 'Unreadable session (unreadable-revision-key:2506a6ff62f391208afd64333d276b25bb8c2c5fbe449abe3f58528d8809aa73)', contents: 'undecodable',
       load: { kind: 'refused', refusal: expect.objectContaining({ kind: 'load_failed' }) },
     })]);
     store.close();
@@ -272,5 +272,20 @@ describe('SAVE-COMPAT branch review fixes', () => {
     store.close();
     expect(await rawRecordCount(indexedDb, name, orphanKey)).toBe(0);
     expect(await rawRecordCount(indexedDb, name, canonicalKey)).toBe(1);
+
+    const foreign = s()[0]!;
+    const foreignId = encounterSessionId(String(foreign.sessionId));
+    expect(foreignId).not.toBe(bId);
+    await seedStream(indexedDb, name, [canonicalJson(foreign)], 'A campaign', BUILD_B);
+    const foreignKey = `${foreignId}\u0000000000000001`;
+    const foreignBytes = await rawRecord(indexedDb, name, foreignKey);
+    await putRawRecord(indexedDb, name, canonicalKey, foreignBytes);
+    const collisionStore = await openStore(indexedDb, name, BUILD_B);
+    const outcome = await collisionStore.restoreStored(storageId, bId).then(
+      () => 'restored', (error: Error) => error.message,
+    );
+    collisionStore.close();
+    expect(outcome).toContain('Browser store revision key belongs to another session');
+    expect(new Uint8Array(await rawRecord(indexedDb, name, canonicalKey))).toEqual(new Uint8Array(foreignBytes));
   });
 });
