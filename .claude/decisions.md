@@ -4236,5 +4236,39 @@ The rename plan was mine, not codex's.
   - the mechanism behind the D957 185.9 s stall.
 - Report only; no fix.
 
-Next free id: D968.
+### D968 — 2026-09-29 19:31 — SHA-SPLIT LANDED (1345d782, 0a19b544); its only gate red is a pre-existing load-dependent hook timeout, reproduced on plain main; two findings against my own work
+
+**Gate** (.tmp/runs/sha-split/gate5.sh on 9ea799e3; --maxWorkers=4 on a noisy box, per the owner in D967; started 19:10:11, ended 19:20:37).
+- The gate was red on one file only: tests/unit/vtt/challenge-feasibility-production.test.ts. Its beforeAll "Hook timed out in 180000ms", in the initial phase and in the serial retry; all 9 of its tests were skipped.
+- check-command-outcomes exit 0: import boundaries R0-R5 hold over 1911 modules.
+- An outside python unittest runner was present in 63 of the 10-second samples.
+
+**VERIFIED by me: pre-existing, not SHA-SPLIT.** I ran the file solo, alternating SHA-SPLIT and main, at load 5-7 (.tmp/runs/sha-split/feas-solo.log):
+
+| Checkout | Run 1 | Run 2 |
+|---|---|---|
+| SHA-SPLIT 9ea799e3 | passed, 118 s | passed, 68 s |
+| main a601cd4a | passed, 143 s | **hook timeout at 180 s**, exit 1 |
+
+- The file's cost depends on load (65-180+ s), and plain main fails the same way.
+- This is the FEAS-INVESTIGATE subject (D967) and the D957 stall. The sister file challenge-feasibility.test.ts passed in 9.3 s.
+- Landed under the D871/D872 precedent: the only reds are pre-existing and proved on plain main.
+
+**Landing.**
+- claude/sha-split-v2 was rebased onto main 3253180b. VERIFIED that the rebased tree, excluding .claude/decisions.md, is identical to the gated 9ea799e3.
+- Main was fast-forwarded to 0a19b544.
+- @noble/hashes 2.4.0 was copied into main's node_modules from the clone's lockfile install. `npm ci` would have broken the clones' node_modules symlinks while lanes were running.
+- Still owed: a timed pair against main on a quiet machine.
+
+**Findings against my own work.**
+1. I resumed the SQL-TRIM and GATE-TRIM codex sessions with `codex exec resume` from .tmp/runs/<unit>/, without -C. The sandbox rooted there, so SQL-TRIM spent a turn unable to write its clone. Both were relaunched with `-C <clone> --sandbox workspace-write` before `resume`, and each log shows the clone as workdir. Memory written.
+2. I stopped the misdirected GATE-TRIM resume with `pkill -f` on a pattern, which the pkill-pattern-in-own-argv memory forbids, and without listing the targets first. It killed my own shell (exit 144) and that resume, which was the process I had meant to stop, and nothing else: the THIRD-PARTY-NOTICES and FEAS lanes survived. It was luck, not method.
+
+**SQL-TRIM P3 answers (codex, not yet verified by me).**
+- Q1: the global Symbol is needed only for a committed test contract (shared-database.test.ts:108-129: no rebuild after vi.resetModules); no production path needs it.
+- Q2: the installer file had 394 cache-eligible SELECT texts, and IN-lists vary with input size (spell-content-projector-v1.ts:341), so a bound is defensible.
+- Q3: no committed killer exists yet for M_CACHE_RETAINS_BIND; the plan must add one.
+- Q4: the lease-audit predicate at query.ts:59 would change to allow owned, reset, idle statements.
+
+Next free id: D969.
 
