@@ -3861,5 +3861,17 @@ QUESTION (AskUserQuestion; recommendation "Codex finishes C6"). OWNER chose: "Co
 - No Claude subagents until the reset.
 NEXT: the C6 dispatch; then verification of C0–C6.
 
-Next free id: D951.
+## D951 — 2026-09-29 09:38 — CODEX DRAFTS, CLAUDE MAKES IT LEAN (owner)
+
+OWNER: "have codex-gpt-6-sol-xhigh do the implementation first draft. use the consensus skill to make sure that the end result is as good as you would have made it. update the skill to be aware that codex models tend to write too much sloppy code with unneccessary checks and tests and functions. claude models are much better about only writing as much code as is needed to do the job and not adding extra unneeded stuff that in the real world just bloats the codebase without much actual benefit"
+- Implementation first drafts: codex gpt-6-sol at xhigh (workspace-write), in the unit's clone. Claude supervises through the consensus workflow. Fresh read-only codex sessions still review.
+- New consensus §8A (~/.claude/skills/consensus/SKILL.md), with a pointer in codex-consensus:
+  - every codex brief demands the minimum and requires each addition beyond the spec to be justified;
+  - Claude's review of each candidate adds a minimality pass;
+  - an unrequired check, catch, helper, refusal kind or test is a significant finding, to be deleted or sent back;
+  - scope creep is reverted.
+- This supersedes the 2026-07-25 "Claude implements" binding in project memory. D390's rationale is the same observation.
+- SAVE-COMPAT applies it now: the review fixes codex wrote (fix1 and fix2) get a minimality pass before review round 3.
+
+Next free id: D952.
 
