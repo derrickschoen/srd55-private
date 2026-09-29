@@ -258,7 +258,7 @@ function isPrefixOf(prefix: readonly SessionRevision[], stream: readonly Session
  *     to it, and a new journal cannot be created over it; it is listed refused and exports its stored source.
  */
 type HeldStream =
-  | { readonly kind: 'stored'; readonly revisions: SessionRevision[] }
+  | { readonly kind: 'stored'; readonly revisions: SessionRevision[]; readonly keys: IDBValidKey[] }
   | {
       readonly kind: 'unpersisted';
       readonly keys: readonly IDBValidKey[];
@@ -578,8 +578,13 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
       throw new Error('Browser store cannot append a revision with an unknown parent.');
     }
     const previous = stream.at(-1);
-    if (held === undefined) this.#held.set(revision.sessionId, { kind: 'stored', revisions: [revision] });
-    else stream.push(revision);
+    const key = revisionKey(revision.sessionId, revision.revision);
+    this.#assertRevisionKeysAvailable(revision.sessionId, [key]);
+    if (held === undefined) this.#held.set(revision.sessionId, { kind: 'stored', revisions: [revision], keys: [key] });
+    else {
+      stream.push(revision);
+      held.keys.push(key);
+    }
     const current = this.#metadata.get(revision.sessionId);
     const metadata: BrowserSaveMetadata = {
       sessionId: revision.sessionId,
@@ -613,10 +618,12 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
     if (first === undefined) return;
     this.#requireWritable();
     if (this.#held.has(first.sessionId)) throw new Error('Browser store import target already exists.');
+    const keys = revisions.map((revision) => revisionKey(revision.sessionId, revision.revision));
+    this.#assertRevisionKeysAvailable(first.sessionId, keys);
     // The memory store checks the stream (in order, known parents) exactly as a single append would.
     const checked = new MemoryBrowserSessionStore(this.recordingEngine);
     checked.appendAll(revisions);
-    this.#held.set(first.sessionId, { kind: 'stored', revisions: [...checked.revisions(first.sessionId)] });
+    this.#held.set(first.sessionId, { kind: 'stored', revisions: [...checked.revisions(first.sessionId)], keys });
     const current = this.#metadata.get(first.sessionId);
     const metadata: BrowserSaveMetadata = {
       sessionId: first.sessionId,
@@ -672,10 +679,20 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
     const held = this.#held.get(sessionId);
     if (held === undefined) return [];
     switch (held.kind) {
-      case 'stored': return held.revisions.map((revision) => revisionKey(sessionId, revision.revision));
+      case 'stored': return held.keys;
       case 'unpersisted':
       case 'undecodable':
         return held.keys;
+    }
+  }
+
+  /** A canonical write must not replace a record that #preload attributed to another stream. */
+  #assertRevisionKeysAvailable(sessionId: EncounterSessionId, keys: readonly string[]): void {
+    for (const [owner] of this.#held) {
+      if (owner === sessionId) continue;
+      if (this.#heldKeys(owner).some((heldKey) => typeof heldKey === 'string' && keys.includes(heldKey))) {
+        throw new Error(`Browser store revision key belongs to another session (${owner}).`);
+      }
     }
   }
 
@@ -1103,6 +1120,7 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
   ): Promise<void> {
     const sessionId = metadata.sessionId;
     const currentKeys = this.#heldKeys(sessionId);
+    this.#assertRevisionKeysAvailable(sessionId, restored.map((revision) => revisionKey(sessionId, revision.revision)));
     const encoded = await Promise.all(restored.map(async (revision) => ({
       key: revisionKey(sessionId, revision.revision),
       value: await encodedStoredRevision(revision),
@@ -1251,7 +1269,7 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
     await transactionComplete(transaction);
     const nextHeld = new Map<EncounterSessionId, HeldStream>();
     const bySession = new Map<EncounterSessionId, {
-      keys: IDBValidKey[]; records: StoredRevisionRecord[]; errors: unknown[];
+      keys: IDBValidKey[]; records: { key: IDBValidKey; stored: StoredRevisionRecord }[]; errors: unknown[];
     }>();
     const unreadableKeys = new Map<EncounterSessionId, IDBValidKey>();
     for (const [index, key] of (revisionKeys as IDBValidKey[]).entries()) {
@@ -1273,19 +1291,29 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
       const sessionId = stored.header.sessionId;
       const current = bySession.get(sessionId) ?? { keys: [], records: [], errors: [] };
       current.keys.push(key);
-      current.records.push(stored);
+      current.records.push({ key, stored });
       bySession.set(sessionId, current);
+      const parsed = parsedRevisionKey(key);
+      if (parsed !== null && (parsed.sessionId !== sessionId || parsed.revision !== stored.header.revision)) {
+        const error = new TypeError(`Stored VTT revision key ${String(key)} disagrees with its record header.`);
+        current.errors.push(error);
+        if (parsed.sessionId !== sessionId) {
+          const keyed = bySession.get(parsed.sessionId) ?? { keys: [], records: [], errors: [] };
+          keyed.errors.push(error);
+          bySession.set(parsed.sessionId, keyed);
+        }
+      }
     }
-    const migratedStreams: SessionRevision[][] = [];
+    const migratedStreams: { revisions: SessionRevision[]; oldKeys: readonly IDBValidKey[] }[] = [];
     // A stream whose history v13 cannot express migrates to ONE archived root revision (FOOTPRINT, D919): the
     // stored revisions past it are deleted, since the root's archive holds their stored texts byte for byte.
-    const staleRevisionKeys: IDBValidKey[] = [];
     // The stored texts of each stream that migrated by archive, for its autosaves' restore points.
     const archivedStreams = new Map<EncounterSessionId, readonly string[]>();
     for (const [sessionId, group] of bySession) {
       const stream = group.records;
-      stream.sort((left, right) => left.header.revision - right.header.revision);
-      const texts = stream.map((stored) => stored.text);
+      stream.sort((left, right) => left.stored.header.revision - right.stored.header.revision);
+      const texts = stream.map(({ stored }) => stored.text);
+      const keys = stream.map(({ key }) => key);
       if (group.errors.length > 0) {
         const error = group.errors[0];
         nextHeld.set(sessionId, {
@@ -1294,7 +1322,6 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
         });
         continue;
       }
-      const keys = stream.map((stored) => revisionKey(stored.header.sessionId, stored.header.revision));
       // SAVE-COMPAT C2 (WR17, WR18): each stream decodes on its own. One that does not is held undecodable, its
       // stored records untouched, and every other stream still opens.
       let migrated: SessionRevision[];
@@ -1306,8 +1333,8 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
         });
         continue;
       }
-      if (!stream.some((stored, index) => stored.header.schemaVersion !== migrated[index]?.schemaVersion)) {
-        nextHeld.set(sessionId, { kind: 'stored', revisions: migrated });
+      if (!stream.some(({ stored }, index) => stored.header.schemaVersion !== migrated[index]?.schemaVersion)) {
+        nextHeld.set(sessionId, { kind: 'stored', revisions: migrated, keys });
         continue;
       }
       // SAVE-COMPAT C3 (WR12, D944): a migrated stream is written only after a strict replay under this store's build
@@ -1317,9 +1344,11 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
         nextHeld.set(sessionId, { kind: 'unpersisted', keys, texts, revisions: migrated, refusal: verdict.refusal });
         continue;
       }
-      nextHeld.set(sessionId, { kind: 'stored', revisions: migrated });
-      migratedStreams.push(migrated);
-      staleRevisionKeys.push(...keys.slice(migrated.length));
+      nextHeld.set(sessionId, {
+        kind: 'stored', revisions: migrated,
+        keys: migrated.map((revision) => revisionKey(revision.sessionId, revision.revision)),
+      });
+      migratedStreams.push({ revisions: migrated, oldKeys: keys });
       const root = migrated[0];
       if (root?.transition.kind === 'session_migrated') archivedStreams.set(root.sessionId, texts);
     }
@@ -1355,18 +1384,20 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
       this.#snapshots.set(snapshot.storageId, snapshot);
     }
     if (migratedStreams.length > 0) {
-      const encoded = await Promise.all(migratedStreams.flatMap((stream) =>
+      const encoded = await Promise.all(migratedStreams.flatMap(({ revisions: stream }) =>
         stream.map(async (revision) => ({
           key: revisionKey(revision.sessionId, revision.revision),
           value: await encodedStoredRevision(revision),
         }))));
       const migration = this.database.transaction([revisionStoreName(), sessionStoreName(), snapshotStoreName()], 'readwrite');
+      for (const { oldKeys } of migratedStreams) {
+        for (const key of oldKeys) migration.objectStore(revisionStoreName()).delete(key);
+      }
       for (const revision of encoded) {
         migration.objectStore(revisionStoreName()).put(revision.value, revision.key);
       }
-      for (const key of staleRevisionKeys) migration.objectStore(revisionStoreName()).delete(key);
       for (const snapshot of repointed) migration.objectStore(snapshotStoreName()).put(snapshot, snapshot.storageId);
-      for (const stream of migratedStreams) {
+      for (const { revisions: stream } of migratedStreams) {
         const sessionId = stream[0]?.sessionId;
         if (sessionId === undefined) continue;
         const existing = this.#metadata.get(sessionId);

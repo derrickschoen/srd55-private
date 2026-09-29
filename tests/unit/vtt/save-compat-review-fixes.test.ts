@@ -6,7 +6,7 @@ import { sha256 } from '../../../src/crypto/sha256';
 import { SaveFolderRepository, FolderSaveCollisionError } from '../../../src/vtt/save-folder';
 import { decodeSavedSessionRevisions, exportSavedSession, MemoryBrowserSessionStore, importSavedSession } from '../../../src/vtt/session-persistence';
 import { BUILD_A, BUILD_B, bundle, bundleNotRehashed, e1, LR_SQUEEZED_V12, OVERHANG_V12, recordS, rehashed, type Plain } from '../../helpers/save-compat-fixtures';
-import { MemoryStorageLike, openStore, rawTexts, seedStream } from '../../helpers/save-compat-storage';
+import { MemoryStorageLike, openStore, putSnapshot, rawTexts, seedStream } from '../../helpers/save-compat-storage';
 import { declareTestInputs } from '../../helpers/test-inputs';
 
 const inputs = declareTestInputs({ fixtures: [OVERHANG_V12, LR_SQUEEZED_V12] });
@@ -69,6 +69,43 @@ async function putRawRecord(indexedDb: IDBFactory, name: string, key: IDBValidKe
       transaction.objectStore('revisions').put(value, key);
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
+    });
+  } finally {
+    database.close();
+  }
+}
+
+async function moveRawRecord(indexedDb: IDBFactory, name: string, from: string, to: string): Promise<void> {
+  const bytes = await rawRecord(indexedDb, name, from);
+  const database = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDb.open(name);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction('revisions', 'readwrite');
+      transaction.objectStore('revisions').delete(from);
+      transaction.objectStore('revisions').put(bytes, to);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  } finally {
+    database.close();
+  }
+}
+
+async function rawRecordCount(indexedDb: IDBFactory, name: string, key: string): Promise<number> {
+  const database = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDb.open(name);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  try {
+    return await new Promise<number>((resolve, reject) => {
+      const request = database.transaction('revisions', 'readonly').objectStore('revisions').count(key);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
     });
   } finally {
     database.close();
@@ -168,5 +205,72 @@ describe('SAVE-COMPAT branch review fixes', () => {
     })]);
     store.close();
     expect(new Uint8Array(await rawRecord(indexedDb, name, badKey))).toEqual(new Uint8Array(bytes));
+  });
+
+  it('B1 foreign revision at A canonical key blocks A import and preserves B bytes', async () => {
+    const indexedDb = new IDBFactory();
+    const name = 'review-b1-foreign-key';
+    const a = s();
+    const aId = encounterSessionId(String(a[0]!.sessionId));
+    const bRecorder = new MemoryBrowserSessionStore(BUILD_A);
+    const bId = importSavedSession(bRecorder, inputs.fixtures.readText(LR_SQUEEZED_V12));
+    await seedStream(indexedDb, name, [canonicalJson(bRecorder.revisions(bId)[0]!)], 'B campaign', BUILD_B);
+    const bKey = `${bId}\u0000000000000001`;
+    const aKey = `${aId}\u0000000000000001`;
+    await moveRawRecord(indexedDb, name, bKey, aKey);
+    const bBytes = new Uint8Array(await rawRecord(indexedDb, name, aKey));
+    const store = await openStore(indexedDb, name, BUILD_B);
+    let refused = false;
+    try { store.import(bundle(a)); } catch { refused = true; }
+    await store.flush();
+    const heldA = store.heldSession(aId);
+    const heldB = store.heldSession(bId);
+    const saves = store.savedSessions();
+    store.close();
+    expect(refused).toBe(true);
+    expect(heldA).toEqual({ kind: 'undecodable' });
+    expect(heldB).toEqual({ kind: 'undecodable' });
+    expect(saves.find((save) => save.storageId === `session:${aId}`)?.load.kind).toBe('refused');
+    expect(saves.find((save) => save.storageId === `session:${bId}`)?.load.kind).toBe('refused');
+    expect(new Uint8Array(await rawRecord(indexedDb, name, aKey))).toEqual(bBytes);
+  });
+
+  it('B1 deleting a stream removes its actual noncanonical revision key', async () => {
+    const indexedDb = new IDBFactory();
+    const name = 'review-b1-delete-key';
+    const bRecorder = new MemoryBrowserSessionStore(BUILD_A);
+    const bId = importSavedSession(bRecorder, inputs.fixtures.readText(LR_SQUEEZED_V12));
+    await seedStream(indexedDb, name, [canonicalJson(bRecorder.revisions(bId)[0]!)], 'B campaign', BUILD_B);
+    const orphanKey = 'orphan-revision-key';
+    await moveRawRecord(indexedDb, name, `${bId}\u0000000000000001`, orphanKey);
+    const store = await openStore(indexedDb, name, BUILD_B);
+    expect(store.savedSessions().find((save) => save.storageId === `session:${bId}`)?.load).toEqual({ kind: 'loadable' });
+    await store.remove(bId);
+    store.close();
+    expect(await rawRecordCount(indexedDb, name, orphanKey)).toBe(0);
+  });
+
+  it('B1 replacing a stream removes its actual noncanonical revision key', async () => {
+    const indexedDb = new IDBFactory();
+    const name = 'review-b1-replace-key';
+    const bRecorder = new MemoryBrowserSessionStore(BUILD_A);
+    const bId = importSavedSession(bRecorder, inputs.fixtures.readText(LR_SQUEEZED_V12));
+    await seedStream(indexedDb, name, [canonicalJson(bRecorder.revisions(bId)[0]!)], 'B campaign', BUILD_B);
+    const orphanKey = 'orphan-revision-key';
+    const canonicalKey = `${bId}\u0000000000000001`;
+    await moveRawRecord(indexedDb, name, canonicalKey, orphanKey);
+    const storageId = `per_round:${bId}:000000000001:encounter_start`;
+    await putSnapshot(indexedDb, name, {
+      sessionId: bId, fingerprint: 'f'.repeat(64), revisionCount: 1, room: null, round: 0, initialSeed: 0,
+      storageId, trigger: 'encounter_start', pool: 'per_round', name: 'Start',
+      updatedAt: '2026-09-20T10:01:00.000Z', retention: { kind: 'named' },
+      restorePoint: { kind: 'own_save', text: exportSavedSession(bRecorder, bId) },
+    });
+    const store = await openStore(indexedDb, name, BUILD_B);
+    expect(store.savedSessions().find((save) => save.storageId === `session:${bId}`)?.load).toEqual({ kind: 'loadable' });
+    await store.restoreStored(storageId, bId);
+    store.close();
+    expect(await rawRecordCount(indexedDb, name, orphanKey)).toBe(0);
+    expect(await rawRecordCount(indexedDb, name, canonicalKey)).toBe(1);
   });
 });

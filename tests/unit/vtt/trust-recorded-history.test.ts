@@ -161,4 +161,3 @@ describe('SAVE-COMPAT C5: trust-recorded-history', () => {
     expect(sha256(TRUST_RECORDED_HISTORY_KEY)).toBe(TRUST_RECORDED_HISTORY_KEY_SHA256);
   });
 });
-

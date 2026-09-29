@@ -865,7 +865,7 @@ export interface CombatantObservation {
   readonly revision: number;
 }
 
-interface ReevaluatedSpellBranch {
+export interface ReevaluatedSpellBranch {
   readonly sequence: number;
   readonly spellId: string;
   readonly command: SpellCastCommand;
