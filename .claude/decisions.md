@@ -3873,5 +3873,16 @@ OWNER: "have codex-gpt-6-sol-xhigh do the implementation first draft. use the co
 - This supersedes the 2026-07-25 "Claude implements" binding in project memory. D390's rationale is the same observation.
 - SAVE-COMPAT applies it now: the review fixes codex wrote (fix1 and fix2) get a minimality pass before review round 3.
 
-Next free id: D952.
+## D952 — 2026-09-29 09:51 — SAVE-COMPAT SIMPLIFIED: DROP C6, SLIM C5 (owner)
+
+CONTEXT (verified by me on the branch): C5 (trust-recorded-history) is +740 lines, and C6 (the toggle registry) is +49. session-persistence.ts exports went from 50 to 98. Outside its own tests, nothing uses C5 today; the MOVE-COST and CONDITION-D20 plans consume it only through one T-D941 test each. C6 ships empty.
+QUESTION (AskUserQuestion; recommendation "Drop C6, slim C5"). OWNER chose: "Drop C6, slim C5 (Recommended)".
+- C6 is removed: src/rules/rule-toggles.ts and its two tests. A registry comes back with the first real toggle.
+- C5 stays as a plain test-only helper. It loads a save trusting its recorded history and marks the result as relaxed.
+- Removed from C5: the grant key and its sha256 pin, the three ast-grep rules and their tests, the import-boundary addition, and the per-result type stamping.
+- Kept in C5: W26, a relaxed export still fails a strict import, so no laundering. The only containment is that the helper lives under tests/.
+- This amends D941's C5 and C6 shape and the SAVE-COMPAT FROZEN API. MOVE-COST and CONDITION-D20 take the slimmer names at their next sync.
+NEXT: after fix round 2, codex drafts the cut under consensus §8A; then the minimality pass, the gate, and review round 3.
+
+Next free id: D953.
 
