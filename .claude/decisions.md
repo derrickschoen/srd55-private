@@ -4270,5 +4270,32 @@ The rename plan was mine, not codex's.
 - Q3: no committed killer exists yet for M_CACHE_RETAINS_BIND; the plan must add one.
 - Q4: the lease-audit predicate at query.ts:59 would change to allow owned, reset, idle statements.
 
-Next free id: D969.
+### D969 — 2026-09-29 19:42 — SQL-TRIM P2 review REVISE (hash memo survives rollback); TPN and GATE-TRIM revisions; session paused at the usage limit
+
+**SQL-TRIM P2** (ef8768be, lane claude/sql-trim in dnd-probe-sqlperf-9f0886c3).
+- VERIFIED by me:
+  - installer file medians over 3 alternating runs: main e56d9ee9 36.16 s, P2 31.85 s (−4.3 s; P2 won every pair);
+  - content-adoption 8/8;
+  - the `'listed'` guard mutant fails 9 installer tests; file restored.
+- Fresh review (codex 01a0ef87, read-only) returned REVISE P2. The JavaScript memo registryGraphHashCache {revision, hash} (content-adoption.ts:302) survives a preview rollback, while the TEMP revision counter rolls back. A later sequence of committed writes can reach the same revision with different rows and hit a stale speculative hash. P2 makes this reachable, because the TEMP table no longer drops with the installer's outer transaction.
+- CONFIRMED by me from code (:342-366, :1570-1586). Whether main's own planContentImport simulation already has the same latent problem is still OPEN. The reviewer also says the memo must be cleared when the recovery path recreates the table.
+- Do NOT land P2 until this is fixed. The landing gate on ef8768be (started 19:40:10) is informational only.
+
+**THIRD-PARTY-NOTICES.** Codex's draft is committed on the lane as 245b73cc (WIP, unreviewed). Resume 1 is running with rulings R1-R5:
+- R1: one collector;
+- R2: a readable licenses/THIRD-PARTY-NOTICES.txt;
+- R3: a hard error for missing licence text, with a vendored Apache-2.0 text for sqlite-wasm (which ships no licence file);
+- R4: the precache question for .vite/third-party-bundle.json;
+- R5: absolute package paths.
+Codex corrected my brief: zod is in both pipelines.
+
+**GATE-TRIM.** The revised plan (.tmp/runs/gate-trim/plan.r2.md) applies R1-R4. T3 was kept on a measurement: 98.6% of the per-cap cost is repeated preparation and rendering, an estimated 61.8 s. A fresh read-only review is running (codex 01a0ef8b).
+
+**Running at pause.** Exit files under .tmp/runs/:
+- sqlperf/gate.exit
+- tpn/resume1.exit
+- gate-trim/review-r1.exit
+- feas/run.exit
+
+Next free id: D970.
 
