@@ -3962,5 +3962,11 @@ FINDINGS AGAINST MY OWN WORK:
 - (1) queue11/12 waited for zero codex processes, stricter than D883/D893 (agent and codex sessions never delay a run). The timed work was held back about 1.5 h. Fixed; run-gate-arm's quietwait applies the rule.
 - (2) PERF-SHA's codex test runs overlapped a timed pair and helped void it. No codex test runs during timed arms from now on.
 
-Next free id: D956.
+## D956 — 2026-09-29 14:08 — PERF-TESTS LANDED (d68c09fa)
+
+Three commits rebased onto 76fc01e4. The tree outside .claude is identical to the timed 5174d741.
+- Evidence (D955): codex review r3 APPROVE; timed pair pt-0929-5174d741 with all arms VALID, 228.5 → 194.4 s (−34.1 s); same 707 files and 12,368 tests.
+- PERF-SHA (0b79b484) is not included. It waits for my test run and a codex review.
+
+Next free id: D957.
 
