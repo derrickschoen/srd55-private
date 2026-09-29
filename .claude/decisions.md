@@ -3837,5 +3837,19 @@ SAVE-COMPAT plan review r3 (FINAL): codex APPROVE, with no P1/P2 remaining and a
 - The generic driver check: every RevisionRewriteStep leaves the branch RNG-state fingerprint byte-identical.
 NEXT: SAVE-COMPAT implementation. Step 0 is the final plan sync (the two P3 additions plus this deletion), which the supervisor verifies, then C1…C6. The flake pair is re-run when the machine is quiet.
 
-Next free id: D949.
+## D949 — 2026-09-28 22:45 — ENV-TRACE FLAKE FIX LANDED (4d3e3b6e)
+
+TIMED PAIR env-0928r2-e425e531 (A = main a4b582e7, B = the fix e425e531). Label new; the reports were checked fresh.
+- A prewarm: VOID (outside test runs, 2.65 cores); passed, 282.8 s.
+- B prewarm: VALID, passed; initial 204.5 s, total 253.5 s; 701 files, 12,335 tests.
+- A timed: VALID, passed; initial 188.7 s, retry 44.0 s, total 232.7 s; 701 files, 12,314 tests.
+- B timed: VALID, passed; initial 191.8 s, retry 11.3 s, total 203.1 s; 701 files, 12,335 tests.
+- The prewarm and timed counts agree for each arm. B adds 21 tests (the new witnesses) and no files. The initial phase moves +3.1 s (guard +30 s), and B's total is lower.
+- The earlier pair env-0928-e425e531 was void (D947) and is not counted.
+LANDED: the branch was rebased (records only) onto c0e9acd3. Its tree outside .claude is identical to the timed e425e531. Main fast-forwarded to 4d3e3b6e (5 commits).
+- Verified earlier by me (D945): tsc, check-command-outcomes, 131/131 specs, and my own mutant killed. Codex r2: APPROVE.
+- The empty legacy directory tests/test-input-boundary-probes/ is removed from main's working tree (untracked, empty).
+NEXT: the SAVE-COMPAT implementation (wave 14).
+
+Next free id: D950.
 
