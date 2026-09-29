@@ -45,7 +45,6 @@ import {
   EncounterSessionJournal,
   MemoryBrowserSessionStore,
   MemoryMirrorSink,
-  SqliteBrowserSessionStore,
   SessionFingerprintMismatchError,
   UnknownSessionTransitionKindError,
   VTT_SESSION_MIGRATIONS,
@@ -59,8 +58,6 @@ import {
   type MirrorSink,
   type SessionRevision,
 } from '../../../src/vtt/session-persistence';
-import { DatabaseContext } from '../../../src/db/database';
-import { openTestDatabase } from '../../helpers/open-db';
 import {
   damageType,
   dieSides,
@@ -1281,50 +1278,4 @@ describe('event-sourced encounter persistence', () => {
     expect(reloaded.revisions(importedId)).toEqual(imported.revisions(importedId));
   });
 
-  it('SQLITE-BROWSER-STORE appends each revision as a separate local database row', async () => {
-    const connection = await openTestDatabase();
-    try {
-      const fixture = pair();
-      const registry = new ControllerRegistry([
-        { combatantId: fixture.player.id, controller: new AlgorithmController() },
-        { combatantId: fixture.monster.id, controller: new AlgorithmController() },
-      ]);
-      const database = new DatabaseContext(connection);
-      const store = new SqliteBrowserSessionStore(database);
-      await expect(store.flush()).resolves.toBeUndefined();
-      const { journal, rng } = createJournal(
-        store,
-        new MemoryMirrorSink(),
-        registry,
-        fixture.state,
-      );
-      const coordinator = new TurnCoordinator(fixture.state, registry, rng, {
-        persistence: journal,
-      });
-      await coordinator.step();
-      await coordinator.step();
-
-      const rows = database.allRaw(
-        `SELECT revision, schema_version
-         FROM vtt_session_revisions
-         ORDER BY revision`,
-      );
-      expect(rows).toEqual([
-        { revision: 1, schema_version: 13 },
-        { revision: 2, schema_version: 13 },
-        { revision: 3, schema_version: 13 },
-        { revision: 4, schema_version: 13 },
-        { revision: 5, schema_version: 13 },
-      ]);
-      expect(
-        EncounterSessionJournal.resume(
-          encounterSessionId('session:persistence-test'),
-          store,
-          new MemoryMirrorSink(),
-        ).encounterState,
-      ).toEqual(coordinator.state());
-    } finally {
-      connection.close();
-    }
-  });
 });

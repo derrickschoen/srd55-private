@@ -24,8 +24,13 @@ describe('VTT hidden-roll session migration', () => {
     if (migration === undefined) {
       throw new Error('Missing 0057_vtt_session_hidden_rolls migration.');
     }
+    // The table's last shipped shape is the one 0067 leaves: 0068 drops it (owner D948).
+    const dropIndex = DATABASE_MIGRATIONS.findIndex(
+      (entry) => entry.id === '0068_drop_vtt_session_revisions',
+    );
+    const lastShapingMigration = DATABASE_MIGRATIONS[dropIndex - 1];
     const latestMigration = DATABASE_MIGRATIONS.at(-1);
-    if (latestMigration === undefined) {
+    if (dropIndex < 0 || lastShapingMigration === undefined || latestMigration === undefined) {
       throw new Error('Missing database migrations.');
     }
 
@@ -46,7 +51,7 @@ describe('VTT hidden-roll session migration', () => {
       `);
 
       db.exec(DATABASE_MIGRATIONS
-        .slice(migrationIndex)
+        .slice(migrationIndex, dropIndex)
         .map((entry) => entry.sql)
         .join('\n'));
 
@@ -69,8 +74,27 @@ describe('VTT hidden-roll session migration', () => {
         )
       `);
 
-      fresh.exec(schema);
+      fresh.exec(DATABASE_MIGRATIONS
+        .slice(0, dropIndex)
+        .map((entry) => entry.sql)
+        .join('\n'));
       expect(schemaSignature(db)).toBe(schemaSignature(fresh));
+      expect(databaseSchemaChecksum(schemaSignature(db))).toBe(
+        lastShapingMigration.resultSchemaChecksum,
+      );
+
+      // The rest of the chain reaches the fresh schema.
+      db.exec(DATABASE_MIGRATIONS
+        .slice(dropIndex)
+        .map((entry) => entry.sql)
+        .join('\n'));
+      const current = new sqlite3.oo1.DB(':memory:', 'c');
+      try {
+        current.exec(schema);
+        expect(schemaSignature(db)).toBe(schemaSignature(current));
+      } finally {
+        current.close();
+      }
       expect(databaseSchemaChecksum(schemaSignature(db))).toBe(
         latestMigration.resultSchemaChecksum,
       );

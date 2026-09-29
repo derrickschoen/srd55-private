@@ -196,8 +196,6 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'subclass_feature_value_contributions',
       'subclass_features',
       'subclass_progressions',
-      // Increment 5's event stream is whole-database state only.
-      'vtt_session_revisions',
       'warning_acknowledgements',
       'weapon_templates',
       'wizard_spellbook_entries',
@@ -379,11 +377,11 @@ describe('table scope classification', () => {
     // 0044 adds one registry-only provenance table while 0045 adds the
     // character-owned share-lineage receipt table. Migration 0046 adds the
     // recipient's durable replacement-choice table. Migration 0051 adds the
-    // ONE whole-database-only VTT revision stream table explicitly listed in
-    // the application-table oracle above. Migration 0066 adds the ONE
-    // species senses statement table (D923 Q10).
-    expect(names).toHaveLength(89);
-    expect(new Set(names).size).toBe(89);
+    // ONE whole-database-only VTT revision stream table, and 0068 drops it
+    // again (owner D948: the SQLite session store had no production caller).
+    // Migration 0066 adds the ONE species senses statement table (D923 Q10).
+    expect(names).toHaveLength(88);
+    expect(new Set(names).size).toBe(88);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 

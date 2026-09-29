@@ -415,6 +415,14 @@ const SCHEMA_BEFORE_VTT_FOOTPRINT_PLACEMENT = DATABASE_MIGRATIONS
   .map((entry) => entry.sql)
   .join('\n');
 const VTT_FOOTPRINT_PLACEMENT_MIGRATION = DATABASE_MIGRATIONS[VTT_FOOTPRINT_PLACEMENT_INDEX]!;
+const DROP_VTT_SESSION_REVISIONS_INDEX = DATABASE_MIGRATIONS.findIndex(
+  (entry) => entry.id === '0068_drop_vtt_session_revisions',
+);
+const SCHEMA_BEFORE_DROP_VTT_SESSION_REVISIONS = DATABASE_MIGRATIONS
+  .slice(0, DROP_VTT_SESSION_REVISIONS_INDEX)
+  .map((entry) => entry.sql)
+  .join('\n');
+const DROP_VTT_SESSION_REVISIONS_MIGRATION = DATABASE_MIGRATIONS[DROP_VTT_SESSION_REVISIONS_INDEX];
 
 /**
  * One character, three source instances (one of them deleted so the
@@ -4625,6 +4633,36 @@ describe('database migration chain', () => {
       expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
         VTT_FOOTPRINT_PLACEMENT_MIGRATION.resultSchemaChecksum,
       );
+      expect(databaseSchemaSignature(db)).toBe(schemaSignature(SCHEMA_BEFORE_DROP_VTT_SESSION_REVISIONS));
+    } finally {
+      db.close();
+    }
+  });
+
+  it('W59 (owner D948) 0068 drops the unused VTT session revision table and nothing else', () => {
+    // The last migration: HEAD's schema is its result.
+    expect(DATABASE_MIGRATIONS.at(-1)?.id).toBe('0068_drop_vtt_session_revisions');
+    const migration = DROP_VTT_SESSION_REVISIONS_MIGRATION!;
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(SCHEMA_BEFORE_DROP_VTT_SESSION_REVISIONS);
+      // A row an earlier build could have written; no build reads the table (the store had no production caller).
+      db.exec(`
+        INSERT INTO vtt_session_revisions (
+          session_id, revision, schema_version, payload_json, payload_checksum
+        ) VALUES ('session:never-read', 1, 13, '{"schemaVersion":13}', '${'58'.repeat(32)}')
+      `);
+      const schemaObjects = (): string[] => db.selectValues(
+        `SELECT type || ' ' || name FROM sqlite_schema ORDER BY type, name`,
+      ).map(String);
+      const before = schemaObjects();
+      expect(before).toContain('table vtt_session_revisions');
+
+      db.exec(migration.sql);
+
+      // The table and its own primary-key index are gone; every other schema object is untouched.
+      expect(schemaObjects()).toEqual(before.filter((entry) => !entry.includes('vtt_session_revisions')));
+      expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(migration.resultSchemaChecksum);
       expect(databaseSchemaSignature(db)).toBe(schemaSignature(schema));
     } finally {
       db.close();

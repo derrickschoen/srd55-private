@@ -29,4 +29,3 @@ export * from './items';
 export * from './sheet';
 export * from './sheet-inputs';
 export * from './weapons';
-export * from './vtt';

@@ -39,7 +39,6 @@ import {
   type EncounterSessionId,
 } from '../combat/values';
 import { sha256 } from '../crypto/sha256';
-import type { DatabaseContext } from '../db/database';
 import {
   assembleDecodedState,
   decodeAbsentTokens,
@@ -161,8 +160,8 @@ export interface ArchivedText {
 
 /**
  * What the loader accepted, kept exactly, before any parse or migration: an imported save's text, or a stored
- * stream's revisions, each as the text its store holds (IndexedDB: the decompressed JSON it wrote; SQLite: the
- * payload_json column), in revision order. Nothing here is a re-serialization.
+ * stream's revisions, each as the text its store holds (IndexedDB: the decompressed JSON it wrote), in revision
+ * order. Nothing here is a re-serialization.
  */
 export type ArchivedSource =
   | { readonly kind: 'saved_session'; readonly save: ArchivedText }
@@ -496,100 +495,6 @@ export class MemoryBrowserSessionStore implements SessionStore {
 
   revisions(sessionId: EncounterSessionId): readonly SessionRevision[] {
     return [...(this.#bySession.get(sessionId) ?? [])];
-  }
-
-  async flush(): Promise<void> {}
-}
-
-export class SqliteBrowserSessionStore implements SessionStore {
-  constructor(
-    private readonly db: DatabaseContext,
-    readonly recordingEngine: EngineBuild = RUNNING_ENGINE_BUILD,
-  ) {}
-
-  append(revision: SessionRevision): void {
-    const payload = canonicalJson(revision);
-    this.db.transaction((transaction) => {
-      const latest = transaction.scalar<number>(
-        `SELECT max(revision)
-         FROM vtt_session_revisions
-         WHERE session_id = $sessionId`,
-        { $sessionId: revision.sessionId },
-      );
-      const expected = (latest ?? 0) + 1;
-      if (revision.revision !== expected) {
-        throw new Error('SQLite browser store requires every revision in order.');
-      }
-      if (revision.parentRevision !== null) {
-        const parentCount = transaction.scalar<number>(
-          `SELECT count(*)
-           FROM vtt_session_revisions
-           WHERE session_id = $sessionId AND revision = $revision`,
-          {
-            $sessionId: revision.sessionId,
-            $revision: revision.parentRevision,
-          },
-        );
-        if (parentCount !== 1) {
-          throw new Error('SQLite browser store cannot append an unknown parent.');
-        }
-      }
-      transaction.exec(
-        `INSERT INTO vtt_session_revisions (
-           session_id, revision, schema_version, payload_json, payload_checksum
-         ) VALUES (
-           $sessionId, $revision, $schemaVersion, $payload, $checksum
-         )`,
-        {
-          $sessionId: revision.sessionId,
-          $revision: revision.revision,
-          $schemaVersion: revision.schemaVersion,
-          $payload: payload,
-          $checksum: revision.checksum,
-        },
-      );
-    });
-  }
-
-  appendAll(revisions: readonly SessionRevision[]): void {
-    this.db.transaction(() => {
-      for (const revision of revisions) this.append(revision);
-    });
-  }
-
-  revisions(sessionId: EncounterSessionId): readonly SessionRevision[] {
-    const stored = this.db.allRaw(
-      `SELECT schema_version, payload_json, payload_checksum
-       FROM vtt_session_revisions
-       WHERE session_id = $sessionId
-       ORDER BY revision`,
-      { $sessionId: sessionId },
-    ).map((row) => {
-      if (typeof row.payload_json !== 'string') {
-        throw new TypeError('Stored VTT session payload is not text.');
-      }
-      const revision: unknown = JSON.parse(row.payload_json);
-      if (
-        !isRecord(revision) ||
-        row.schema_version !== revision.schemaVersion ||
-        row.payload_checksum !== revision.checksum
-      ) {
-        throw new Error('Stored VTT session row metadata disagrees with its payload.');
-      }
-      // The row's text, as stored: what a migration archives byte for byte (D919).
-      return row.payload_json;
-    });
-    if (stored.length === 0) return [];
-    const migrated = migrateStoredSessionRevisions(stored, this.recordingEngine);
-    // A history v13 cannot express became one archived root revision (FOOTPRINT, D919): the rows are rewritten,
-    // since the root's archive holds every stored row's text byte for byte and new revisions number from the root.
-    if (migrated.length !== stored.length) {
-      this.db.transaction((transaction) => {
-        transaction.exec('DELETE FROM vtt_session_revisions WHERE session_id = $sessionId', { $sessionId: sessionId });
-        this.appendAll(migrated);
-      });
-    }
-    return migrated;
   }
 
   async flush(): Promise<void> {}

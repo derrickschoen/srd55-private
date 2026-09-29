@@ -123,9 +123,7 @@ export type TableRole =
   /** Modifier-item definitions and their ordered mechanical effect graph. */
   | 'catalog_item'
   /** Non-secret local publication and repository-observation relationships. */
-  | 'party_observation'
-  /** Durable VTT sessions retained only by whole-database images. */
-  | 'vtt_session';
+  | 'party_observation';
 
 /**
  * The scopes a table can participate in.
@@ -532,14 +530,6 @@ export const TABLE_SCOPES = {
   },
   catalog_data_migrations: {
     role: 'catalog_registry',
-    snapshot: false,
-    backupDirect: false,
-    backup: false,
-    share: false,
-    backupReference: false,
-  },
-  vtt_session_revisions: {
-    role: 'vtt_session',
     snapshot: false,
     backupDirect: false,
     backup: false,
@@ -1448,7 +1438,6 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'subclass_feature_value_contributions',
   'subclass_features',
   'subclass_progressions',
-  'vtt_session_revisions',
   'warning_acknowledgements',
   'weapon_templates',
   'wizard_spellbook_entries',

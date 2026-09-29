@@ -68,6 +68,7 @@ import vttCreatureSpace from '../../drizzle/0064_vtt_creature_space.sql?raw';
 import vttObservationHistory from '../../drizzle/0065_vtt_observation_history.sql?raw';
 import speciesTemplateSenses from '../../drizzle/0066_species_template_senses.sql?raw';
 import vttFootprintPlacement from '../../drizzle/0067_vtt_footprint_placement.sql?raw';
+import dropVttSessionRevisions from '../../drizzle/0068_drop_vtt_session_revisions.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -698,6 +699,14 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
     sql: vttFootprintPlacement,
     checksum: 'ac00ac665e78a4e60f8bf2d306eb0f06bb3e8fb724be3c7f53268442db2fcd87',
     resultSchemaChecksum: '5599bfaf0b1adee6fd4e5470ec926d315f8c1941350d5d1665cfa0316f4f253e',
+  }),
+  Object.freeze({
+    // SAVE-COMPAT (owner D948): the SQLite VTT session store had no production caller and is deleted; this drops its
+    // unused table. 0052-0067 stay as shipped.
+    id: '0068_drop_vtt_session_revisions',
+    sql: dropVttSessionRevisions,
+    checksum: 'fc7ea61cd87a4e8af0b07df05f948124f71f086c60d5ea2b4c3fe7a6303a8914',
+    resultSchemaChecksum: '715a0e45fc501e995a1169375439b53ef66a53df3318e58541513ce7c6cae8e7',
   }),
 ]);
 

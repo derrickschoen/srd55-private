@@ -12,7 +12,6 @@ import { restoreMulberry32 } from '../../../src/combat/random';
 import { V12CheckpointError } from '../../../src/combat/token-placement';
 import { combatantId, encounterSessionId, type CombatantId } from '../../../src/combat/values';
 import { sha256 } from '../../../src/crypto/sha256';
-import { DatabaseContext } from '../../../src/db/database';
 import { IndexedDbBrowserSessionStore } from '../../../src/vtt/local-session-store';
 import { engineCommit, RUNNING_ENGINE_BUILD } from '../../../src/vtt/engine-build';
 import {
@@ -23,7 +22,6 @@ import {
   MemoryBrowserSessionStore,
   MemoryMirrorSink,
   migrateStoredSessionRevisions,
-  SqliteBrowserSessionStore,
   replaySessionRevisions,
   SessionHistoryArchiveError,
   SessionHistoryArchiveMetadataError,
@@ -33,7 +31,6 @@ import {
   verifySessionHistoryArchive,
   type SessionRevision,
 } from '../../../src/vtt/session-persistence';
-import { openTestDatabase } from '../../helpers/open-db';
 import { declareTestInputs } from '../../helpers/test-inputs';
 
 // FOOTPRINT session v13 (owner rulings D907 Q6 and D919). The inputs are v12 saves produced AT THE BASE COMMIT
@@ -374,31 +371,6 @@ describe('FOOTPRINT session v13: a save v13 cannot express is repaired and archi
     });
     check.close();
     expect(keys).toEqual([`session:footprint-mixed\u0000${'1'.padStart(12, '0')}`]);
-  });
-
-  it('W21c (SQLite): the SQLite store rewrites stored v11 + v12 rows to the archived root row', async () => {
-    const connection = await openTestDatabase();
-    try {
-      const database = new DatabaseContext(connection);
-      const stream = JSON.parse(text('mixed')) as { sessionId: string; revision: number; schemaVersion: number; checksum: string }[];
-      for (const revision of stream) {
-        database.exec(
-          `INSERT INTO vtt_session_revisions (session_id, revision, schema_version, payload_json, payload_checksum)
-           VALUES ($sessionId, $revision, $schemaVersion, $payload, $checksum)`,
-          { $sessionId: revision.sessionId, $revision: revision.revision, $schemaVersion: revision.schemaVersion, $payload: canonicalJson(revision), $checksum: revision.checksum },
-        );
-      }
-      const store = new SqliteBrowserSessionStore(database, { kind: 'engine_commit', commit: engineCommit('d'.repeat(40)) });
-      const sessionId = encounterSessionId('session:footprint-mixed');
-      expect(accepted(() => store.revisions(sessionId)).map((revision) => revision.transition.kind)).toEqual(['session_migrated']);
-      // fix1: the root the SQLite store rewrote records that store's build.
-      expect(store.revisions(sessionId)[0]?.recordedBy).toEqual({ kind: 'engine_commit', commit: 'd'.repeat(40) });
-      expect(database.allRaw('SELECT revision, schema_version FROM vtt_session_revisions ORDER BY revision'))
-        .toEqual([{ revision: 1, schema_version: 13 }]);
-      expect(store.revisions(sessionId)).toHaveLength(1);
-    } finally {
-      connection.close();
-    }
   });
 
   it('W21e: a Huge with no whole-body anchor anywhere goes to the DM at its fixed size', () => {
