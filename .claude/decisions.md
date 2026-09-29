@@ -4189,5 +4189,52 @@ The rename plan was mine, not codex's.
 
 **Superseded.** The '#sha256' branch claude/sha-split (up to 0ceb6ed4) is superseded and will not land. Its seven pins were byte-identical, but its gate fails.
 
-Next free id: D967.
+### D967 — 2026-09-29 19:10 — THIRD-PARTY-NOTICES opened; SHA-SPLIT gate at 4 workers on a noisy box (owner); plan rulings; T8 parked; a finding against my own report
+
+**Owner, this session.**
+- "Do it": land SHA-SPLIT, then THIRD-PARTY-NOTICES as a small unit.
+- T8: "Park it, investigate". The challenge-feasibility deletion is parked, and FEAS-INVESTIGATE is opened.
+- "If the machine is noisy, can you just run with 2 or 4 threads to get started?" The SHA-SPLIT landing gate therefore runs at --maxWorkers=4 without waiting for a quiet box. Outside runners are sampled to .tmp/runs/sha-split/gate.outside.log so that any timeout red can be judged. A green under noise is a valid verdict.
+
+**Finding against my own work.** I reported the gate3 rerun as started. It never ran: at 19:01 there was no gate.meta, no gate.log and no process. The rerun was lost for about 2.5 h.
+
+**SHA-SPLIT.**
+- Review r3 P3 comment fix at src/db/boot-verification-stamp.ts:172-174, commit 9ea799e3 on claude/sha-split-v2. VERIFIED that no test or tool pins this file's bytes.
+- Landing gate .tmp/runs/sha-split/gate5.sh: holds fan-out slots 1-8, runs at 4 workers, started 19:10:11 at load 1.61.
+
+**THIRD-PARTY-NOTICES.**
+- Why: npm dependencies live only in package.json and node_modules, but the build copies their code into dist/, and serving dist/ distributes it. MIT, ISC and BSD notices must travel with that code, and dist/ has none today.
+- VERIFIED by me in node_modules/vite/dist/node/chunks/config.js (licensePlugin): Vite 7.3.6's `build.license` reads only non-asset chunks of the bundle it runs in. Worker output (the separate `config.worker` pipeline, vite.config.ts:233-270) reaches that bundle as assets, so the built-in option alone would omit worker-only packages. zod reaches the browser only through the worker (vite.config.ts:291).
+- Codex gpt-6.1-sol xhigh drafts it in clone dnd-probe-tpn-9ea799e3, branch claude/third-party-notices from 9ea799e3; session 01a0ef69-3fba-73a3-b019-82f695c480b5.
+- Named mutants: M1 collector missing from the worker pipeline; M2 licence text dropped; M3 Legal link removed.
+
+**SQL-TRIM (plan by codex, session 01a0ee5f).**
+- Codex-measured installer file medians: 41.47 s → 36.24 s with P2 → 30.02 s with P2+P3.
+- P1 (join rewrite) and P4 are dropped: after P2, P1 saves only 0.69 s.
+- P2 is APPROVED and in implementation on branch claude/sql-trim from main a601cd4a. It prepares the registry-hash TEMP cache before the outer preview transaction and adds a `visibility IS NOT ?` guard. Codex found setup 163→13 and catch recoveries 150→0; the 0.66 ms revision read was preparation cost.
+- P3 (the prepared-statement cache) is NOT approved yet. Four minimality questions are open:
+  - the global Symbol;
+  - the 128 FIFO bound;
+  - a killer that lives in an uncommitted .tmp script (decisions.md:88);
+  - the lease-audit changes.
+
+**GATE-TRIM/GATE-TIER plan (codex, session 01a0ee97): §8A rulings.**
+- Approved as written: T7, T5 (measured 4.2 s), T4 (parent pointers off, measured 0.9 s per build), T6, T9 (a byte-equal clone was proved), T2, G2, and T10 after T6.
+- G3 CONFIRMED by codex with a unit-level reducer call: `--changed` can certify a filtered run as passed. Not yet verified by me.
+- R1 (T1), a finding against my own brief: my constraint that each file keep its assertions forced a global setup, an argv parse and a cross-worker result channel. The revision moves the three probe cases into declaration-emit.test.ts, sharing its one compile.
+- R2: G1 drops the reporter extension. Landing means no filter; lane means exactly `--tagsFilter=!landing`.
+- R3: the handoff M1 change stays only with a cited consumer.
+- R4: T3 is measured before any seam; it is dropped under 15 s.
+- T8 is removed from the plan (owner). Codex's evidence: under a pinned runtime the exploration ran 1,800 s without a report, while today's tests accept SHELVE. Not yet verified by me.
+
+**FEAS-INVESTIGATE (owner).**
+- Codex gpt-6.1-sol xhigh measures, in clone dnd-probe-feas-a601cd4a (session 01a0ef6d-c46c-7bd1-9b15-d5697c336cf5):
+  - which verdict today's explorations actually return, and which limit fires;
+  - whether the pinned exploration is finite;
+  - whether GO is reachable;
+  - what the tests prove;
+  - the mechanism behind the D957 185.9 s stall.
+- Report only; no fix.
+
+Next free id: D968.
 
