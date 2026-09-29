@@ -58,6 +58,7 @@
     "windows:probe": "node --experimental-strip-types tools/vtt-handoff/windows-probe.ts --"
   },
   "dependencies": {
+    "@noble/hashes": "2.4.0",
     "@sqlite.org/sqlite-wasm": "3.53.0-build1",
     "qrcode": "^1.5.4",
     "trystero": "0.25.3",

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { sha256 } from '../../../src/crypto/sha256';
+import { browserSha256 as sha256 } from '../../../src/crypto/sha256';
 
 function nodeSha256(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
@@ -17,6 +17,8 @@ describe('sha256', () => {
     ['65-byte padding boundary', 'a'.repeat(65)],
     ['long input', 'long-input-'.repeat(1_000)],
     ['multibyte UTF-8', 'D&D 🐉 café 日本語'],
+    ['lone high surrogate', '\ud800'],
+    ['lone low surrogate', 'x\udc00y'],
   ])('matches node:crypto for %s', (_label, value) => {
     expect(sha256(value)).toBe(nodeSha256(value));
   });

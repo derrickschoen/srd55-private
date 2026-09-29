@@ -199,7 +199,7 @@ silently added to a frozen fingerprint projector.
   definitions on the wire.
 - **A synchronous, browser-safe full SHA-256 implementation already ships.**
   `sha256(string)` UTF-8 encodes its input and returns 64 lowercase hex
-  characters (`src/crypto/sha256.ts:24-29,122-125`). Identity needs a canonical
+  characters (`src/crypto/sha256.ts:12-23`). Identity needs a canonical
   projection and frozen vectors, not another hash implementation.
 - **Schema migrations cannot run semantic TypeScript projectors today.**
   `DatabaseMigration` contains SQL plus SQL/schema checksums
