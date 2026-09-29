@@ -1,0 +1,20 @@
+id: no-trust-mint-import-outside-tests
+language: TypeScript
+severity: error
+message: >-
+  The trust-recorded-history mint (tests/helpers/trust-recorded-history.ts) is for tests only (owner D941 GUARD, D945
+  SQ3): the app and the tools never import, re-export, load or require it.
+files:
+  - src/**/*.ts
+  - tools/**/*.ts
+rule:
+  any:
+    - pattern: import $$$BINDINGS from '$MODULE'
+    - pattern: import '$MODULE'
+    - pattern: export { $$$BINDINGS } from '$MODULE'
+    - pattern: export * from '$MODULE'
+    - pattern: import('$MODULE')
+    - pattern: require('$MODULE')
+constraints:
+  MODULE:
+    regex: trust-recorded-history

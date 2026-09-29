@@ -13,3 +13,9 @@ invalid:
     store.appendAll(revisions as unknown as ReplayVerifiedRevisions);
   - >-
     store.append(revision as JournalRecordedRevision);
+  - >-
+    const stamp = value as LoadedRelaxedStamp;
+  - >-
+    const stamped = value as LoadedRelaxed<string>;
+  - >-
+    const resume = strict as unknown as RelaxedSessionResume;
