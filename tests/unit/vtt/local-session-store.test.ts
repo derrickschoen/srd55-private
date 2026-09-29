@@ -227,7 +227,7 @@ function controlledIndexedDb(outcome: 'success' | 'open_error' | 'request_error'
   const registrations: ListenerRegistration[] = [];
   const transactionTarget = new RecordedEventTarget('transaction', registrations);
   const transactionError = new DOMException('controlled transaction failure', 'AbortError');
-  const requests = Array.from({ length: 3 }, (_unused, index) => {
+  const requests = Array.from({ length: 4 }, (_unused, index) => {
     const request = new RecordedEventTarget(`request-${String(index)}`, registrations);
     return Object.assign(request, {
       result: [] as unknown[],
@@ -239,6 +239,7 @@ function controlledIndexedDb(outcome: 'success' | 'open_error' | 'request_error'
     error: transactionError,
     objectStore: () => ({
       getAll: () => requests[requestIndex++] as unknown as IDBRequest<unknown[]>,
+      getAllKeys: () => requests[requestIndex++] as unknown as IDBRequest<IDBValidKey[]>,
     }),
   }) as unknown as IDBTransaction;
   const database = {
@@ -373,6 +374,8 @@ describe('IndexedDB durable VTT session adapter', () => {
         { target: 'request-1', type: 'error', options: { once: true } },
         { target: 'request-2', type: 'success', options: { once: true } },
         { target: 'request-2', type: 'error', options: { once: true } },
+        { target: 'request-3', type: 'success', options: { once: true } },
+        { target: 'request-3', type: 'error', options: { once: true } },
         { target: 'transaction', type: 'complete', options: { once: true } },
         { target: 'transaction', type: 'abort', options: { once: true } },
         { target: 'transaction', type: 'error', options: { once: true } },
@@ -829,17 +832,25 @@ describe('IndexedDB durable VTT session adapter', () => {
     { sessionId: 1, revision: 1, checksum: 'checksum' },
     { sessionId: 'session:malformed', revision: 1.5, checksum: 'checksum' },
     { sessionId: 'session:malformed', revision: 1, checksum: 1 },
-  ])('rejects malformed preloaded revisions %# with the exact decoder error', async (value) => {
+  ])('holds malformed preloaded revisions %# with the exact decoder error', async (value) => {
     const indexedDb = new IDBFactory();
     const databaseName = `malformed-preload-${JSON.stringify(value)}`;
     await seedStoredRevision(indexedDb, databaseName, value);
 
-    await expect(IndexedDbBrowserSessionStore.open(indexedDb, new MemoryStorage(), {
-      databaseName,
-    })).rejects.toMatchObject({
-      operation: 'migration',
-      cause: expect.objectContaining({ message: 'Stored VTT session revision is malformed.' }),
-    });
+    const store = await IndexedDbBrowserSessionStore.open(indexedDb, new MemoryStorage(), { databaseName });
+    expect(store.savedSessions()).toEqual([expect.objectContaining({
+      storageId: 'session:malformed', contents: 'undecodable',
+      load: { kind: 'refused', refusal: expect.objectContaining({
+        kind: 'load_failed', message: expect.stringContaining('Stored VTT session revision is malformed.'),
+      }) },
+    })]);
+    expect(() => store.revisions(encounterSessionId('malformed'))).toThrow('Stored VTT session revision is malformed.');
+    store.close();
+    const database = await requestValue(indexedDb.open(databaseName));
+    const read = database.transaction('revisions', 'readonly');
+    expect(await requestValue(read.objectStore('revisions').get('malformed\u0000000000000001'))).toEqual(value);
+    await completed(read);
+    database.close();
   });
 
   it('keeps the first autosave metadata when later snapshots share its session', async () => {

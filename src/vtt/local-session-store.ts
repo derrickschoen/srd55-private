@@ -1,4 +1,4 @@
-import type { EncounterSessionId } from '../combat/values';
+import { encounterSessionId, type EncounterSessionId } from '../combat/values';
 import { encounterConclusionAfter } from '../combat/encounter';
 import { sha256 } from '../crypto/sha256';
 import {
@@ -261,15 +261,17 @@ type HeldStream =
   | { readonly kind: 'stored'; readonly revisions: SessionRevision[] }
   | {
       readonly kind: 'unpersisted';
-      readonly keys: readonly string[];
+      readonly keys: readonly IDBValidKey[];
       readonly texts: readonly string[];
       readonly revisions: readonly SessionRevision[];
       readonly refusal: SessionLoadRefusal;
     }
   | {
       readonly kind: 'undecodable';
-      readonly keys: readonly string[];
+      readonly keys: readonly IDBValidKey[];
       readonly texts: readonly string[];
+      /** False when a raw record cannot be represented as text; exporting a partial stream would lose data. */
+      readonly sourceComplete: boolean;
       readonly error: unknown;
       readonly refusal: SessionLoadRefusal;
     };
@@ -386,6 +388,24 @@ function openDatabase(indexedDb: IDBFactory, databaseName: string): Promise<IDBD
 
 function revisionKey(sessionId: EncounterSessionId, revision: number): string {
   return `${sessionId}\u0000${String(revision).padStart(12, '0')}`;
+}
+
+/** Recover the session id from a storage key only when its record cannot be decoded. */
+function parsedRevisionKey(key: IDBValidKey): { readonly sessionId: EncounterSessionId; readonly revision: number } | null {
+  if (typeof key !== 'string') return null;
+  const separator = key.lastIndexOf('\u0000');
+  if (separator <= 0 || !/^\d{12}$/u.test(key.slice(separator + 1))) return null;
+  const revision = Number(key.slice(separator + 1));
+  if (!Number.isSafeInteger(revision) || revision <= 0) return null;
+  try {
+    return { sessionId: encounterSessionId(key.slice(0, separator)), revision };
+  } catch {
+    return null;
+  }
+}
+
+function unreadableKeySessionId(key: IDBValidKey): EncounterSessionId {
+  return encounterSessionId(`unreadable-revision-key:${sha256(JSON.stringify([typeof key, key]))}`);
 }
 
 async function encodedStoredRevision(revision: SessionRevision): Promise<ArrayBuffer> {
@@ -648,7 +668,7 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
   }
 
   /** The keys of every stored record of the session: what a delete removes. */
-  #heldKeys(sessionId: EncounterSessionId): readonly string[] {
+  #heldKeys(sessionId: EncounterSessionId): readonly IDBValidKey[] {
     const held = this.#held.get(sessionId);
     if (held === undefined) return [];
     switch (held.kind) {
@@ -947,8 +967,9 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
         return this.#streamLoad(sessionId, held.revisions, new Set()).kind === 'loadable'
           ? exportSavedSession(this, sessionId)
           : encodeRecordedSession(held.revisions);
-      case 'unpersisted':
+      case 'unpersisted': return exportStoredSessionSource(held.texts);
       case 'undecodable':
+        if (!held.sourceComplete) throw held.error;
         return exportStoredSessionSource(held.texts);
     }
   }
@@ -975,7 +996,10 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
           : point.text;
       case 'live': {
         const held = this.#held.get(sessionId);
-        if (held?.kind === 'undecodable') return exportStoredSessionSource(held.texts.slice(0, snapshot.revisionCount));
+        if (held?.kind === 'undecodable') {
+          if (!held.sourceComplete) throw held.error;
+          return exportStoredSessionSource(held.texts.slice(0, snapshot.revisionCount));
+        }
         this.#requireLivePoint(snapshot, point);
         if (loadable) return this.#exportPrefix(sessionId, snapshot.revisionCount);
         // Refused: as recorded; a stream whose migration is not persisted, as its stored texts.
@@ -1218,30 +1242,58 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
       [revisionStoreName(), sessionStoreName(), snapshotStoreName()],
       'readonly',
     );
-    const [revisions, metadata, snapshots] = await Promise.all([
+    const [revisions, revisionKeys, metadata, snapshots] = await Promise.all([
       requestResult(transaction.objectStore(revisionStoreName()).getAll()),
+      requestResult(transaction.objectStore(revisionStoreName()).getAllKeys()),
       requestResult(transaction.objectStore(sessionStoreName()).getAll()),
       requestResult(transaction.objectStore(snapshotStoreName()).getAll()),
     ]);
     await transactionComplete(transaction);
     const nextHeld = new Map<EncounterSessionId, HeldStream>();
-    const bySession = new Map<EncounterSessionId, StoredRevisionRecord[]>();
-    for (const stored of await Promise.all(
-      (revisions as unknown[]).map(async (value) => decodedStoredRevision(value)),
-    )) {
-      const current = bySession.get(stored.header.sessionId) ?? [];
-      current.push(stored);
-      bySession.set(stored.header.sessionId, current);
+    const bySession = new Map<EncounterSessionId, {
+      keys: IDBValidKey[]; records: StoredRevisionRecord[]; errors: unknown[];
+    }>();
+    const unreadableKeys = new Map<EncounterSessionId, IDBValidKey>();
+    for (const [index, key] of (revisionKeys as IDBValidKey[]).entries()) {
+      let stored: StoredRevisionRecord;
+      try {
+        stored = await decodedStoredRevision((revisions as unknown[])[index]);
+      } catch (error) {
+        const parsed = parsedRevisionKey(key);
+        const sessionId = parsed?.sessionId ?? unreadableKeySessionId(key);
+        const current = bySession.get(sessionId) ?? { keys: [], records: [], errors: [] };
+        current.keys.push(key);
+        current.errors.push(parsed === null
+          ? new TypeError(`Stored VTT revision key ${String(key)} is malformed.`, { cause: error })
+          : error);
+        if (parsed === null) unreadableKeys.set(sessionId, key);
+        bySession.set(sessionId, current);
+        continue;
+      }
+      const sessionId = stored.header.sessionId;
+      const current = bySession.get(sessionId) ?? { keys: [], records: [], errors: [] };
+      current.keys.push(key);
+      current.records.push(stored);
+      bySession.set(sessionId, current);
     }
     const migratedStreams: SessionRevision[][] = [];
     // A stream whose history v13 cannot express migrates to ONE archived root revision (FOOTPRINT, D919): the
     // stored revisions past it are deleted, since the root's archive holds their stored texts byte for byte.
-    const staleRevisionKeys: string[] = [];
+    const staleRevisionKeys: IDBValidKey[] = [];
     // The stored texts of each stream that migrated by archive, for its autosaves' restore points.
     const archivedStreams = new Map<EncounterSessionId, readonly string[]>();
-    for (const [sessionId, stream] of bySession) {
+    for (const [sessionId, group] of bySession) {
+      const stream = group.records;
       stream.sort((left, right) => left.header.revision - right.header.revision);
       const texts = stream.map((stored) => stored.text);
+      if (group.errors.length > 0) {
+        const error = group.errors[0];
+        nextHeld.set(sessionId, {
+          kind: 'undecodable', keys: group.keys, texts, sourceComplete: false,
+          error, refusal: sessionLoadRefusalOf(error),
+        });
+        continue;
+      }
       const keys = stream.map((stored) => revisionKey(stored.header.sessionId, stored.header.revision));
       // SAVE-COMPAT C2 (WR17, WR18): each stream decodes on its own. One that does not is held undecodable, its
       // stored records untouched, and every other stream still opens.
@@ -1249,7 +1301,9 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
       try {
         migrated = [...migrateStoredSessionRevisions(texts, this.recordingEngine)];
       } catch (error) {
-        nextHeld.set(sessionId, { kind: 'undecodable', keys, texts, error, refusal: sessionLoadRefusalOf(error) });
+        nextHeld.set(sessionId, {
+          kind: 'undecodable', keys, texts, sourceComplete: true, error, refusal: sessionLoadRefusalOf(error),
+        });
         continue;
       }
       if (!stream.some((stored, index) => stored.header.schemaVersion !== migrated[index]?.schemaVersion)) {
@@ -1273,6 +1327,19 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
     this.#loadability.clear();
     this.#metadata.clear();
     for (const value of metadata as BrowserSaveMetadata[]) this.#metadata.set(value.sessionId, value);
+    for (const [sessionId, key] of unreadableKeys) {
+      this.#metadata.set(sessionId, {
+        sessionId, name: `Unreadable revision key (${String(key)})`, updatedAt: new Date(0).toISOString(),
+        retention: { kind: 'named' }, migrationStatus: 'native',
+      });
+    }
+    for (const [sessionId, held] of nextHeld) {
+      if (held.kind !== 'undecodable' || this.#metadata.has(sessionId)) continue;
+      this.#metadata.set(sessionId, {
+        sessionId, name: `Unreadable session (${sessionId})`, updatedAt: new Date(0).toISOString(),
+        retention: { kind: 'named' }, migrationStatus: 'native',
+      });
+    }
     this.#snapshots.clear();
     const repointed: StoredAutosaveSnapshot[] = [];
     for (const stored of (snapshots as unknown[]).map(storedSnapshot)) {
@@ -1385,10 +1452,14 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
         ? { kind: 'diverged' }
         : legacySessionPlacement(legacyRevisions, stored);
       // Its revisions are written only when a strict replay verifies the stream they make (SAVE-COMPAT C3, WR14);
-      // otherwise the save is kept whole, verbatim, as a save of its own.
+      // otherwise the save is kept whole, verbatim, as a save of its own. A loadable legacy prefix must also be
+      // kept when the longer stored stream refuses: a checksum prefix alone cannot stand in for a loadable save.
       const writes = natural.kind === 'new_session' || natural.kind === 'extends';
+      const legacyLoad = savedSessionLoadability(legacyRevisions, this.recordingEngine);
       const placement: LegacySessionPlacement =
-        writes && savedSessionLoadability(legacyRevisions, this.recordingEngine).kind === 'refused'
+        (writes && legacyLoad.kind === 'refused') ||
+        (natural.kind === 'held' && legacyLoad.kind === 'loadable' && stored !== null &&
+          savedSessionLoadability(stored, this.recordingEngine).kind === 'refused')
           ? { kind: 'diverged' }
           : natural;
       const written = placement.kind === 'new_session' ? legacyRevisions : placement.kind === 'extends' ? placement.added : [];

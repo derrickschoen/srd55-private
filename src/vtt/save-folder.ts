@@ -12,6 +12,14 @@ const STORE_NAME = 'directory-handles';
 const DEFAULT_HANDLE_KEY = 'default-save-folder';
 const SAVE_SUFFIX = '.vtt.json';
 
+export class FolderSaveCollisionError extends Error {
+  override readonly name = 'FolderSaveCollisionError' as const;
+
+  constructor(readonly filename: string) {
+    super(`Cannot overwrite ${filename}: it is not a loadable save of this session.`);
+  }
+}
+
 type DirectoryPermissionHandle = FileSystemDirectoryHandle & {
   queryPermission?: (options: { readonly mode: 'readwrite' }) => Promise<PermissionState>;
 };
@@ -179,9 +187,29 @@ export class SaveFolderRepository {
     return saves;
   }
 
-  async write(name: string, bytes: string): Promise<string> {
+  async write(name: string, bytes: string, running: EngineBuild = RUNNING_ENGINE_BUILD): Promise<string> {
     const directory = this.#requireHandle();
     const filename = this.#filename(name);
+    let existing: FileSystemFileHandle | null = null;
+    try {
+      existing = await directory.getFileHandle(filename);
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'NotFoundError')) throw error;
+    }
+    if (existing !== null) {
+      const existingBytes = await (await existing.getFile()).text();
+      let safeToOverwrite = false;
+      try {
+        const incoming = decodeSavedSession(bytes, running);
+        const previous = decodeSavedSession(existingBytes, running);
+        safeToOverwrite = incoming.summary.sessionId === previous.summary.sessionId &&
+          savedSessionLoadability(incoming.revisions, running).kind === 'loadable' &&
+          savedSessionLoadability(previous.revisions, running).kind === 'loadable';
+      } catch {
+        // A save this build cannot decode cannot authorize overwriting the file.
+      }
+      if (!safeToOverwrite) throw new FolderSaveCollisionError(filename);
+    }
     const file = await directory.getFileHandle(filename, { create: true });
     const writable = await file.createWritable();
     await writable.write(bytes);
@@ -194,6 +222,7 @@ export class SaveFolderRepository {
     if (save.bytes === undefined) throw new Error('Folder save has no file contents.');
     const oldFilename = save.id.slice('folder:'.length);
     const requestedFilename = this.#filename(name);
+    if (requestedFilename === oldFilename) return;
     if (requestedFilename !== oldFilename && await this.#fileExists(requestedFilename)) {
       throw new Error(`A folder save named ${name.trim()} already exists.`);
     }
