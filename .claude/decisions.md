@@ -3785,5 +3785,42 @@ FINAL CODEX PLAN REVIEWS (gpt-6-sol xhigh):
 - ORDER: the SAVE-COMPAT revision first freezes the API. The MOVE-COST and CONDITION-D20 sync revisions follow it (a pipeline), after the flake-fix timed pair ends (a quiet box).
 ENV-TRACE flake fix: rebased onto a4b582e7 (records only) as e425e531 (branch claude/envflake-landing in the main repo). Timed pair label env-0928-e425e531 is running (A = main a4b582e7).
 
-Next free id: D947.
+## D947 — 2026-09-28 20:30 — flake pair VOID (outside load); wave 13 harvested; supervisor rulings; SAVE-COMPAT final review launched
+
+FLAKE PAIR env-0928-e425e531: 3 of 4 runs VOID under void rule v2. The outside load came from another project: codex lanes of ai-security-scanner (pi-scan-e2s1, -e2g, -hdc) running python unittest at 2.2–3.1 cores; the load peaked at 8.3.
+- The B prewarm, the only valid run, passed: 254.6 s, 701 files, 12,335 tests.
+- The void runs:
+  - A prewarm: 251.5 s, 12,314 tests.
+  - A timed: 288.8 s.
+  - B timed: 229.9 s.
+- All four runs passed, and no run shows a regression. The file count is unchanged and 21 tests were added (the new witnesses).
+- The pair is re-run when the box is quiet. I do not stop the other project's agents, which are the owner's work.
+WAVE 13 (agent-reported). Plans saved; previous versions kept as *.prev.md.
+- SAVE-COMPAT r2 (913 lines): 6/6 codex r2 findings FIXED. It adds the typed not_migratable outcome, replay-before-persist on 15 censused write paths (branded appendAll/append), a mapped-type RelaxedSessionJournal stamping all 31 methods, typed decode integrity, and a FROZEN API section. It found 5 new defects on main, red by assertion:
+  - WR15: a SQLite bump bricks a session;
+  - WR16: importSavedSession persists without replay;
+  - WR17/WR18: one bad stream bricks open;
+  - WR19: the folder list rejects;
+  - WR20: exporting a refused stream throws.
+- MOVE-COST r4 final sync (1450 lines): 17 old names, 37 occurrences replaced. The commanded-move oracle now reproduces 107 of 107 moves from the pre-state, with 2 oracle mutants killed on main. Self-finding S12: r3's migration would have refused honest branched saves.
+- CONDITION-D20 r3 final sync (1580 lines): names adopted; C17 uses not_migratable; C22 mutants M-104 to M-108.
+SUPERVISOR VERIFICATION of the two capped plans (by python over the plan texts): every superseded name (recorded_under_other_rules, RecordedUnderOtherRules, SessionRecordedUnderOtherRulesError, recorded_under_earlier_rules, 'disagrees', RulesDerivedTransitionKind, RulesDerivationFailure, resumeTrustingRecordedHistory, SessionFingerprintMismatchError) now appears only in the name-map tables. The API-like names not in the SAVE-COMPAT plan are existing code (migrateReplayEmbeddedRevision, session-persistence.ts:3807), a retired name, or a unit-local reason type (ConditionD20NotMigratableReason).
+RULINGS (recommendations adopted):
+- SAVE-COMPAT:
+  - SQ6: lifecycle import returns refused for not_migratable too.
+  - SQ7: "every result" means every value a relaxed journal or resume returns; the stamp is compile-enforced.
+  - SQ8: SqliteBrowserSessionStore is gated now; whether to delete it (no production caller) goes to the OWNER.
+  - SQ9, SQ10, SQ11 adopted.
+- CONDITION-D20:
+  - SQ-R3-1: an orphaned bound Restrained is refused as not_migratable.
+  - SQ-R3-2: each migration sub-step lands with its shape.
+  - SQ-R3-3: T-OR-1 table (a `witnesses` field on OwnerRuling is a RULE-INDEX follow-up).
+- MOVE-COST:
+  - OQ9: tag-blind branch fingerprint adopted.
+  - OQ10: every RevisionRewriteStep must leave the branch fingerprint byte-identical. Proposed to SAVE-COMPAT as a generic driver check.
+  - The GoldenPair and path conventions follow SAVE-COMPAT's landed harness.
+- Cross-unit: the not_migratable message names both builds (D939). Both this and the generic fingerprint check go to the final SAVE-COMPAT review (r3, FINAL, launched), then its final sync.
+- MOVE-COST keeps chain key 13 and the MOVEMENT_STOP_REASONS union (CONDITION-D20 depends on both).
+
+Next free id: D948.
 
