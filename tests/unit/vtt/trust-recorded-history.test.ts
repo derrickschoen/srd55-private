@@ -135,7 +135,14 @@ describe('SAVE-COMPAT C5: trust-recorded-history', () => {
   it('W26: a relaxed export is as recorded, and a strict import still refuses it (no laundering)', () => {
     const resume = loadSaveTrustingRecordedHistory(e1S2(), BUILD_B, 'W26');
     resume.journal.endSession();
-    const error = thrown(() => importSavedSession(new MemoryBrowserSessionStore(BUILD_B), resume.journal.export().value));
+    // The relaxed export is the history as recorded: it is written without a strict replay...
+    let exported: unknown;
+    expect(() => {
+      exported = resume.journal.export().value;
+    }).not.toThrow();
+    expect(typeof exported).toBe('string');
+    // ...and a strict import still refuses it.
+    const error = thrown(() => importSavedSession(new MemoryBrowserSessionStore(BUILD_B), String(exported)));
     expect(error?.name).toBe('SessionRecordedByOtherBuildError');
     expect(error.refusal).toMatchObject({ revision: 2, relation: { kind: 'other_commit', recorded: A40 } });
   });
