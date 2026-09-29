@@ -4,7 +4,7 @@ import type {
   StoredBrowserSave,
 } from './local-session-store';
 import {
-  decodeSavedSessionFingerprint,
+  savedSessionSummary,
   sessionLoadRefusalOf,
   type DecodedSavedSessionFingerprint,
   type SessionLoadRefusal,
@@ -146,9 +146,11 @@ export class IndexedDbSessionLifecycle implements SessionLifecyclePort {
   }
 
   async #import(bytes: string): Promise<SessionLifecycleResult> {
+    // The save's own summary, without a replay: the store's import replays it strictly before any write (SAVE-COMPAT
+    // C3), and refuses it there when this build cannot verify it.
     let decoded: DecodedSavedSessionFingerprint;
     try {
-      decoded = decodeSavedSessionFingerprint(bytes, this.store.recordingEngine);
+      decoded = savedSessionSummary(bytes, this.store.recordingEngine);
     } catch (error) {
       return this.#refusedImport(error);
     }

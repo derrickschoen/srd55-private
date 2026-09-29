@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import type { EngineBuild, EngineCommit } from '../src/vtt/engine-build';
+import * as sessionPersistence from '../src/vtt/session-persistence';
 import {
   importSavedSession,
   MemoryBrowserSessionStore,
@@ -23,7 +24,10 @@ import {
  *
  * It replays at the build it is given (SAVE-COMPAT, D929/D946): the recording commit, passed as the running build, so
  * a turn that does not replay there is an integrity fault of the save. A commit before SAVE-COMPAT ignores the
- * argument (its replay takes none).
+ * argument (its replay takes none). A saved session is DECODED, not imported: since SAVE-COMPAT an import replays
+ * strictly, and a turn that does not replay must reach the per-turn report, not refuse the load. The decoder is
+ * looked up at run time (decodeSavedSessionRevisions), since a commit before SAVE-COMPAT lacks it; there the import
+ * never replayed, so importing is decoding.
  *
  * argv[2]: a JSON file { "source": ArchivedSource, "replayAt": EngineCommit }. stdout: one line of JSON, a
  * DriverReport.
@@ -52,10 +56,20 @@ function described(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 }
 
+/** This commit's decoder of a saved session without a replay, when it has one (SAVE-COMPAT and later). */
+function savedSessionDecoder(): ((text: string, recordingEngine?: EngineBuild) => readonly SessionRevision[]) | null {
+  const decoder: unknown = Reflect.get(sessionPersistence, 'decodeSavedSessionRevisions');
+  return typeof decoder === 'function'
+    ? decoder as (text: string, recordingEngine?: EngineBuild) => readonly SessionRevision[]
+    : null;
+}
+
 /** The archived revisions, loaded by this commit's own loader. */
 function loadedRevisions(source: ArchivedSource): readonly SessionRevision[] {
   switch (source.kind) {
     case 'saved_session': {
+      const decode = savedSessionDecoder();
+      if (decode !== null) return decode(source.save.text, REPLAY_RECORDS_NOTHING);
       const store = new MemoryBrowserSessionStore();
       return store.revisions(importSavedSession(store, source.save.text));
     }

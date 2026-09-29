@@ -9,7 +9,7 @@ import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-envir
 import { encounterSeed } from '../../../src/vtt/session-seed';
 import {
   decodeSavedSessionFingerprint,
-  exportSavedSession,
+  encodeRecordedSession,
   MemoryBrowserSessionStore,
   type SessionRevision,
 } from '../../../src/vtt/session-persistence';
@@ -51,11 +51,9 @@ async function recorded(seed: number, hidden: readonly HiddenRollCategory[]): Pr
   return revisions;
 }
 
-/** The save the app exports for exactly `revisions`. */
+/** The save the app exports for exactly `revisions` (as recorded; the tests' own honest recordings). */
 function saveOf(revisions: readonly SessionRevision[]): string {
-  const store = new MemoryBrowserSessionStore();
-  store.appendAll(revisions);
-  return exportSavedSession(store, revisions[0]!.sessionId);
+  return encodeRecordedSession(revisions);
 }
 
 function checksums(revisions: readonly SessionRevision[]): readonly string[] {

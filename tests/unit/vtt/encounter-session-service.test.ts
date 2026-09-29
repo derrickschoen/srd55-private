@@ -33,6 +33,7 @@ import { DEFAULT_REFUSAL_HANDLING_SETTINGS } from '../../../src/vtt/refusal-hand
 import {
   MemoryBrowserSessionStore,
   type MirrorSink,
+  type JournalRecordedRevision,
   type SessionRevision,
 } from '../../../src/vtt/session-persistence';
 import {
@@ -173,7 +174,7 @@ class FaultInjectingStore extends ControlledFlushStore {
     this.#appendCountdown = count;
   }
 
-  override append(revision: SessionRevision): void {
+  override append(revision: JournalRecordedRevision): void {
     if (this.#appendCountdown !== null) {
       this.#appendCountdown -= 1;
       if (this.#appendCountdown === 0) {
@@ -193,7 +194,7 @@ class PersistentlyFailingStore extends MemoryBrowserSessionStore {
     this.#failNextFlush = true;
   }
 
-  override append(revision: SessionRevision): void {
+  override append(revision: JournalRecordedRevision): void {
     if (this.#failed) throw new Error('persistent session store failure');
     super.append(revision);
   }

@@ -11,8 +11,10 @@ import { sha256 } from '../../../src/crypto/sha256';
 import { engineCommit, RUNNING_ENGINE_BUILD } from '../../../src/vtt/engine-build';
 import { referenceEncounterSetup } from '../../../src/vtt/reference-encounter';
 import {
+  decodeSavedSessionRevisions,
   decodeSessionHistoryArchiveDocument,
   EncounterSessionJournal,
+  encodeRecordedSession,
   exportSavedSession,
   importSavedSession,
   MemoryBrowserSessionStore,
@@ -110,10 +112,8 @@ describe('FOOTPRINT fix1: an archive replays offline at the commit it was record
     const commit = head();
     const revisions = recordedAt(commit);
     expect(revisions.map((revision) => revision.recordedBy)).toEqual(Array(4).fill({ kind: 'engine_commit', commit }));
-    // The save as the app exports it (a journal DAG).
-    const exporter = new MemoryBrowserSessionStore();
-    exporter.appendAll(revisions);
-    const text = exportSavedSession(exporter, revisions[0]!.sessionId);
+    // The save as the app exports it (a journal DAG), as recorded.
+    const text = encodeRecordedSession(revisions);
     const archive = sessionHistoryArchiveOf({ kind: 'saved_session', text });
     expect(archive.recordedEngine).toEqual({ kind: 'engine_commit', commit });
     expect(archive.recordedSchemaVersions).toEqual([13]);
@@ -141,9 +141,14 @@ describe('FOOTPRINT fix1: an archive replays offline at the commit it was record
       return { ...edited, checksum: sha256(canonicalJson(edited)) };
     });
     const text = revisionBundle(tampered);
-    // The app loads it: every hash the save carries is consistent.
-    const loaded = new MemoryBrowserSessionStore();
-    expect(loaded.revisions(importSavedSession(loaded, text))).toHaveLength(4);
+    // Every hash the save carries is consistent: it decodes. The app does not load it (SAVE-COMPAT C3: an import
+    // replays strictly): turn 3 was recorded at HEAD, and this test runs a build that names no commit, so the refusal
+    // is the cross-build one (relation unrecorded, D945 SQ5); only the replay at HEAD can tell which.
+    expect(decodeSavedSessionRevisions(text)).toHaveLength(4);
+    const refused = thrown(() => importSavedSession(new MemoryBrowserSessionStore(), text)) as
+      { readonly name?: string; readonly refusal?: { readonly revision: number; readonly relation: { readonly kind: string } } };
+    expect([refused.name, refused.refusal?.revision, refused.refusal?.relation.kind])
+      .toEqual(['SessionRecordedByOtherBuildError', 3, 'unrecorded']);
     const archive = sessionHistoryArchiveOf({ kind: 'saved_session', text });
     expect(decodeSessionHistoryArchiveDocument(sessionHistoryArchiveDocument(archive))).toEqual(archive);
     const report = await replaySessionArchive(archive);
@@ -348,8 +353,8 @@ describe('SAVE-COMPAT C1: the offline replay decides what the app cannot (D929, 
 
   it('W9c: the driver replays at the build it is given: turn 2 recorded by A, replayed at A, is integrity', () => {
     const { plain } = recordS(BUILD_A, inputs.fixtures.readText(OVERHANG));
-    const store = new MemoryBrowserSessionStore(BUILD_A);
-    const revisions = store.revisions(importSavedSession(store, bundle(e1(plain))));
+    // Decoded as recorded (an import would refuse it: SAVE-COMPAT C3).
+    const revisions = decodeSavedSessionRevisions(bundle(e1(plain)), BUILD_A);
     const turns = replayedTurns(revisions, BUILD_A);
     expect(turns.map((turn) => [turn.revision, turn.status])).toEqual([[1, 'pass'], [2, 'fail'], [3, 'not_checked']]);
     const failed = turns[1];

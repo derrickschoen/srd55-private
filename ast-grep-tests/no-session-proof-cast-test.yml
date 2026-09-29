@@ -1,0 +1,15 @@
+id: no-session-proof-cast
+valid:
+  - >-
+    store.appendAll(replayVerifiedRevisions(revisions, store.recordingEngine));
+  - >-
+    const revisions = value as unknown as readonly SessionRevision[];
+  - >-
+    override append(revision: JournalRecordedRevision): void { super.append(revision); }
+invalid:
+  - >-
+    store.appendAll(revisions as ReplayVerifiedRevisions);
+  - >-
+    store.appendAll(revisions as unknown as ReplayVerifiedRevisions);
+  - >-
+    store.append(revision as JournalRecordedRevision);

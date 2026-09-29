@@ -604,11 +604,34 @@ export interface SessionRevision extends SessionRevisionBody {
   readonly checksum: string;
 }
 
+declare const replayVerified: unique symbol;
+
+/**
+ * Revisions a strict replay under the build it names verified (SAVE-COMPAT C3, D944 "persisted only after a strict
+ * replay"): the only thing a store takes in bulk. Minted only by replayVerifiedRevisions; its key is never exported,
+ * so no other code can build one, and ast-grep no-session-proof-cast forbids casting to it.
+ */
+export type ReplayVerifiedRevisions = readonly SessionRevision[] & { readonly [replayVerified]: EngineBuild };
+
+/** Strictly replays `revisions` under `running` (typed throws), then brands them verified: the only mint. */
+export function replayVerifiedRevisions(
+  revisions: readonly SessionRevision[],
+  running: EngineBuild,
+): ReplayVerifiedRevisions {
+  replaySessionRevisions(revisions, running);
+  return revisions as ReplayVerifiedRevisions;
+}
+
+declare const journalRecorded: unique symbol;
+
+/** A revision the journal recorded (EncounterSessionJournal's #append is its only mint): the only single append. */
+export type JournalRecordedRevision = SessionRevision & { readonly [journalRecorded]: true };
+
 export interface SessionStore {
   /** The engine build this store records new revisions with: a journal's appends and a migration's root. */
   readonly recordingEngine: EngineBuild;
-  append(revision: SessionRevision): void;
-  appendAll(revisions: readonly SessionRevision[]): void;
+  append(revision: JournalRecordedRevision): void;
+  appendAll(revisions: ReplayVerifiedRevisions): void;
   revisions(sessionId: EncounterSessionId): readonly SessionRevision[];
   flush(): Promise<void>;
 }
@@ -685,7 +708,11 @@ export class MemoryBrowserSessionStore implements SessionStore {
 
   constructor(readonly recordingEngine: EngineBuild = RUNNING_ENGINE_BUILD) {}
 
-  append(revision: SessionRevision): void {
+  append(revision: JournalRecordedRevision): void {
+    this.#appendChecked(revision);
+  }
+
+  #appendChecked(revision: SessionRevision): void {
     const current = this.#bySession.get(revision.sessionId) ?? [];
     if (revision.revision !== current.length + 1) {
       throw new Error('Browser store requires every revision in order.');
@@ -700,14 +727,14 @@ export class MemoryBrowserSessionStore implements SessionStore {
     this.#bySession.set(revision.sessionId, current);
   }
 
-  appendAll(revisions: readonly SessionRevision[]): void {
+  appendAll(revisions: ReplayVerifiedRevisions): void {
     if (revisions.length === 0) return;
     const sessionId = revisions[0]!.sessionId;
     if (this.revisions(sessionId).length !== 0) {
       throw new Error('Browser store import target already exists.');
     }
     verifyRevisionSequence(revisions, sessionId);
-    for (const revision of revisions) this.append(revision);
+    for (const revision of revisions) this.#appendChecked(revision);
   }
 
   revisions(sessionId: EncounterSessionId): readonly SessionRevision[] {
@@ -2696,10 +2723,11 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       agentSession: input.agentSession,
       recordedBy: this.store.recordingEngine,
     };
-    const persisted: SessionRevision = {
+    // The only mint of a JournalRecordedRevision: a revision this journal recorded from its own verified state.
+    const persisted = {
       ...body,
       checksum: revisionChecksum(body),
-    };
+    } as JournalRecordedRevision;
     this.store.append(persisted);
     this.mirror.append(persisted);
     return persisted;
@@ -4209,8 +4237,7 @@ export function exportSavedSession(
 ): string {
   const revisions = store.revisions(sessionId);
   if (revisions.length === 0) throw new Error('Encounter session does not exist.');
-  replaySessionRevisions(revisions, store.recordingEngine);
-  return encodeRecordedSession(revisions);
+  return encodeRecordedSession(replayVerifiedRevisions(revisions, store.recordingEngine));
 }
 
 /**
@@ -4343,6 +4370,10 @@ export function decodeSavedSessionRevisions(
   return decodeSavedSession(bytes, recordingEngine).revisions;
 }
 
+/**
+ * Imports a save: decoded and migrated, then strictly replayed under the store's build BEFORE any write (SAVE-COMPAT
+ * C3, WR16): a save the build cannot verify is refused with its typed error and nothing is stored.
+ */
 export function importSavedSession(
   store: SessionStore,
   bytes: string,
@@ -4351,8 +4382,7 @@ export function importSavedSession(
   if (store.revisions(bundle.sessionId).length !== 0) {
     throw new Error('Imported encounter session already exists.');
   }
-  verifyRevisionSequence(bundle.revisions, bundle.sessionId);
-  store.appendAll(bundle.revisions);
+  store.appendAll(replayVerifiedRevisions(bundle.revisions, store.recordingEngine));
   return bundle.sessionId;
 }
 

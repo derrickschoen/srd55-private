@@ -2,6 +2,7 @@ import type { EncounterSessionId } from '../combat/values';
 import { encounterConclusionAfter } from '../combat/encounter';
 import { sha256 } from '../crypto/sha256';
 import {
+  decodeSavedSession,
   decodeSavedSessionFingerprint,
   encodeRecordedSession,
   MemoryBrowserSessionStore,
@@ -10,11 +11,14 @@ import {
   importSavedSession,
   migrateStoredSessionRevisions,
   recordedSessionSummary,
+  replayVerifiedRevisions,
   savedSessionLoadability,
   sessionLoadRefusalOf,
   type SessionStore,
   type DecodedSavedSessionFingerprint,
+  type JournalRecordedRevision,
   type RefusedSavedSession,
+  type ReplayVerifiedRevisions,
   type SavedSessionLoadability,
   type SessionLoadRefusal,
   type SessionRevision,
@@ -243,22 +247,25 @@ function isPrefixOf(prefix: readonly SessionRevision[], stream: readonly Session
     prefix.every((revision, index) => revision.checksum === stream[index]?.checksum);
 }
 
-/** A store holding exactly `revisions`, recording with `recordingEngine`, for an export. */
-function storeOf(revisions: readonly SessionRevision[], recordingEngine: EngineBuild): MemoryBrowserSessionStore {
-  const store = new MemoryBrowserSessionStore(recordingEngine);
-  store.appendAll(revisions);
-  return store;
-}
-
 /**
- * A session's stream as this store holds it (SAVE-COMPAT C2):
- *   stored: its revisions decoded (migrated in memory to the current schema);
+ * A session's stream as this store holds it (SAVE-COMPAT C2, C3):
+ *   stored: its revisions, as stored (current schema);
+ *   unpersisted: its stored records migrate, but the migrated stream fails a strict replay, so the migration is NOT
+ *     written (D944): the stored texts and keys stay exactly as an earlier build left them, listed refused, and the
+ *     next open migrates them again (deterministically);
  *   undecodable: its stored records do not decode (a hash, schema or sequence fault, a step that refuses them): the
  *     texts and keys exactly as stored, the error and its refusal. Nothing is written for it, nothing can be appended
  *     to it, and a new journal cannot be created over it; it is listed refused and exports its stored source.
  */
 type HeldStream =
   | { readonly kind: 'stored'; readonly revisions: SessionRevision[] }
+  | {
+      readonly kind: 'unpersisted';
+      readonly keys: readonly string[];
+      readonly texts: readonly string[];
+      readonly revisions: readonly SessionRevision[];
+      readonly refusal: SessionLoadRefusal;
+    }
   | {
       readonly kind: 'undecodable';
       readonly keys: readonly string[];
@@ -534,10 +541,12 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
     }
   }
 
-  append(revision: SessionRevision): void {
+  append(revision: JournalRecordedRevision): void {
     this.#requireWritable();
     const held = this.#held.get(revision.sessionId);
     if (held?.kind === 'undecodable') throw held.error;
+    // A journal resumes only a stream that replays, and an unpersisted one does not.
+    if (held?.kind === 'unpersisted') throw new Error('A session whose migration is not persisted takes no revision.');
     const stream = held?.revisions ?? [];
     if (revision.revision !== stream.length + 1) {
       throw new Error('Browser store requires every revision in order.');
@@ -579,7 +588,7 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
     });
   }
 
-  appendAll(revisions: readonly SessionRevision[]): void {
+  appendAll(revisions: ReplayVerifiedRevisions): void {
     const first = revisions[0];
     if (first === undefined) return;
     this.#requireWritable();
@@ -619,7 +628,9 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
     const held = this.#held.get(sessionId);
     if (held === undefined) return [];
     switch (held.kind) {
-      case 'stored': return [...held.revisions];
+      case 'stored':
+      case 'unpersisted':
+        return [...held.revisions];
       case 'undecodable': throw held.error;
     }
   }
@@ -629,7 +640,9 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
     const held = this.#held.get(sessionId);
     if (held === undefined) return null;
     switch (held.kind) {
-      case 'stored': return { kind: 'decoded', summary: recordedSessionSummary(held.revisions) };
+      case 'stored':
+      case 'unpersisted':
+        return { kind: 'decoded', summary: recordedSessionSummary(held.revisions) };
       case 'undecodable': return { kind: 'undecodable' };
     }
   }
@@ -640,7 +653,9 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
     if (held === undefined) return [];
     switch (held.kind) {
       case 'stored': return held.revisions.map((revision) => revisionKey(sessionId, revision.revision));
-      case 'undecodable': return held.keys;
+      case 'unpersisted':
+      case 'undecodable':
+        return held.keys;
     }
   }
 
@@ -727,7 +742,8 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
       // A kept legacy session save: the session becomes that save; it keeps its own name and retention, and takes
       // the kept save's migration status, since it now holds that history.
       const current = this.#metadata.get(sessionId);
-      await this.#replaceStream(this.#ownSavePoint(snapshot, snapshot.restorePoint), [], {
+      const restored = replayVerifiedRevisions(this.#ownSavePoint(snapshot, snapshot.restorePoint), this.recordingEngine);
+      await this.#replaceStream(restored, [], {
         sessionId,
         name: current?.name ?? sessionId,
         updatedAt: snapshot.updatedAt,
@@ -742,8 +758,13 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
         await this.#restoreArchived(snapshot, point);
         return;
       case 'own_save':
-        // Its stream is its own: no other point of the session is re-pointed by it.
-        await this.#replaceStream(this.#ownSavePoint(snapshot, point), [], this.#restoredAutosaveMetadata(snapshot));
+        // Its stream is its own: no other point of the session is re-pointed by it. It replaces the session only once
+        // a strict replay verifies it (SAVE-COMPAT C3): a refused point throws before any write or delete.
+        await this.#replaceStream(
+          replayVerifiedRevisions(this.#ownSavePoint(snapshot, point), this.recordingEngine),
+          [],
+          this.#restoredAutosaveMetadata(snapshot),
+        );
         return;
       case 'live':
         await this.#restoreLive(snapshot, point);
@@ -751,11 +772,23 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
     }
   }
 
-  /** Restores a live point: the live revisions after it are deleted. */
+  /**
+   * Restores a live point: the live revisions after it are deleted, once the stream the point leaves verifies
+   * (SAVE-COMPAT C3): a point whose prefix does not replay throws before anything is deleted. For a stream whose
+   * migration is not persisted, what remains is its first stored texts, which the reload migrates and writes only
+   * after a strict replay; so that is what is verified here.
+   */
   async #restoreLive(snapshot: StoredAutosaveSnapshot, point: LiveRestorePoint): Promise<void> {
     const sessionId = snapshot.sessionId;
     this.#requireLivePoint(snapshot, point);
-    const currentCount = this.revisions(sessionId).length;
+    const held = this.#held.get(sessionId);
+    replayVerifiedRevisions(
+      held?.kind === 'unpersisted'
+        ? migrateStoredSessionRevisions(held.texts.slice(0, snapshot.revisionCount), this.recordingEngine)
+        : this.revisions(sessionId).slice(0, snapshot.revisionCount),
+      this.recordingEngine,
+    );
+    const laterKeys = this.#heldKeys(sessionId).slice(snapshot.revisionCount);
     const metadata: BrowserSaveMetadata = {
       sessionId,
       name: sessionId,
@@ -765,9 +798,7 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
     };
     await this.#directWrite('restore', async () => {
       const transaction = this.database.transaction([revisionStoreName(), sessionStoreName()], 'readwrite');
-      for (let revision = snapshot.revisionCount + 1; revision <= currentCount; revision += 1) {
-        transaction.objectStore(revisionStoreName()).delete(revisionKey(sessionId, revision));
-      }
+      for (const key of laterKeys) transaction.objectStore(revisionStoreName()).delete(key);
       transaction.objectStore(sessionStoreName()).put(metadata, sessionId);
       await transactionComplete(transaction);
     });
@@ -811,6 +842,13 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
           ...fields,
           contents: 'decoded',
           load: this.#entryLoad(() => this.#streamLoad(sessionId, held.revisions, used)),
+        });
+      } else if (held?.kind === 'unpersisted') {
+        saves.push({
+          ...recordedSessionSummary(held.revisions),
+          ...fields,
+          contents: 'decoded',
+          load: { kind: 'refused', refusal: held.refusal },
         });
       } else {
         const refusal = held?.kind === 'undecodable'
@@ -862,7 +900,9 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
         if (held?.kind === 'undecodable') return { kind: 'refused', refusal: held.refusal };
         this.#requireLivePoint(snapshot, point);
         const stream = this.revisions(snapshot.sessionId);
-        const whole = this.#streamLoad(snapshot.sessionId, stream, used);
+        const whole: SavedSessionLoadability = held?.kind === 'unpersisted'
+          ? { kind: 'refused', refusal: held.refusal }
+          : this.#streamLoad(snapshot.sessionId, stream, used);
         // A prefix of a stream that replays replays too.
         if (whole.kind === 'loadable') return whole;
         const prefix = stream.slice(0, snapshot.revisionCount);
@@ -907,6 +947,7 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
         return this.#streamLoad(sessionId, held.revisions, new Set()).kind === 'loadable'
           ? exportSavedSession(this, sessionId)
           : encodeRecordedSession(held.revisions);
+      case 'unpersisted':
       case 'undecodable':
         return exportStoredSessionSource(held.texts);
     }
@@ -925,19 +966,21 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
         const texts = this.#archivedRevisions(snapshot, point);
         if (texts === null) throw new RestorePointUnavailableError(snapshot.storageId);
         return loadable
-          ? exportSavedSession(storeOf(this.#archivedPoint(snapshot, point), this.recordingEngine), sessionId)
+          ? this.#strictExport(this.#archivedPoint(snapshot, point))
           : exportStoredSessionSource(texts);
       }
       case 'own_save':
         return loadable
-          ? exportSavedSession(storeOf(this.#ownSavePoint(snapshot, point), this.recordingEngine), sessionId)
+          ? this.#strictExport(this.#ownSavePoint(snapshot, point))
           : point.text;
       case 'live': {
         const held = this.#held.get(sessionId);
         if (held?.kind === 'undecodable') return exportStoredSessionSource(held.texts.slice(0, snapshot.revisionCount));
         this.#requireLivePoint(snapshot, point);
-        return loadable
-          ? this.#exportPrefix(sessionId, snapshot.revisionCount)
+        if (loadable) return this.#exportPrefix(sessionId, snapshot.revisionCount);
+        // Refused: as recorded; a stream whose migration is not persisted, as its stored texts.
+        return held?.kind === 'unpersisted'
+          ? exportStoredSessionSource(held.texts.slice(0, snapshot.revisionCount))
           : encodeRecordedSession(this.revisions(sessionId).slice(0, snapshot.revisionCount));
       }
     }
@@ -978,11 +1021,17 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
    * it, else the version bump.
    */
   #ownSavePoint(snapshot: StoredSnapshotFields, point: OwnSaveRestorePoint): readonly SessionRevision[] {
-    const own = new MemoryBrowserSessionStore(this.recordingEngine);
-    if (importSavedSession(own, point.text) !== snapshot.sessionId) {
+    // Decoded as recorded, not imported: its loadability and its restore replay it on their own (SAVE-COMPAT C3).
+    const { summary, revisions } = decodeSavedSession(point.text, this.recordingEngine);
+    if (summary.sessionId !== snapshot.sessionId) {
       throw new Error('Browser autosave save belongs to another session.');
     }
-    return own.revisions(snapshot.sessionId);
+    return revisions;
+  }
+
+  /** The strict export of `revisions`: replayed under this store's build, then encoded as recorded. */
+  #strictExport(revisions: readonly SessionRevision[]): string {
+    return encodeRecordedSession(replayVerifiedRevisions(revisions, this.recordingEngine));
   }
 
   /**
@@ -994,7 +1043,7 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
    */
   async #restoreArchived(snapshot: StoredAutosaveSnapshot, point: ArchivedRestorePoint): Promise<void> {
     const sessionId = snapshot.sessionId;
-    const restored = this.#archivedPoint(snapshot, point);
+    const restored = replayVerifiedRevisions(this.#archivedPoint(snapshot, point), this.recordingEngine);
     const repointed: StoredAutosaveSnapshot[] = restored[0]?.transition.kind === 'session_migrated'
       ? []
       : [...this.#snapshots.values()]
@@ -1024,7 +1073,7 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
    * the session's `metadata` and the re-pointed autosaves.
    */
   async #replaceStream(
-    restored: readonly SessionRevision[],
+    restored: ReplayVerifiedRevisions,
     repointed: readonly StoredAutosaveSnapshot[],
     metadata: BrowserSaveMetadata,
   ): Promise<void> {
@@ -1065,7 +1114,7 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
   }
 
   #exportPrefix(sessionId: EncounterSessionId, revisionCount: number): string {
-    return exportSavedSession(storeOf(this.revisions(sessionId).slice(0, revisionCount), this.recordingEngine), sessionId);
+    return this.#strictExport(this.revisions(sessionId).slice(0, revisionCount));
   }
 
   #pruneAutosaves(): readonly string[] {
@@ -1193,30 +1242,32 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
     for (const [sessionId, stream] of bySession) {
       stream.sort((left, right) => left.header.revision - right.header.revision);
       const texts = stream.map((stored) => stored.text);
+      const keys = stream.map((stored) => revisionKey(stored.header.sessionId, stored.header.revision));
       // SAVE-COMPAT C2 (WR17, WR18): each stream decodes on its own. One that does not is held undecodable, its
       // stored records untouched, and every other stream still opens.
       let migrated: SessionRevision[];
       try {
         migrated = [...migrateStoredSessionRevisions(texts, this.recordingEngine)];
       } catch (error) {
-        nextHeld.set(sessionId, {
-          kind: 'undecodable',
-          keys: stream.map((stored) => revisionKey(stored.header.sessionId, stored.header.revision)),
-          texts,
-          error,
-          refusal: sessionLoadRefusalOf(error),
-        });
+        nextHeld.set(sessionId, { kind: 'undecodable', keys, texts, error, refusal: sessionLoadRefusalOf(error) });
+        continue;
+      }
+      if (!stream.some((stored, index) => stored.header.schemaVersion !== migrated[index]?.schemaVersion)) {
+        nextHeld.set(sessionId, { kind: 'stored', revisions: migrated });
+        continue;
+      }
+      // SAVE-COMPAT C3 (WR12, D944): a migrated stream is written only after a strict replay under this store's build
+      // verifies it. One that does not verify is held unpersisted: its stored records and metadata stay as they are.
+      const verdict = savedSessionLoadability(migrated, this.recordingEngine);
+      if (verdict.kind === 'refused') {
+        nextHeld.set(sessionId, { kind: 'unpersisted', keys, texts, revisions: migrated, refusal: verdict.refusal });
         continue;
       }
       nextHeld.set(sessionId, { kind: 'stored', revisions: migrated });
-      if (stream.some((stored, index) => stored.header.schemaVersion !== migrated[index]?.schemaVersion)) {
-        migratedStreams.push(migrated);
-        for (const stale of stream.slice(migrated.length)) {
-          staleRevisionKeys.push(revisionKey(stale.header.sessionId, stale.header.revision));
-        }
-        const root = migrated[0];
-        if (root?.transition.kind === 'session_migrated') archivedStreams.set(root.sessionId, texts);
-      }
+      migratedStreams.push(migrated);
+      staleRevisionKeys.push(...keys.slice(migrated.length));
+      const root = migrated[0];
+      if (root?.transition.kind === 'session_migrated') archivedStreams.set(root.sessionId, texts);
     }
     this.#held = nextHeld;
     this.#loadability.clear();
@@ -1305,9 +1356,15 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
       const bytes = this.legacyStorage.getItem(key);
       if (bytes === null) continue;
       const sessionId = key.slice(LEGACY_SESSION_PREFIX.length) as EncounterSessionId;
-      const imported = new MemoryBrowserSessionStore(this.recordingEngine);
-      const decodedSessionId = importSavedSession(imported, bytes);
-      if (decodedSessionId !== sessionId) throw new Error('Stored VTT session identity does not match its storage key.');
+      // Decoded as recorded, never imported (SAVE-COMPAT C3). A save that does not decode stays in localStorage,
+      // untouched, and is retried at the next open (D947 SQ11).
+      let decoded: ReturnType<typeof decodeSavedSession>;
+      try {
+        decoded = decodeSavedSession(bytes, this.recordingEngine);
+      } catch {
+        continue;
+      }
+      if (decoded.summary.sessionId !== sessionId) throw new Error('Stored VTT session identity does not match its storage key.');
       const storedMetadata = legacyMetadata(
         this.legacyStorage.getItem(`${LEGACY_METADATA_PREFIX}${sessionId}`),
         sessionId,
@@ -1322,11 +1379,18 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
           ? 'truncated'
           : 'complete',
       };
-      const legacyRevisions = imported.revisions(sessionId);
+      const legacyRevisions = decoded.revisions;
       const stored = streamOf(sessionId);
-      const placement: LegacySessionPlacement = stored === null
+      const natural: LegacySessionPlacement = stored === null
         ? { kind: 'diverged' }
         : legacySessionPlacement(legacyRevisions, stored);
+      // Its revisions are written only when a strict replay verifies the stream they make (SAVE-COMPAT C3, WR14);
+      // otherwise the save is kept whole, verbatim, as a save of its own.
+      const writes = natural.kind === 'new_session' || natural.kind === 'extends';
+      const placement: LegacySessionPlacement =
+        writes && savedSessionLoadability(legacyRevisions, this.recordingEngine).kind === 'refused'
+          ? { kind: 'diverged' }
+          : natural;
       const written = placement.kind === 'new_session' ? legacyRevisions : placement.kind === 'extends' ? placement.added : [];
       const storedRevisions = await Promise.all(written.map(async (revision) => ({
         bytes: await encodedStoredRevision(revision),
@@ -1339,7 +1403,7 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
       if (placement.kind === 'new_session') transaction.objectStore(sessionStoreName()).put(metadata, sessionId);
       if (placement.kind === 'diverged') {
         const kept: KeptLegacySessionSave = {
-          ...decodeSavedSessionFingerprint(bytes, this.recordingEngine),
+          ...decoded.summary,
           kind: 'kept_legacy_session',
           storageId: keptLegacySessionStorageId(sessionId, bytes),
           name: `${metadata.name} (kept legacy copy)`,
@@ -1370,16 +1434,26 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
       if (raw === null) return [];
       const legacy = legacySnapshot(raw);
       if (legacy === null) throw new Error('Stored browser autosave is malformed.');
-      const imported = new MemoryBrowserSessionStore(this.recordingEngine);
-      if (importSavedSession(imported, legacy.bytes) !== legacy.sessionId) {
+      // Decoded as recorded, never imported (SAVE-COMPAT C3); a save that does not decode stays in localStorage.
+      let decoded: ReturnType<typeof decodeSavedSession>;
+      try {
+        decoded = decodeSavedSession(legacy.bytes, this.recordingEngine);
+      } catch {
+        return [];
+      }
+      if (decoded.summary.sessionId !== legacy.sessionId) {
         throw new Error('Stored browser autosave identity does not match its session.');
       }
-      return [{ key, legacy, revisions: imported.revisions(legacy.sessionId), historyLength: legacyHistoryLength(legacy.bytes) }];
+      return [{ key, legacy, decoded, historyLength: legacyHistoryLength(legacy.bytes) }];
     }).sort((left, right) => right.historyLength - left.historyLength);
-    for (const { key, legacy, revisions } of autosaves) {
-      const decoded = decodeSavedSessionFingerprint(legacy.bytes, this.recordingEngine);
+    for (const { key, legacy, decoded: { summary: decoded, revisions } } of autosaves) {
       const session = streamOf(legacy.sessionId);
-      const written = session !== null && session.length === 0 ? revisions : [];
+      // An autosave's revisions become the session only when a strict replay verifies them (SAVE-COMPAT C3, WR14);
+      // otherwise it keeps its own save text, verbatim.
+      const written = session !== null && session.length === 0 &&
+        savedSessionLoadability(revisions, this.recordingEngine).kind === 'loadable'
+        ? revisions
+        : [];
       let restorePoint: AutosaveRestorePoint;
       if (written.length > 0) restorePoint = { kind: 'live', headChecksum: checksumAt(written, written.length) };
       else if (session !== null && isPrefixOf(revisions, session)) {
@@ -1408,7 +1482,8 @@ export class IndexedDbBrowserSessionStore implements SessionStore {
       for (const revision of storedRevisions) {
         transaction.objectStore(revisionStoreName()).put(revision.bytes, revision.key);
       }
-      if (existingMetadata === null) {
+      // No session metadata without the session's revisions.
+      if (existingMetadata === null && written.length > 0) {
         transaction.objectStore(sessionStoreName()).put({
           sessionId: legacy.sessionId,
           name: legacy.sessionId,

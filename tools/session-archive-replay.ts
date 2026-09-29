@@ -9,8 +9,6 @@ import { engineCommit, type EngineCommit, type UnknownRecordedCommitReason } fro
 import {
   decodeSavedSessionRevisions,
   decodeSessionHistoryArchiveDocument,
-  importSavedSession,
-  MemoryBrowserSessionStore,
   SessionHistoryArchiveError,
   SessionHistoryArchiveMetadataError,
   sessionHistoryArchiveDocument,
@@ -123,8 +121,8 @@ export function archiveOfFile(text: string): SessionHistoryArchive {
   if (typeof value === 'object' && value !== null && Reflect.get(value, 'kind') === 'vtt_session_history_archive') {
     return decodeSessionHistoryArchiveDocument(text);
   }
-  const store = new MemoryBrowserSessionStore();
-  const root = store.revisions(importSavedSession(store, text))[0];
+  // Decoded as recorded (SAVE-COMPAT C3): a save's own turns are not replayed by the build running the tool.
+  const [root] = decodeSavedSessionRevisions(text);
   if (root === undefined) throw new SessionHistoryArchiveError('The save holds no revision.');
   return verifySessionHistoryArchive(root);
 }

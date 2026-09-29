@@ -37,7 +37,7 @@ import {
 } from '../../../src/vtt/handoff/protocol-runtime';
 import {
   MemoryBrowserSessionStore,
-  type SessionRevision,
+  type JournalRecordedRevision,
 } from '../../../src/vtt/session-persistence';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 
@@ -137,7 +137,7 @@ class ProtocolFaultStore extends MemoryBrowserSessionStore {
     this.#flushFailure = true;
   }
 
-  override append(revision: SessionRevision): void {
+  override append(revision: JournalRecordedRevision): void {
     if (this.#appendFailure) {
       this.#appendFailure = false;
       throw new Error('injected protocol append failure');

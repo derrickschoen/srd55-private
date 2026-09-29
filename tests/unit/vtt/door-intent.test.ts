@@ -10,7 +10,7 @@ import type { ProjectedControllerRequest } from '../../../src/vtt/encounter-proj
 import { buildTwoRoomEncounter } from '../../../src/vtt/handoff/fixtures/two-room';
 import {
   MemoryBrowserSessionStore,
-  type SessionRevision,
+  type JournalRecordedRevision,
 } from '../../../src/vtt/session-persistence';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 
@@ -86,7 +86,7 @@ class CancellationFailureStore extends MemoryBrowserSessionStore {
     this.#appendCountdown = count;
   }
 
-  override append(revision: SessionRevision): void {
+  override append(revision: JournalRecordedRevision): void {
     if (this.#appendCountdown !== null) {
       this.#appendCountdown -= 1;
       if (this.#appendCountdown === 0) {

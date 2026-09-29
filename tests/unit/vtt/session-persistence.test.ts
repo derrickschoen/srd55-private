@@ -51,6 +51,7 @@ import {
   exportSavedSessionV1ForMigrationTest,
   importSavedSession,
   replaySessionRevisions,
+  replayVerifiedRevisions,
   sessionHistory,
   validateVttSessionMigrationRegistry,
   type SessionStore,
@@ -122,7 +123,7 @@ function copyPrefix(
   count: number,
 ): MemoryBrowserSessionStore {
   const copy = new MemoryBrowserSessionStore();
-  for (const revision of revisions.slice(0, count)) copy.append(revision);
+  copy.appendAll(replayVerifiedRevisions(revisions.slice(0, count), copy.recordingEngine));
   return copy;
 }
 
