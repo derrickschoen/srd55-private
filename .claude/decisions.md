@@ -3884,5 +3884,30 @@ QUESTION (AskUserQuestion; recommendation "Drop C6, slim C5"). OWNER chose: "Dro
 - This amends D941's C5 and C6 shape and the SAVE-COMPAT FROZEN API. MOVE-COST and CONDITION-D20 take the slimmer names at their next sync.
 NEXT: after fix round 2, codex drafts the cut under consensus §8A; then the minimality pass, the gate, and review round 3.
 
-Next free id: D953.
+## D953 — 2026-09-29 11:02 — SAVE-COMPAT REVIEW r3 TRIAGED; MIGRATION DRIVER WIRING MOVES TO MOVE-COST (owner); POST-CAP TRIAGE RULE (owner)
+
+WORK SINCE D952 (branch claude/savecompat; supervisor-verified unless marked):
+- fbdc0f31, review r2 + gate fixes. Written by codex; codex reported 314/314.
+- cf37d33f, the D952 cut: 14 files, +74/−710. Full gate VERIFIED: tsc 0, cco 0, gate 0; 707 files, 12,368 tests; 3 files passed on retry.
+- cd23b90f, the minimality pass (§8A findings L1–L3), applied by codex:
+  - the key guard runs on restore only, with a permanent killer;
+  - no incoming replay on Save now;
+  - one undecodable-name path.
+  VERIFIED: 7 files 119/119, tsc 0.
+- bca24af4, the r3 P3 dead branch, removed by the supervisor. VERIFIED: tsc 0, folder specs 17/17. No unit test calls rename(); the browser spec is still to run.
+CODEX REVIEW r3 (fresh session; REVISE):
+- No P1 found; no data-loss path. The removal of the append/import guard was confirmed by code trace.
+- P2: rewriteRevisionsToCurrent has no production caller. Neither migrateSavedBundle nor migrateStoredSessionRevisions runs rewrite steps, although plan §6.7 says they should. VERIFIED by me. It is inert today: the chain has no rewrite step.
+- P3: dead branch in rename. Fixed.
+QUESTION (AskUserQuestion; recommendation "Connect it in MOVE-COST"). OWNER chose: "Connect it in MOVE-COST (Recommended)".
+- SAVE-COMPAT lands with the gap recorded.
+- MOVE-COST wires rewriteRevisionsToCurrent into both load paths. Its planned end-to-end not_migratable witnesses (plan-final §6.10: the stored v13 stream listed refused; the lifecycle import returning refused not_migratable) are the killers.
+OWNER (mid-turn): "Update the skill to review the issues after a round 3 review finds more problems . Have Claude make sure codex is not nitpicking".
+- New consensus §5 "Post-cap triage": after round 3, the supervisor verifies each finding against source and classifies it significant, deferrable (inert until a named unit) or nitpick.
+- A nitpick is rejected with its reason. An obvious one-line fix is applied and verified by the supervisor. A deferrable finding goes to the named unit's plan. Only a surviving significant finding is HARD_GATE (b).
+- In every round, each codex finding must answer "what concretely breaks?"
+- Under this rule, r3 P2 classifies as deferrable, which matches the owner's choice.
+NEXT: the 7 pins at the final HEAD; the vtt-save-manager browser spec; rebase onto main; a timed pair on a quiet machine; landing.
+
+Next free id: D954.
 
