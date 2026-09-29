@@ -3909,5 +3909,24 @@ OWNER (mid-turn): "Update the skill to review the issues after a round 3 review 
 - Under this rule, r3 P2 classifies as deferrable, which matches the owner's choice.
 NEXT: the 7 pins at the final HEAD; the vtt-save-manager browser spec; rebase onto main; a timed pair on a quiet machine; landing.
 
-Next free id: D954.
+## D954 — 2026-09-29 11:13 — OWNER: GATE PERFORMANCE GOES FIRST
+
+OWNER: "Prioritize the performance improvements so that future test gates run faster".
+MEASURED (by me, from the full gate at cf37d33f, report vitest-initial-3548507):
+- 707 files; the initial phase is 199 s wall at maxWorkers 8, with 1,400 file-seconds summed.
+- That is throughput-bound: 1,400/8 = 175 s. The longest single file is ai-dm-arena at 79 s.
+- The box has 24 CPUs and 39 GB of RAM, and the gate uses 8 workers.
+- Top files by wall time (at 8-worker contention):
+  - arena 79, renderer-profile 74, survival-policy 73, migrations 60, class-progression 45;
+  - the conversation family ~157 (four files);
+  - bundled-homebrew-installer 41, replay 39.
+  The top 25 files take 62% of all file-seconds.
+- Recent pairs: the retry phase costs 11–44 s per gate. Its whole-file serial reruns hit, among others, replay (32 s), experiment-orchestrator (14 s), js-round-plan-integration and d583-contract-inventory.
+ORDER (the supervisor's, under this ruling): SAVE-COMPAT still lands first, since only its timed pair is left. Then, before MOVE-COST:
+- P1 worker sweep: maxWorkers 8 vs 12 vs 16 on the landed main, exploratory arms under the void rule, with peak memory recorded. At 16 workers the throughput floor is ~88 s, against the 79 s arena critical path. D843's null result was measured when the conversation file was a 690 s pole, which is no longer the gate's shape.
+- P2 retry-phase flakes: root-cause each file that passed on retry, without re-budgeting (Part A:79–80).
+- P3 work reduction: CPU profiles of the top files, aggregated by function, decide the engine units. VISIBILITY-PERF and COVER-SWEEP-FLAT move ahead of the rule units only if the profile says they pay; D925's order against COVER-EDGE then goes back to the owner. The TEST-PERF-01 B2–B6 re-baseline (D902) folds into this profile.
+- Codex drafts every change (D951). Measurement is by me.
+
+Next free id: D955.
 
