@@ -97,6 +97,7 @@ import {
   type RecordedEngine,
 } from './engine-build';
 import { EncounterRuleError } from '../combat/encounter-rule-error';
+import type { TestRef } from '../rules/srd/rule-status-types';
 import type { JsonValue } from '../domain/models';
 import {
   isAgentSessionBinding,
@@ -152,10 +153,23 @@ export type EngineHostTransition =
       readonly controllerKind: 'agent' | 'algorithm';
     };
 
-export const VTT_SESSION_SCHEMA_VERSION = 13 as const;
-export const VTT_SESSION_MINIMUM_SCHEMA_VERSION = 1 as const;
-/** The last session schema before whole-body placement (FOOTPRINT, D900): the rules archived histories keep. */
-export const VTT_SESSION_LAST_V12_SCHEMA_VERSION = 12 as const;
+/** Every session schema version this build reads (SAVE-COMPAT §6.7). */
+export const VTT_SESSION_SCHEMA_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] as const;
+export type VttSessionSchemaVersion = (typeof VTT_SESSION_SCHEMA_VERSIONS)[number];
+export const VTT_SESSION_SCHEMA_VERSION = 13 as const satisfies VttSessionSchemaVersion;
+/**
+ * The last session schema before revisions named the engine build that recorded them (FOOTPRINT fix1), and before
+ * whole-body placement (D900): the rules archived histories keep, and the `from` of the bump-or-archive step.
+ */
+export const LAST_SCHEMA_BEFORE_ENGINE_RECORDING = 12 as const;
+/** The first session schema a save was written as a journal DAG. */
+export const JOURNAL_DAG_FIRST_SCHEMA_VERSION = 7 as const;
+type MigratableVersion = Exclude<VttSessionSchemaVersion, typeof VTT_SESSION_SCHEMA_VERSION>;
+type LegacyBundleVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
+
+function isLegacyBundleVersion(version: number): version is LegacyBundleVersion {
+  return Number.isSafeInteger(version) && version >= 1 && version < LAST_SCHEMA_BEFORE_ENGINE_RECORDING;
+}
 
 /** One input the loader accepted, kept exactly as it arrived (owner D919: byte for byte), and that text's sha256. */
 export interface ArchivedText {
@@ -209,7 +223,7 @@ export type SessionTransition =
        * the repaired current state, the archived history and every repair. Nothing before it is replayed.
        */
       readonly kind: 'session_migrated';
-      readonly migration: 'vtt_session_v12_to_v13';
+      readonly migration: BumpOrArchiveStep['id'];
       readonly archive: SessionHistoryArchive;
       readonly placementRepair: readonly PlacementRepair[];
     }
@@ -904,11 +918,11 @@ function decodeTransition(value: unknown): SessionTransition {
     case 'session_migrated':
       if (
         hasExactlyKeys(value, ['kind', 'migration', 'archive', 'placementRepair']) &&
-        value.migration === 'vtt_session_v12_to_v13' &&
+        value.migration === VTT_SESSION_MIGRATION_CHAIN[LAST_SCHEMA_BEFORE_ENGINE_RECORDING].id &&
         Array.isArray(value.placementRepair) && value.placementRepair.every(isRecord)
       ) {
         const archive = decodeSessionHistoryArchive(value.archive);
-        if (archive.recordedSchemaVersions.some((version) => version > VTT_SESSION_LAST_V12_SCHEMA_VERSION)) {
+        if (archive.recordedSchemaVersions.some((version) => version > LAST_SCHEMA_BEFORE_ENGINE_RECORDING)) {
           throw new SessionHistoryArchiveError('A migrated root archives a history of session schema 12 or older.');
         }
         return value as unknown as SessionTransition;
@@ -2986,13 +3000,234 @@ function decodeJournalDagBundle(value: Readonly<Record<string, unknown>>): Saved
   return { ...expanded, fingerprint: value.fingerprint };
 }
 
-export interface VttSessionMigration {
+/** A schema step for the whole saved bundle (schema 1 through 11): the chain before revisions named their build. */
+export interface LegacyBundleStep<F extends LegacyBundleVersion> {
+  readonly kind: 'legacy_bundle';
   readonly id: string;
-  readonly from: number;
-  readonly to: number;
+  readonly from: F;
   readonly source: string;
   readonly checksum: string;
+  /** The tests that fail if this step stops carrying its saves (W22 holds every reference to a test that runs). */
+  readonly witnessedBy: readonly [TestRef, ...TestRef[]];
   migrate(bundle: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>>;
+}
+
+/**
+ * The FOOTPRINT step (owner D919): a schema-12 stream schema 13 can express migrates by the version bump alone;
+ * any other becomes ONE root revision whose archive keeps the stream byte for byte, its current state repaired.
+ */
+export interface BumpOrArchiveStep {
+  readonly kind: 'bump_or_archive';
+  readonly id: 'vtt_session_v12_to_v13';
+  readonly source: string;
+  readonly checksum: string;
+  /** The bundle's schema-12 revisions, each checksum verified. */
+  verified(bundle: Readonly<Record<string, unknown>>): readonly Readonly<Record<string, unknown>>[];
+  /** Whether schema 13 can express every revision (then the stream migrates by the bump). */
+  expressible(revisions: readonly Readonly<Record<string, unknown>>[]): boolean;
+  bump(bundle: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>>;
+  archive(
+    bundle: Readonly<Record<string, unknown>>,
+    archive: SessionHistoryArchive,
+    recordingEngine: EngineBuild,
+  ): Readonly<Record<string, unknown>>;
+}
+
+/** A recorded revision without its schemaVersion, recordedBy and checksum: what a rewrite step reads and returns. */
+export type RevisionContent = Readonly<Record<string, unknown>>;
+
+/** What a rewrite step makes of one revision: its content at the next schema, or why it cannot carry it (D940). */
+export type RevisionRewriteOutcome<R extends string> =
+  | { readonly kind: 'rewritten'; readonly content: RevisionContent }
+  /** `path`: a JSON path inside the content. */
+  | { readonly kind: 'not_migratable'; readonly reason: R; readonly path: string };
+
+/** Repository fixture paths: an earlier-build revision in, the exact rewritten revision out (owner D940). */
+export interface GoldenPair {
+  readonly input: string;
+  readonly output: string;
+}
+
+/** A repository fixture the step refuses, with the reason and path it must refuse it with. */
+export interface NotMigratableGolden<R extends string> {
+  readonly input: string;
+  readonly reason: R;
+  readonly path: string;
+}
+
+/**
+ * A schema step for each recorded revision, from schema F (13 and later; SAVE-COMPAT adds none). `rewrite` is pure and
+ * total (D940): a function of the content alone. Every reason it can refuse with carries its refusal text and a
+ * golden, both mapped over R, so a reason without either does not compile (W19b). The chain driver
+ * (rewriteRevisionsToCurrent) owns the rest: the revision's checksum, its recording build, the next version, the
+ * refusal, and the branch RNG-state fingerprint invariant ([FS-b]).
+ */
+export interface RevisionRewriteStep<F extends number, R extends string> {
+  readonly kind: 'revision_rewrite';
+  readonly id: `vtt_session_v${F}_to_v${number}`;
+  /** The refusal text of each reason. */
+  readonly reasons: { readonly [K in R]: string };
+  readonly golden: GoldenPair;
+  readonly notMigratableGoldens: { readonly [K in R]: NotMigratableGolden<K> };
+  rewrite(content: RevisionContent): RevisionRewriteOutcome<R>;
+}
+
+type StepFor<F extends MigratableVersion> =
+  F extends LegacyBundleVersion ? LegacyBundleStep<F> : F extends 12 ? BumpOrArchiveStep : RevisionRewriteStep<F, string>;
+
+/** What the chain must be: one step from every schema version before the current one, keyed by that version. */
+export type VttSessionMigrationChainShape = { readonly [F in MigratableVersion]: StepFor<F> };
+
+/**
+ * A revision the build running now cannot carry to the current schema (owner D940, D945 Q-W): the step and reason
+ * that refused it, and both builds (D939). Trust mode does not bypass it: the save is not re-interpreted either way.
+ */
+export interface SessionNotMigratable {
+  readonly revision: number;
+  readonly fromSchemaVersion: number;
+  readonly toSchemaVersion: number;
+  readonly step: string;
+  readonly reason: string;
+  readonly reasonText: string;
+  readonly path: string;
+  readonly recordedBy: EngineBuild;
+  readonly running: EngineBuild;
+}
+
+/** The typed refusal of a save a migration step cannot carry; its message always names both builds ([FS-a]). */
+export class SessionNotMigratableError extends Error {
+  override readonly name = 'SessionNotMigratableError' as const;
+
+  constructor(readonly refusal: SessionNotMigratable) {
+    super(
+      `Save refused: turn ${String(refusal.revision)} was recorded by ${describeEngineBuild(refusal.recordedBy)} under ` +
+        `session schema ${String(refusal.fromSchemaVersion)}, and ${describeEngineBuild(refusal.running)}, the build ` +
+        `running now, cannot carry it to schema ${String(refusal.toSchemaVersion)}: ${refusal.reasonText} (at ` +
+        `${refusal.path}). The save is not changed.`,
+    );
+  }
+}
+
+/** [FS-b] How a rewrite step broke the driver's contract: a defect of the step, never of the save. */
+export type RevisionRewriteStepViolation = {
+  readonly kind: 'branch_rng_fingerprint_changed';
+  readonly step: string;
+  readonly revision: number;
+  /** The stored field rewritten, or the rewritten state no longer recomputing to it. */
+  readonly subject: 'stored_field' | 'recomputed';
+  readonly expected: string;
+  readonly actual: string;
+};
+
+/**
+ * [FS-b] (MOVE-COST S12/OQ10, D947): a head_moved revision's RNG is derived from its parent's STORED branch
+ * fingerprint and decode recomputes the fingerprint from the state, so a step that moves either would refuse an honest
+ * branched save as an integrity fault. The driver refuses the step instead: a typed program error, which every load
+ * surface shows as load_failed.
+ */
+export class RevisionRewriteStepError extends Error {
+  override readonly name = 'RevisionRewriteStepError' as const;
+
+  constructor(readonly violation: RevisionRewriteStepViolation) {
+    super(
+      `Migration step ${violation.step} changed the branch RNG-state fingerprint of revision ${String(violation.revision)} ` +
+        `(${violation.subject}): expected ${violation.expected}, got ${violation.actual}. A rewrite step must leave the ` +
+        'fingerprinted mechanical state byte-identical.',
+    );
+  }
+}
+
+function isRevisionRewriteStep(step: unknown): step is RevisionRewriteStep<number, string> {
+  return isRecord(step) && step.kind === 'revision_rewrite';
+}
+
+/** The chain's revision-rewrite steps, by the schema they rewrite from (SAVE-COMPAT adds none). */
+function revisionRewriteChain(): Readonly<Record<number, RevisionRewriteStep<number, string>>> {
+  const chain: Record<number, RevisionRewriteStep<number, string>> = {};
+  for (const [from, step] of Object.entries(VTT_SESSION_MIGRATION_CHAIN) as readonly [string, unknown][]) {
+    if (isRevisionRewriteStep(step)) chain[Number(from)] = step;
+  }
+  return chain;
+}
+
+/**
+ * One recorded revision at schema `from` carried by `step` to `from + 1`: its checksum verified at its own version, its
+ * content rewritten, its ORIGINAL recordedBy kept (a strict replay afterwards classifies against the build that
+ * recorded each outcome: D940's per-move proof), then rehashed.
+ */
+function rewrittenRevision(
+  step: RevisionRewriteStep<number, string>,
+  from: number,
+  value: unknown,
+  running: EngineBuild,
+): Readonly<Record<string, unknown>> {
+  if (!isRecord(value) || value.schemaVersion !== from || !Number.isSafeInteger(value.revision) ||
+    typeof value.checksum !== 'string') {
+    throw schemaViolation('Stored VTT session revision stream is malformed.');
+  }
+  const revision = value.revision as number;
+  const { checksum, ...body } = value;
+  if (sha256(canonicalJson(body)) !== checksum) {
+    throw hashMismatch('revision_checksum', revision, 'VTT session revision checksum mismatch.');
+  }
+  const { schemaVersion: _schemaVersion, recordedBy, ...content } = body;
+  const outcome = step.rewrite(content);
+  switch (outcome.kind) {
+    case 'not_migratable': {
+      const reasonText = step.reasons[outcome.reason];
+      // A typed step states a text for every reason it can refuse with (its `reasons` are mapped over them).
+      if (reasonText === undefined) throw new Error(`Migration step ${step.id} refused with ${outcome.reason}, a reason it states no text for.`);
+      throw new SessionNotMigratableError({
+        revision, fromSchemaVersion: from, toSchemaVersion: from + 1, step: step.id, reason: outcome.reason, reasonText,
+        path: outcome.path, recordedBy: decodeEngineBuild(recordedBy, `VTT session revision ${String(revision)} recordedBy`),
+        running,
+      });
+    }
+    case 'rewritten': {
+      // [FS-b] The branch RNG-state fingerprint must come through byte-identical: stored and recomputed.
+      const stored = String(content.branchRngStateFingerprint);
+      const storedAfter = String(outcome.content.branchRngStateFingerprint);
+      if (storedAfter !== stored) {
+        throw new RevisionRewriteStepError({
+          kind: 'branch_rng_fingerprint_changed', step: step.id, revision, subject: 'stored_field', expected: stored, actual: storedAfter,
+        });
+      }
+      const recomputed = branchRngStateFingerprint(outcome.content.encounterState as unknown as DecodedStateRest);
+      if (recomputed !== stored) {
+        throw new RevisionRewriteStepError({
+          kind: 'branch_rng_fingerprint_changed', step: step.id, revision, subject: 'recomputed', expected: stored, actual: recomputed,
+        });
+      }
+      const next = { ...outcome.content, schemaVersion: from + 1, recordedBy };
+      return { ...next, checksum: sha256(canonicalJson(next)) };
+    }
+  }
+}
+
+/**
+ * The chain driver for revision-rewrite steps (SAVE-COMPAT §6.7): every revision, all at one schema version, carried
+ * step by step to `current`. A step's `not_migratable` outcome is the typed refusal SessionNotMigratableError; a step
+ * that moves the branch RNG-state fingerprint is RevisionRewriteStepError. The defaults are this build's chain and
+ * schema; a test passes a synthetic chain.
+ */
+export function rewriteRevisionsToCurrent(
+  revisions: readonly unknown[],
+  running: EngineBuild,
+  chain: Readonly<Record<number, RevisionRewriteStep<number, string>>> = revisionRewriteChain(),
+  current: number = VTT_SESSION_SCHEMA_VERSION,
+): readonly unknown[] {
+  let staged: readonly unknown[] = revisions;
+  for (;;) {
+    const first = staged[0];
+    if (!isRecord(first) || !Number.isSafeInteger(first.schemaVersion)) {
+      throw schemaViolation('Stored VTT session revision stream is malformed.');
+    }
+    const version = first.schemaVersion as number;
+    if (version === current) return staged;
+    const step = chain[version];
+    if (step === undefined) throw schemaViolation(`VTT session schema ${String(version)} has no step to schema ${String(current)}.`);
+    staged = staged.map((revision) => rewrittenRevision(step, version, revision, running));
+  }
 }
 
 const V1_TO_V2_SOURCE = 'vtt-session-v1-to-v2:add-format-and-sha-fingerprint=vtt-session-revisions';
@@ -3148,12 +3383,21 @@ function migrateV10EncounterState(value: unknown): DecodedStateRest {
   };
 }
 
-export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
-  Object.freeze([
-    Object.freeze({
+/**
+ * THE SESSION MIGRATION CHAIN (SAVE-COMPAT §6.7): one step from every schema version before the current one, keyed by
+ * that version, so a gap or a duplicate does not compile (W18). Legacy bundle steps carry a whole save to schema 12;
+ * the bump-or-archive step carries it to 13 (D919); later schemas are revision-rewrite steps (none yet; MOVE-COST's
+ * key 13 is the first), which rewriteRevisionsToCurrent drives.
+ */
+export const VTT_SESSION_MIGRATION_CHAIN = Object.freeze({
+    1: Object.freeze({
+      kind: 'legacy_bundle',
       id: 'vtt_session_v1_to_v2',
       from: 1,
-      to: 2,
+      witnessedBy: [
+        'tests/unit/vtt/session-persistence.test.ts::MIRROR-QUEUE-AND-MIGRATION keeps browser authority and deterministic export',
+        'tests/unit/vtt/session-persistence.test.ts::unknown transition kind refuses the whole session file with a typed refusal naming the kind',
+      ] as const,
       source: V1_TO_V2_SOURCE,
       checksum: '92795e05ddf2acdcd70e3540548adc7359a570517e51f1079738b4074500b111',
       migrate: (bundle: Readonly<Record<string, unknown>>) => {
@@ -3165,10 +3409,13 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
         return { ...body, fingerprint: sha256(canonicalJson(body)) };
       },
     }),
-    Object.freeze({
+    2: Object.freeze({
+      kind: 'legacy_bundle',
       id: 'vtt_session_v2_to_v3',
       from: 2,
-      to: 3,
+      witnessedBy: [
+        'tests/unit/vtt/session-persistence.test.ts::MIRROR-QUEUE-AND-MIGRATION keeps browser authority and deterministic export',
+      ] as const,
       source: V2_TO_V3_SOURCE,
       checksum: '0a6dd026931de184063de3aa5173901c1876fb8ef8f89ac340de241511e5303a',
       migrate: (bundle: Readonly<Record<string, unknown>>) => {
@@ -3195,10 +3442,13 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
         return { ...body, fingerprint: sha256(canonicalJson(body)) };
       },
     }),
-    Object.freeze({
+    3: Object.freeze({
+      kind: 'legacy_bundle',
       id: 'vtt_session_v3_to_v4',
       from: 3,
-      to: 4,
+      witnessedBy: [
+        'tests/unit/vtt/session-persistence.test.ts::MIRROR-QUEUE-AND-MIGRATION keeps browser authority and deterministic export',
+      ] as const,
       source: V3_TO_V4_SOURCE,
       checksum: '03fad58a6864c3419f1243aa818fdcb6b38e3411d832de8b32a2e9364ba4bd20',
       migrate: (bundle: Readonly<Record<string, unknown>>) => {
@@ -3229,10 +3479,13 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
         return { ...body, fingerprint: sha256(canonicalJson(body)) };
       },
     }),
-    Object.freeze({
+    4: Object.freeze({
+      kind: 'legacy_bundle',
       id: 'vtt_session_v4_to_v5',
       from: 4,
-      to: 5,
+      witnessedBy: [
+        'tests/unit/vtt/session-persistence.test.ts::MIRROR-QUEUE-AND-MIGRATION keeps browser authority and deterministic export',
+      ] as const,
       source: V4_TO_V5_SOURCE,
       checksum: '2b0d139e3b2c7c9c5491fe09a103cc667beb246f8d199f093c058b0835cb9c3d',
       migrate: (bundle: Readonly<Record<string, unknown>>) => {
@@ -3289,10 +3542,14 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
         return { ...body, fingerprint: sha256(canonicalJson(body)) };
       },
     }),
-    Object.freeze({
+    5: Object.freeze({
+      kind: 'legacy_bundle',
       id: 'vtt_session_v5_to_v6',
       from: 5,
-      to: 6,
+      witnessedBy: [
+        'tests/unit/vtt/preview-hidden-rolls.test.ts::legacy_toggle_dropped: migrates a hideDeathSaveRolls-only v5 save to the equivalent category',
+        'tests/unit/vtt/session-persistence.test.ts::MIRROR-QUEUE-AND-MIGRATION keeps browser authority and deterministic export',
+      ] as const,
       source: V5_TO_V6_SOURCE,
       checksum: '29795e2183f7e7c3831d4d233722a51ba2beee75e124abd434976499132ef174',
       migrate: (bundle: Readonly<Record<string, unknown>>) => {
@@ -3330,10 +3587,14 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
         return { ...body, fingerprint: sha256(canonicalJson(body)) };
       },
     }),
-    Object.freeze({
+    6: Object.freeze({
+      kind: 'legacy_bundle',
       id: 'vtt_session_v6_to_v7',
       from: 6,
-      to: 7,
+      witnessedBy: [
+        'tests/unit/vtt/preview-hidden-rolls.test.ts::legacy_toggle_dropped: migrates a hideDeathSaveRolls-only v5 save to the equivalent category',
+        'tests/unit/vtt/session-persistence.test.ts::MIRROR-QUEUE-AND-MIGRATION keeps browser authority and deterministic export',
+      ] as const,
       source: V6_TO_V7_SOURCE,
       checksum: '523db2c861ce38aeeec95824f4d73de203fa98a475ffaf3ad488e79696beaa2e',
       migrate: (bundle: Readonly<Record<string, unknown>>) => {
@@ -3384,10 +3645,14 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
         return { ...body, fingerprint: sha256(canonicalJson(body)) };
       },
     }),
-    Object.freeze({
+    7: Object.freeze({
+      kind: 'legacy_bundle',
       id: 'vtt_session_v7_to_v8',
       from: 7,
-      to: 8,
+      witnessedBy: [
+        'tests/unit/vtt/session-persistence.test.ts::migrates the literal pre-AgentSessionBinding v7 save without changing unrelated journal bytes',
+        'tests/unit/vtt/session-persistence.test.ts::MIRROR-QUEUE-AND-MIGRATION keeps browser authority and deterministic export',
+      ] as const,
       source: V7_TO_V8_SOURCE,
       checksum: '7438ba7c327f99cfe6eaecedaad97c2e5cd63c0cfdb31b26152eacc9cb2ef5ee',
       migrate: (bundle: Readonly<Record<string, unknown>>) => {
@@ -3437,10 +3702,14 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
         return { ...body, fingerprint: sha256(canonicalJson(body)) };
       },
     }),
-    Object.freeze({
+    8: Object.freeze({
+      kind: 'legacy_bundle',
       id: 'vtt_session_v8_to_v9',
       from: 8,
-      to: 9,
+      witnessedBy: [
+        'tests/unit/vtt/session-persistence.test.ts::migrates the literal pre-AgentSessionBinding v7 save without changing unrelated journal bytes',
+        'tests/unit/vtt/session-persistence.test.ts::MIRROR-QUEUE-AND-MIGRATION keeps browser authority and deterministic export',
+      ] as const,
       source: V8_TO_V9_SOURCE,
       checksum: 'cf56e83a7fad46c19ab76b437cbb943ba48ce9122022207031ffa7d22f8f826a',
       migrate: (bundle: Readonly<Record<string, unknown>>) => {
@@ -3487,10 +3756,14 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
         return { ...body, fingerprint: sha256(canonicalJson(body)) };
       },
     }),
-    Object.freeze({
+    9: Object.freeze({
+      kind: 'legacy_bundle',
       id: 'vtt_session_v9_to_v10',
       from: 9,
-      to: 10,
+      witnessedBy: [
+        'tests/unit/vtt/session-persistence.test.ts::migrates the literal pre-AgentSessionBinding v7 save without changing unrelated journal bytes',
+        'tests/unit/vtt/session-persistence.test.ts::MIRROR-QUEUE-AND-MIGRATION keeps browser authority and deterministic export',
+      ] as const,
       source: V9_TO_V10_SOURCE,
       checksum: 'e32f5335315cd5202b872cadf87f171560933a172f562d9ef2483c3a2d7665a8',
       migrate: (bundle: Readonly<Record<string, unknown>>) => {
@@ -3546,10 +3819,15 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
         return { ...body, fingerprint: sha256(canonicalJson(body)) };
       },
     }),
-    Object.freeze({
+    10: Object.freeze({
+      kind: 'legacy_bundle',
       id: 'vtt_session_v10_to_v11',
       from: 10,
-      to: 11,
+      witnessedBy: [
+        'tests/unit/vtt/session-persistence.test.ts::preserves known sizes and emits explicit v10 adjudication records for every unknown',
+        'tests/unit/vtt/session-persistence.test.ts::decodes the hand-authored schema-10 creature-space fixture through the current schema',
+        'tests/unit/vtt/session-persistence.test.ts::MIRROR-QUEUE-AND-MIGRATION keeps browser authority and deterministic export',
+      ] as const,
       source: V10_TO_V11_SOURCE,
       checksum: '7c407f3ed1d3ad12692deeca519742dcef3b6a89e8b8de16e76964b3d2d583ef',
       migrate: (bundle: Readonly<Record<string, unknown>>) => {
@@ -3583,10 +3861,15 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
         return { ...body, fingerprint: sha256(canonicalJson(body)) };
       },
     }),
-    Object.freeze({
+    11: Object.freeze({
+      kind: 'legacy_bundle',
       id: 'vtt_session_v11_to_v12',
       from: 11,
-      to: 12,
+      witnessedBy: [
+        'tests/unit/vtt/session-persistence.test.ts::migrates a hand-authored pre-history schema-11 save without guessing observations',
+        'tests/unit/vtt/session-v13-footprint-migration.test.ts::D919 mixed versions: a stored v11 + v12 stream is one save, one archive of every stored revision',
+        'tests/unit/vtt/session-persistence.test.ts::MIRROR-QUEUE-AND-MIGRATION keeps browser authority and deterministic export',
+      ] as const,
       source: V11_TO_V12_SOURCE,
       checksum: '0e45635886c5cd0f61e1ae8df72d030417642154833165bdec642a520813b976',
       migrate: (bundle: Readonly<Record<string, unknown>>) => {
@@ -3623,35 +3906,27 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
         return { ...body, fingerprint: sha256(canonicalJson(body)) };
       },
     }),
-    Object.freeze({
-      // FOOTPRINT (D900, D919). The registered step is the version bump of a stream v13 can express; the loader
-      // (migratedToV13) archives any other stream instead of calling it.
+    // FOOTPRINT (D900, D919): the version bump of a stream schema 13 can express, else the archive.
+    12: Object.freeze({
+      kind: 'bump_or_archive',
       id: 'vtt_session_v12_to_v13',
-      from: 12,
-      to: 13,
       source: V12_TO_V13_SOURCE,
       checksum: 'de046b49e03876e51e0a05476f63449bdbaa3d888b24f3273ecbb20a5aa5e4e7',
-      migrate: (bundle: Readonly<Record<string, unknown>>) => bumpedV12Bundle(bundle),
+      verified: verifiedV12Revisions,
+      expressible: v12StreamIsExpressible,
+      bump: bumpedV12Bundle,
+      archive: archivedV13Bundle,
     }),
-  ]);
+} as const satisfies VttSessionMigrationChainShape);
 
-export function validateVttSessionMigrationRegistry(): void {
-  let expected: number = VTT_SESSION_MINIMUM_SCHEMA_VERSION;
+/** Every step that names a source matches its recorded sha256, and no two steps share an id. */
+export function validateVttSessionMigrationChain(): void {
   const ids = new Set<string>();
-  for (const migration of VTT_SESSION_MIGRATIONS) {
-    if (
-      ids.has(migration.id) ||
-      migration.from !== expected ||
-      migration.to !== expected + 1 ||
-      sha256(migration.source) !== migration.checksum
-    ) {
-      throw new Error('VTT session migration registry is invalid.');
+  for (const step of Object.values(VTT_SESSION_MIGRATION_CHAIN)) {
+    if (ids.has(step.id) || sha256(step.source) !== step.checksum) {
+      throw new Error('VTT session migration chain is invalid.');
     }
-    ids.add(migration.id);
-    expected = migration.to;
-  }
-  if (expected !== VTT_SESSION_SCHEMA_VERSION) {
-    throw new Error('VTT session migration registry does not reach current schema.');
+    ids.add(step.id);
   }
 }
 
@@ -3707,23 +3982,27 @@ function schemaVersionGroups(
   return { sessionId: first.sessionId, groups };
 }
 
-/** A pre-v13 stored stream as one v12 bundle: each contiguous version group migrated by the registered chain. */
-function storedStreamV12Bundle(
+/**
+ * A stored stream from before the bump-or-archive step as one bundle at that step's schema: each contiguous version
+ * group migrated by the chain's legacy steps.
+ */
+function storedStreamArchiveStepBundle(
   sessionId: string,
   groups: readonly { readonly schemaVersion: number; readonly revisions: readonly unknown[] }[],
 ): Readonly<Record<string, unknown>> {
   const v12Revisions = groups.flatMap((group) => {
-    const migrated = migratedToV12(revisionBundleOf(sessionId, group.schemaVersion, group.revisions));
+    const migrated = migratedToArchiveStep(revisionBundleOf(sessionId, group.schemaVersion, group.revisions));
     return Array.isArray(migrated.revisions) ? migrated.revisions : [];
   });
-  return revisionBundleOf(sessionId, VTT_SESSION_LAST_V12_SCHEMA_VERSION, v12Revisions);
+  return revisionBundleOf(sessionId, LAST_SCHEMA_BEFORE_ENGINE_RECORDING, v12Revisions);
 }
 
 /** A saved journal DAG of a pre-v13 version, expanded to its revision bundle (its fingerprint checked first). */
 function expandedLegacyJournalDag(value: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
   if (
-    (value.schemaVersion !== 7 && value.schemaVersion !== 8 && value.schemaVersion !== 9 &&
-      value.schemaVersion !== 10 && value.schemaVersion !== 11 && value.schemaVersion !== 12) ||
+    !Number.isSafeInteger(value.schemaVersion) ||
+    (value.schemaVersion as number) < JOURNAL_DAG_FIRST_SCHEMA_VERSION ||
+    (value.schemaVersion as number) > LAST_SCHEMA_BEFORE_ENGINE_RECORDING ||
     typeof value.sessionId !== 'string' ||
     typeof value.fingerprint !== 'string'
   ) throw schemaViolation('Saved VTT session journal DAG header is malformed.');
@@ -3748,31 +4027,30 @@ function expandedLegacyJournalDag(value: Readonly<Record<string, unknown>>): Rea
 }
 
 /**
- * A pre-v13 saved bundle (revision list or journal DAG) migrated by the registered chain to v12, the last
- * schema its history can be replayed under. Every step verifies the checksums of what it reads.
+ * A saved bundle from before engine recording (revision list or journal DAG) migrated by the chain's legacy steps to
+ * the bump-or-archive step's schema (12), the last schema its history can be replayed under. Every step verifies the
+ * checksums of what it reads.
  */
-function migratedToV12(value: unknown): Readonly<Record<string, unknown>> {
+function migratedToArchiveStep(value: unknown): Readonly<Record<string, unknown>> {
   const expanded = isRecord(value) && value.format === JOURNAL_DAG_FORMAT ? expandedLegacyJournalDag(value) : value;
   if (!isRecord(expanded) || !Number.isSafeInteger(expanded.schemaVersion)) {
     throw schemaViolation('Saved VTT session has no valid schema version.');
   }
   let migrated: Readonly<Record<string, unknown>> = expanded;
   let version: number = expanded.schemaVersion as number;
-  if (version < VTT_SESSION_MINIMUM_SCHEMA_VERSION || version > VTT_SESSION_LAST_V12_SCHEMA_VERSION) {
+  if (version !== LAST_SCHEMA_BEFORE_ENGINE_RECORDING && !isLegacyBundleVersion(version)) {
     throw schemaViolation('Saved VTT session is outside the migration window.');
   }
-  while (version < VTT_SESSION_LAST_V12_SCHEMA_VERSION) {
-    const migration = VTT_SESSION_MIGRATIONS.find((candidate) => candidate.from === version);
-    if (migration === undefined) throw new Error('Saved VTT session has no adjacent migration.');
-    migrated = migration.migrate(migrated);
-    version = migration.to;
+  while (isLegacyBundleVersion(version)) {
+    migrated = VTT_SESSION_MIGRATION_CHAIN[version].migrate(migrated);
+    version += 1;
   }
   return migrated;
 }
 
 /** The v12 revisions of a bundle, each with its v12 checksum verified. */
 function verifiedV12Revisions(bundle: Readonly<Record<string, unknown>>): readonly Readonly<Record<string, unknown>>[] {
-  if (bundle.schemaVersion !== VTT_SESSION_LAST_V12_SCHEMA_VERSION || !Array.isArray(bundle.revisions) || bundle.revisions.length === 0) {
+  if (bundle.schemaVersion !== LAST_SCHEMA_BEFORE_ENGINE_RECORDING || !Array.isArray(bundle.revisions) || bundle.revisions.length === 0) {
     throw schemaViolation('VTT session v12 revisions are malformed.');
   }
   return bundle.revisions.map((revision) => {
@@ -3830,7 +4108,7 @@ function archivedV13Bundle(
     branchId: head.branchId,
     transition: {
       kind: 'session_migrated' as const,
-      migration: 'vtt_session_v12_to_v13' as const,
+      migration: 'vtt_session_v12_to_v13' satisfies BumpOrArchiveStep['id'],
       archive,
       placementRepair: repaired.repairs,
     },
@@ -3859,7 +4137,7 @@ function archivedV13Bundle(
  */
 function recordedByOf(revision: unknown, label: string): EngineBuild {
   if (!isRecord(revision) || !Number.isSafeInteger(revision.schemaVersion)) throw schemaViolation(`${label} is malformed.`);
-  if ((revision.schemaVersion as number) <= VTT_SESSION_LAST_V12_SCHEMA_VERSION) return RECORDED_BEFORE_ENGINE_RECORDING;
+  if ((revision.schemaVersion as number) <= LAST_SCHEMA_BEFORE_ENGINE_RECORDING) return RECORDED_BEFORE_ENGINE_RECORDING;
   // FOOTPRINT fix2 (codex r2 P1): the build is read only from inside the revision's own checksum, so a build
   // written over the recorded one is refused rather than believed.
   const { checksum, ...body } = revision;
@@ -3877,7 +4155,7 @@ function recordedByOf(revision: unknown, label: string): EngineBuild {
 function savedSessionRecording(value: unknown): readonly { readonly schemaVersion: number; readonly recordedBy: EngineBuild }[] {
   if (!isRecord(value) || !Number.isSafeInteger(value.schemaVersion)) throw schemaViolation('Saved VTT session has no valid schema version.');
   const schemaVersion = value.schemaVersion as number;
-  if (schemaVersion <= VTT_SESSION_LAST_V12_SCHEMA_VERSION) return [{ schemaVersion, recordedBy: RECORDED_BEFORE_ENGINE_RECORDING }];
+  if (schemaVersion <= LAST_SCHEMA_BEFORE_ENGINE_RECORDING) return [{ schemaVersion, recordedBy: RECORDED_BEFORE_ENGINE_RECORDING }];
   const revisions = value.format === JOURNAL_DAG_FORMAT ? decodeJournalDagValues(value.nodes, value.revisions) : value.revisions;
   if (!Array.isArray(revisions) || revisions.length === 0) throw schemaViolation('Saved VTT session revisions are malformed.');
   return revisions.map((revision, index) => ({ schemaVersion, recordedBy: recordedByOf(revision, `Saved revision ${String(index + 1)}`) }));
@@ -3918,19 +4196,19 @@ export function sessionHistoryArchiveOf(input: AcceptedInput): SessionHistoryArc
 }
 
 /**
- * The v13 step of the loader: the version bump when v13 can express the whole stream, else the archive (D919),
- * whose root `recordingEngine` records.
+ * The bump-or-archive step of the loader: the version bump when the next schema can express the whole stream, else
+ * the archive (D919), whose root `recordingEngine` records. (Revision-rewrite steps after it carry its output on; the
+ * first one, MOVE-COST's key 13, adds that carrying, since SAVE-COMPAT's chain has none: decisions.md:92.)
  */
-function migratedToV13(
-  v12Bundle: Readonly<Record<string, unknown>>,
+function migratedThroughArchiveStep(
+  bundle: Readonly<Record<string, unknown>>,
   from: AcceptedInput,
   recordingEngine: EngineBuild,
 ): Readonly<Record<string, unknown>> {
-  const bump = VTT_SESSION_MIGRATIONS.find((candidate) => candidate.from === VTT_SESSION_LAST_V12_SCHEMA_VERSION);
-  if (bump === undefined) throw new Error('VTT session migration registry does not reach current schema.');
-  return v12StreamIsExpressible(verifiedV12Revisions(v12Bundle))
-    ? bump.migrate(v12Bundle)
-    : archivedV13Bundle(v12Bundle, sessionHistoryArchiveOf(from), recordingEngine);
+  const step = VTT_SESSION_MIGRATION_CHAIN[LAST_SCHEMA_BEFORE_ENGINE_RECORDING];
+  return step.expressible(step.verified(bundle))
+    ? step.bump(bundle)
+    : step.archive(bundle, sessionHistoryArchiveOf(from), recordingEngine);
 }
 
 /** A v13 revision bundle, every revision decoded and the fingerprint checked. */
@@ -3961,13 +4239,13 @@ function decodedV13Bundle(migrated: Readonly<Record<string, unknown>>): SavedSes
  * a root `recordingEngine` records.
  */
 function migrateSavedBundle(text: string, recordingEngine: EngineBuild): SavedSessionBundleV2 {
-  validateVttSessionMigrationRegistry();
+  validateVttSessionMigrationChain();
   const value: unknown = JSON.parse(text);
   if (isRecord(value) && value.format === JOURNAL_DAG_FORMAT && value.schemaVersion === VTT_SESSION_SCHEMA_VERSION) {
     return decodeJournalDagBundle(value);
   }
   if (isRecord(value) && value.schemaVersion === VTT_SESSION_SCHEMA_VERSION) return decodedV13Bundle(value);
-  return decodedV13Bundle(migratedToV13(migratedToV12(value), { kind: 'saved_session', text }, recordingEngine));
+  return decodedV13Bundle(migratedThroughArchiveStep(migratedToArchiveStep(value), { kind: 'saved_session', text }, recordingEngine));
 }
 
 /**
@@ -3985,11 +4263,15 @@ export function migrateStoredSessionRevisions(
   if (groups.every((group) => group.schemaVersion === VTT_SESSION_SCHEMA_VERSION)) {
     return decodedV13Bundle(revisionBundleOf(sessionId, VTT_SESSION_SCHEMA_VERSION, revisions)).revisions;
   }
-  if (groups.some((group) => group.schemaVersion > VTT_SESSION_LAST_V12_SCHEMA_VERSION)) {
+  if (groups.some((group) => group.schemaVersion > LAST_SCHEMA_BEFORE_ENGINE_RECORDING)) {
     throw schemaViolation('Stored VTT session revision stream mixes v13 revisions with older ones.');
   }
-  validateVttSessionMigrationRegistry();
-  const v13 = migratedToV13(storedStreamV12Bundle(sessionId, groups), { kind: 'stored_stream', texts }, recordingEngine);
+  validateVttSessionMigrationChain();
+  const v13 = migratedThroughArchiveStep(
+    storedStreamArchiveStepBundle(sessionId, groups),
+    { kind: 'stored_stream', texts },
+    recordingEngine,
+  );
   return decodedV13Bundle(v13).revisions;
 }
 
@@ -4024,12 +4306,13 @@ export function migrateReplayEmbeddedRevision(revision: unknown): SessionRevisio
     if (decoded === undefined) throw schemaViolation('Embedded VTT replay revision is malformed.');
     return decoded;
   }
-  validateVttSessionMigrationRegistry();
-  const v12 = migratedToV12(bundleOf(revision.schemaVersion as number, [revision]));
-  const issues = verifiedV12Revisions(v12).flatMap((entry) =>
+  validateVttSessionMigrationChain();
+  const step = VTT_SESSION_MIGRATION_CHAIN[LAST_SCHEMA_BEFORE_ENGINE_RECORDING];
+  const v12 = migratedToArchiveStep(bundleOf(revision.schemaVersion as number, [revision]));
+  const issues = step.verified(v12).flatMap((entry) =>
     v13PlacementIssues(entry.encounterState as Readonly<Record<string, unknown>>));
   if (issues.length > 0) throw new ReplayHistoryNotExpressibleError(issues);
-  const [decoded] = decodedV13Bundle(bumpedV12Bundle(v12)).revisions;
+  const [decoded] = decodedV13Bundle(step.bump(v12)).revisions;
   if (decoded === undefined) throw schemaViolation('Embedded VTT replay revision is malformed.');
   return decoded;
 }
@@ -4069,7 +4352,7 @@ function decodeSessionHistoryArchive(value: unknown): SessionHistoryArchive {
     value.kind !== 'vtt_session_history_archive' ||
     !Array.isArray(value.recordedSchemaVersions) || value.recordedSchemaVersions.length === 0 ||
     !value.recordedSchemaVersions.every((version) => Number.isSafeInteger(version) &&
-      (version as number) >= VTT_SESSION_MINIMUM_SCHEMA_VERSION && (version as number) <= VTT_SESSION_SCHEMA_VERSION)
+      (VTT_SESSION_SCHEMA_VERSIONS as readonly number[]).includes(version as number))
   ) {
     throw new SessionHistoryArchiveError('The session history archive is malformed.');
   }
@@ -4159,19 +4442,19 @@ export function verifySessionHistoryArchive(
     let v12Bundle: Readonly<Record<string, unknown>>;
     switch (archive.source.kind) {
       case 'saved_session':
-        v12Bundle = migratedToV12(JSON.parse(archive.source.save.text));
+        v12Bundle = migratedToArchiveStep(JSON.parse(archive.source.save.text));
         break;
       case 'stored_stream': {
         const { sessionId, groups } = schemaVersionGroups(
           archive.source.revisions.map((revision): unknown => JSON.parse(revision.text)),
         );
         if (sessionId !== root.sessionId) throw schemaViolation('The archived stream belongs to another session.');
-        v12Bundle = storedStreamV12Bundle(sessionId, groups);
+        v12Bundle = storedStreamArchiveStepBundle(sessionId, groups);
         break;
       }
     }
     rederived = derive('migrated root', () => {
-      const bundle = archivedV13Bundle(v12Bundle, archive, root.recordedBy);
+      const bundle = VTT_SESSION_MIGRATION_CHAIN[LAST_SCHEMA_BEFORE_ENGINE_RECORDING].archive(v12Bundle, archive, root.recordedBy);
       const [expected] = Array.isArray(bundle.revisions) ? bundle.revisions : [];
       return expected;
     });
@@ -4278,6 +4561,7 @@ export function exportStoredSessionSource(texts: readonly string[]): string {
 /** Why a save does not load, as every load surface shows it (SAVE-COMPAT §6.4). `message` is what the player reads. */
 export type SessionLoadRefusal =
   | { readonly kind: 'recorded_by_other_build'; readonly refusal: RecordedByOtherBuild; readonly message: string }
+  | { readonly kind: 'not_migratable'; readonly refusal: SessionNotMigratable; readonly message: string }
   | { readonly kind: 'integrity'; readonly fault: SessionIntegrityFault; readonly message: string }
   /** Any other throw (a structural replay fault, another module's decoder, an unexpected error): its own name and message. */
   | { readonly kind: 'load_failed'; readonly errorName: string; readonly message: string };
@@ -4290,6 +4574,9 @@ export type SavedSessionLoadability = LoadableSavedSession | RefusedSavedSession
 export function sessionLoadRefusalOf(error: unknown): SessionLoadRefusal {
   if (error instanceof SessionRecordedByOtherBuildError) {
     return { kind: 'recorded_by_other_build', refusal: error.refusal, message: error.message };
+  }
+  if (error instanceof SessionNotMigratableError) {
+    return { kind: 'not_migratable', refusal: error.refusal, message: error.message };
   }
   if (error instanceof SessionIntegrityError) return { kind: 'integrity', fault: error.fault, message: error.message };
   if (error instanceof SessionHistoryArchiveError || error instanceof SessionHistoryArchiveMetadataError) {

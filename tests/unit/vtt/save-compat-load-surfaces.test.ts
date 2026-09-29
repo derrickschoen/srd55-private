@@ -167,6 +167,14 @@ describe('SAVE-COMPAT C2: the load surfaces survive a save they refuse', () => {
       },
       { kind: 'integrity', fault: { kind: 'schema_violation', detail: 'Malformed.' }, message: 'Save refused: integrity.' },
       { kind: 'load_failed', errorName: 'Error', message: 'Save could not be loaded: Error: boom' },
+      {
+        kind: 'not_migratable',
+        refusal: {
+          revision: 2, fromSchemaVersion: 13, toSchemaVersion: 14, step: 'vtt_session_v13_to_v14', reason: 'r',
+          reasonText: 't', path: 'p', recordedBy: BUILD_A, running: BUILD_B,
+        },
+        message: 'Save refused: not migratable.',
+      },
     ];
     const base = {
       source: 'browser', updatedAt: '2026-09-20T10:00:00.000Z', sessionId: encounterSessionId('session:x'),

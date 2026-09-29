@@ -54,17 +54,22 @@ export type SessionLifecycleResult =
       readonly existingFingerprint: string | null;
       readonly importedFingerprint: string;
     }
-  /** The save was refused as the player should see it: another build recorded it (D939, D944, D947 SQ6). */
+  /** The save was refused as the player should see it: another build recorded it, or it cannot be carried (D939, D947 SQ6). */
   | { readonly kind: 'refused'; readonly refusal: ReturnedImportRefusal }
   | { readonly kind: 'exported'; readonly bytes: string }
   | { readonly kind: 'flushed' };
 
-/** The refusals an import returns as a result; every other refusal (integrity, load_failed) still throws. */
-export type ReturnedImportRefusal = Extract<SessionLoadRefusal, { readonly kind: 'recorded_by_other_build' }>;
+/**
+ * The refusals an import returns as a result: another build recorded the save, or a migration step cannot carry it
+ * (D947 SQ6: the same family, D940's fallback to D939's refusal). Every other refusal (integrity, load_failed) still
+ * throws.
+ */
+export type ReturnedImportRefusal = Extract<SessionLoadRefusal, { readonly kind: 'recorded_by_other_build' | 'not_migratable' }>;
 
 export function returnedImportRefusal(refusal: SessionLoadRefusal): ReturnedImportRefusal | null {
   switch (refusal.kind) {
     case 'recorded_by_other_build':
+    case 'not_migratable':
       return refusal;
     case 'integrity':
     case 'load_failed':

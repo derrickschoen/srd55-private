@@ -46,14 +46,14 @@ import {
   MemoryBrowserSessionStore,
   MemoryMirrorSink,
   SessionIntegrityError,
-  VTT_SESSION_MIGRATIONS,
+  VTT_SESSION_MIGRATION_CHAIN,
   exportSavedSession,
   exportSavedSessionV1ForMigrationTest,
   importSavedSession,
   replaySessionRevisions,
   replayVerifiedRevisions,
   sessionHistory,
-  validateVttSessionMigrationRegistry,
+  validateVttSessionMigrationChain,
   type SessionStore,
   type MirrorSink,
   type SessionRevision,
@@ -275,8 +275,7 @@ describe('event-sourced encounter persistence', () => {
   });
 
   it('preserves known sizes and emits explicit v10 adjudication records for every unknown', () => {
-    const migration = VTT_SESSION_MIGRATIONS.find((candidate) => candidate.from === 10 && candidate.to === 11);
-    if (migration === undefined) throw new Error('The session 10-to-11 migration is not registered.');
+    const migration = VTT_SESSION_MIGRATION_CHAIN[10];
     const sourceBytes = canonicalJson(HAND_AUTHORED_V10_CREATURE_SPACE_CASES);
 
     const caseRevisionBody = {
@@ -1241,7 +1240,7 @@ describe('event-sourced encounter persistence', () => {
   });
 
   it('MIRROR-QUEUE-AND-MIGRATION keeps browser authority and deterministic export', () => {
-    validateVttSessionMigrationRegistry();
+    validateVttSessionMigrationChain();
     const fixture = pair();
     const registry = new ControllerRegistry([
       { combatantId: fixture.player.id, controller: new AlgorithmController() },

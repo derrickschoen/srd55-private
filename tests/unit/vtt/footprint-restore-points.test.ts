@@ -8,7 +8,7 @@ import { IndexedDbBrowserSessionStore, RestorePointUnavailableError } from '../.
 import {
   importSavedSession,
   MemoryBrowserSessionStore,
-  VTT_SESSION_MIGRATIONS,
+  VTT_SESSION_MIGRATION_CHAIN,
   type SessionRevision,
 } from '../../../src/vtt/session-persistence';
 import { declareTestInputs } from '../../helpers/test-inputs';
@@ -275,10 +275,10 @@ function v12Save(revisions: readonly StoredRevision[]): string {
 
 /** A v11 revision as the v12 app held it: migrated by the registered v11 -> v12 migration. */
 function asV12(revision: StoredRevision): StoredRevision {
-  const migration = VTT_SESSION_MIGRATIONS.find((candidate) => candidate.from === 11 && candidate.to === 12);
-  if (migration === undefined || revision.schemaVersion !== 11) throw new Error('Expected a v11 revision and the v11 -> v12 migration.');
+  const migration = VTT_SESSION_MIGRATION_CHAIN[11];
+  if (revision.schemaVersion !== 11) throw new Error('Expected a v11 revision.');
   const body = { format: 'vtt-session-revisions', schemaVersion: 11, sessionId: revision.sessionId, revisions: [revision] };
-  const migrated = migration.migrate({ ...body, fingerprint: sha256(canonicalJson(body)) }) as { readonly revisions: readonly StoredRevision[] };
+  const migrated = migration.migrate({ ...body, fingerprint: sha256(canonicalJson(body)) }) as unknown as { readonly revisions: readonly StoredRevision[] };
   return migrated.revisions[0]!;
 }
 
