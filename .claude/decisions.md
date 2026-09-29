@@ -3928,5 +3928,39 @@ ORDER (the supervisor's, under this ruling): SAVE-COMPAT still lands first, sinc
 - P3 work reduction: CPU profiles of the top files, aggregated by function, decide the engine units. VISIBILITY-PERF and COVER-SWEEP-FLAT move ahead of the rule units only if the profile says they pay; D925's order against COVER-EDGE then goes back to the owner. The TEST-PERF-01 B2–B6 re-baseline (D902) folds into this profile.
 - Codex drafts every change (D951). Measurement is by me.
 
-Next free id: D955.
+## D955 — 2026-09-29 14:08 — SAVE-COMPAT LANDED (082f7cf0); PERF-TESTS approved and timed; worker sweep read
+
+SAVE-COMPAT LANDED: main fast-forwarded by 15 commits to 082f7cf0. Outside .claude the tree is identical to the tested 3345bd8d.
+- Verified by me:
+  - full gate at cf37d33f passed;
+  - later commits touched only local-session-store and save-folder, and their 7 affected specs are 119/119;
+  - the vtt-save-manager browser spec 3/3;
+  - all 7 pins unchanged at bca24af4;
+  - tsc 0 and check-command-outcomes 0 on both arms.
+- Timing, initial phase in every VALID arm:
+  - main: 211.5 s (sc-0929 A prewarm) and 208.8 s (sc-0929r2 A prewarm);
+  - SAVE-COMPAT: 216.3 s (sc-0929 B timed), 207.8 and 211.2 s (pt-0929 A prewarm and timed), 215.4 s (sc-0929r2 B prewarm);
+  - means about 210 s against 213 s: +3 s, inside the +30 s guard.
+- Every run passed; 707 files against 701, and 12,368 tests against 12,335.
+- Deviation, stated: no single timed pair was VALID on both sides. sc-0929 A timed was VOID (outside test runs of 2.74 cores). My PERF-SHA codex runs were part of that, alongside the other project's unittest. The owner asked "why are we waiting to land save-compat?", and I judged the valid arms sufficient. The sc-0929r2 timed pair still runs as confirmation and is recorded when it finishes.
+PERF-TESTS (branch claude/perf-tests):
+- 3d677abc, then d6309ebb and 5174d741 after review.
+- Codex review: r1 REVISE, r2 REVISE, r3 APPROVE.
+- Supervisor cuts:
+  - reverted a sandbox workaround in tools/engine-child-bundle.ts;
+  - dropped an isolation assertion added inside M63;
+  - replaced codex's inline seeded-image clone and its proof test with the existing D306 helper openSeededTestDatabase. That file is +8/−3 against the base, and its titles are identical.
+- Timed pair pt-0929-5174d741, all four arms VALID. A (SAVE-COMPAT) 211.2 + 17.2 = 228.5 s; B 183.8 + 10.6 = 194.4 s; −34.1 s total, −27.4 s initial. 707 files and 12,368 tests on both sides.
+PERF-SHA: 0b79b484 (on perf-tests), written by codex; +8 net; differential against node:crypto; codex micro-benchmark 1.24x.
+- NOT yet run by me, and NOT yet reviewed by codex.
+WORKER SWEEP (ws-0929, on 3345bd8d; one timed arm each, all VALID):
+- w8: 230.2 + 49.2 = 279.4 s, peak 22.7 GB;
+- w12: 221.7 + 140.8 = 362.4 s, peak 29.8 GB;
+- w16: 150.2 + 109.2 = 259.4 s, peak 31.7 GB of 39.
+- More workers turn contention into 5 s timeout retries: at w16, js-round-plan, d583, session-archive-replay, dice, engine-boundary, experiment-orchestrator and replay were retried. A re-sweep on PERF-TESTS is queued (queue15).
+FINDINGS AGAINST MY OWN WORK:
+- (1) queue11/12 waited for zero codex processes, stricter than D883/D893 (agent and codex sessions never delay a run). The timed work was held back about 1.5 h. Fixed; run-gate-arm's quietwait applies the rule.
+- (2) PERF-SHA's codex test runs overlapped a timed pair and helped void it. No codex test runs during timed arms from now on.
+
+Next free id: D956.
 
