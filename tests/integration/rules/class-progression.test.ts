@@ -26,6 +26,7 @@ import {
 import { bundledSrdSubclassManifest } from '../../../src/rules/srd-subclasses';
 import { getSqlite3, openTestDatabase } from '../../helpers/open-db';
 import { expectIdenticalDatabaseImages } from '../../helpers/database-image-equality';
+import { attachSqlTrace } from '../../helpers/sql-trace';
 
 let seededImage: Promise<Uint8Array> | undefined;
 
@@ -40,7 +41,9 @@ async function openClassProgressionDatabase(): Promise<Database> {
       fresh.close();
     }
   })();
-  return openDatabaseImage(sqlite3, (await seededImage).slice(), { readonly: false });
+  const clone = openDatabaseImage(sqlite3, (await seededImage).slice(), { readonly: false });
+  attachSqlTrace(clone, sqlite3);
+  return clone;
 }
 
 function defect(run: () => unknown): unknown {
@@ -810,7 +813,12 @@ describe('persisted class progression catalog', () => {
     ).toBe(21);
   });
 
-  it('upserts idempotently while retaining persisted row identities', () => {
+  it('upserts idempotently while retaining persisted row identities', async () => {
+    // D306: the seed under test runs on fresh DDL, not on the cloned image.
+    connection.close();
+    connection = await openTestDatabase();
+    db = new DatabaseContext(connection);
+    applicationSeed(db);
     const before = db.allRaw(`
       SELECT class.content_key, progression.class_level, progression.id
       FROM class_progressions progression
