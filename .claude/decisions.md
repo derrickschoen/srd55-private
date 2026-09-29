@@ -4120,5 +4120,15 @@ Reports: .tmp/runs/gate-review/astra/final.md (codex gpt-6-astra, session 01a0ee
 - (3) Whether to delete the challenge-feasibility twin exploration: 5 identical tests plus 4 subsets, flagged by the room-d-land review F1.
 - (4) Whether the installer may share one installed image across four tests (D306 scope).
 
-Next free id: D964.
+### D964 — 2026-09-29 15:13 — Owner decisions on the D963 gate review
+
+The owner's answers, verbatim from the question tool:
+1. **Tiering: "Landing + nightly".** The survival 30-seed sweep (tests/integration/vtt/survival-policy.test.ts:1312), the migration prefix family (the four catalog-data-migration-prefix files) and the 3×3 brutal smoke (tests/unit/tools/ai-dm-conversation-smoke.test.ts:62) leave lane and dev gates. They run at every landing and nightly.
+2. **Verdict cache: "Yes, lanes only".** Lanes and the dev loop may use scripts/test-affected.mjs. The full gate stays mandatory at every landing (Part A:77 unchanged).
+3. **challenge-feasibility twin: delete it.** Owner text: "Keep one exploration with a pinned runtime and unconditional GO assertions; saves ~8 s at w4 and one source of stalls. Verify both sides kill the same mutants before deleting." The mutant-equivalence proof is a precondition of the deletion.
+4. **Installer: "Share one installed image".** Four bundled-homebrew-installer tests may clone one post-install image. This widens D306's opt-in preseeded images from seed-only to one post-install image, and needs the same kind of proven equivalence as D306's helper. :542 keeps its own install, since it owns the install claim.
+
+These feed unit GATE-TRIM (the no-decision fixes in D963 plus items 3–4) and unit GATE-TIER (items 1–2, plus closing the `--changed` gate hole if confirmed). Codex gpt-6.1-sol drafts one plan covering both. It goes through consensus with the §8A minimality pass before any implementation.
+
+Next free id: D965.
 
