@@ -3968,5 +3968,13 @@ Three commits rebased onto 76fc01e4. The tree outside .claude is identical to th
 - Evidence (D955): codex review r3 APPROVE; timed pair pt-0929-5174d741 with all arms VALID, 228.5 → 194.4 s (−34.1 s); same 707 files and 12,368 tests.
 - PERF-SHA (0b79b484) is not included. It waits for my test run and a codex review.
 
-Next free id: D957.
+### D957 — 2026-09-29 14:18 — SAVE-COMPAT confirmation pair; SQLITE-PERF track opened; a correction to my sha256 share
+
+**Confirmation pair (promised in D955).** sc-0929r2-3345bd8d, BA order, both timed runs VALID under D883/D893. B (SAVE-COMPAT 3345bd8d) initial 269.0 s, A (main df38d16b) 199.7 s: B loses this pair by 69.3 s. VERIFIED by me from the vitest-initial reports: 175.3 s of it is one file. unit/vtt/challenge-feasibility.test.ts ran 185.9 s in B against 10.6 s in A and 26.3 s in B-prewarm; it ended failed with 6 of 31 tests skipped and no failure message, then passed on the serial retry. Every other file differs by at most 5.2 s. So the loss is a challenge-feasibility stall, not SAVE-COMPAT cost. Across all VALID default-worker runs, the initial-phase medians are main df38d16b 208.8 s (n=3) and SAVE-COMPAT 3345bd8d 215.4 s (n=5), so +6.6 s, inside the +30 s guard. The landing in D955 stands. challenge-feasibility now has a stall signature at 8 workers, not only timeouts at high worker counts; it is on the D954 flaky list for root-causing.
+
+**SQLITE-PERF (owner, verbatim: "start a parallel track to profile sqlite usage and see if we can imporve performance by adding indexes and rewriting queries").** Codex gpt-6-sol xhigh, workspace-write, session 01a0ee5f-53f6-70e0-9dfe-a5bdb21565b7, in /home/vagrant/PhpstormProjects/dnd-probe-sqlperf-9f0886c3. It measures and prototypes only; no commits; the clone must end clean. Brief: .tmp/runs/sqlperf/brief.md. It does static work only until the timed queue writes QUEUE15 DONE, then runs one test process at a time through slot.sh.
+
+**Correction against my own work (sha256 share).** I told the owner sha256 was 21.1 s of 1,295 s sampled, "about 1.6%". That denominator was wrong. Of the 81 profiles, 52 are vitest main processes and 29 are workers by URL. The main-process profiles are about 95% `(idle)`: they sit waiting while the worker runs the file. Counting only the 64 profiles that are under 50% idle (the processes actually running tests), the total is 506.4 s, of which 51.2 s is idle, and sha256 is 21.1 s = 4.2%. The earlier "engine 57%, SQLite 26%" shares from the perf-03 report need the same check before anyone plans on them.
+
+Next free id: D958.
 
