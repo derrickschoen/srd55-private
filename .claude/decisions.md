@@ -3993,5 +3993,41 @@ Three commits rebased onto 76fc01e4. The tree outside .claude is identical to th
 
 **Finding against my own work.** My first GATE-OTEL dispatch set codex's working root and --add-dir to all of /home/vagrant/PhpstormProjects, with network access, so that codex could create its own clone and run npm ci. That would have given one agent write access to every project on the machine. The auto-mode classifier blocked it, rightly. The redispatch keeps the agent inside one clone: I did the clone and install steps myself, and codex has no network.
 
-Next free id: D959.
+### D959 — 2026-09-29 14:40 — SHA-SPLIT: node:crypto in Node, hash-wasm in the browser (owner); sweep stopped; benchmarks
+
+**Owner decision (verbatim):** "node:crypto in Node, and hash-wasm in the browser". It supersedes PERF-SHA (0b79b484), which will not land.
+
+**Plan.**
+- `#sha256` package imports select the implementation: `browser` → src/crypto/sha256-browser.ts, a hash-wasm hasher initialised by top-level await; `default` → src/crypto/sha256-node.ts, calling node:crypto createHash.
+- The hand-written JS implementation is deleted, and every importer moves to '#sha256'.
+- The differential test is retargeted to the browser file. Its named mutant is dropping `hasher.init()`.
+- All digests stay byte-identical, and the pins must not change.
+
+**Dispatch and state.**
+- hash-wasm 4.12.0 (MIT) was added by me in clone dnd-probe-shasplit-db6f08c6, branch claude/sha-split, commit 5fddf0e3.
+- Codex gpt-6-sol xhigh drafts the change, workspace-write, session 01a0ee77-090f-7503-8c8a-d7af0a422cc8. Brief: .tmp/runs/sha-split/brief.md.
+
+**VERIFIED by me before dispatch.**
+- node createHash, hash-wasm update(string), hash-wasm update(TextEncoder bytes) and the current JS agree on 9 vectors: empty, lone surrogates, astral characters and the 55/56/64 padding boundaries.
+- There is no CSP in index.html, public/ or vite.config.ts.
+- Vite is 7.3.6.
+
+**Benchmarks, measured by me** (noisy: outside python test runs used about 5 cores, and the traced gate started 30 s in). Microseconds per call at 64 B / 1 KB / 64 KB / 1 MB, each result matching node:crypto:
+
+| Implementation | 64 B | 1 KB | 64 KB | 1 MB |
+|---|---|---|---|---|
+| JS main | 4.43 | 12.2 | 577 | 9476 |
+| PERF-SHA | 3.38 | 11.8 | 562 | 9152 |
+| @noble/hashes | 1.75 | 6.8 | 305 | 5112 |
+| hash-wasm | 0.96 | 4.4 | 266 | 4299 |
+| node:crypto | 0.65 | 1.8 | 79 | 1311 |
+| WebCrypto, awaited | 36.5 | 38.9 | 77 | 739 |
+
+SHA-NI's contribution, measured by masking OPENSSL_ia32cap bit 29: node createHash on a 1 MB buffer runs at 2,152 MB/s with it and 643 MB/s without; the OpenSSL 3.6.1 CLI at 16 KB runs at 2,234 MB/s with it and 632 MB/s without.
+
+**Sweep stopped (owner: "skip the remaining sweep runs and start the telemetry gate").** Both w16 arms were VOID from outside python unittest load, 2.98 and 2.99 cores; their initial phases were 166.6 s (prewarm) and 167.7 s (timed). The w12 prewarm was also VOID (195.5 s). I killed the w12 timed arm by PID while it was still in quiet-wait, before it started.
+
+**GATE-OTEL.** The traced gate started 14:34:12 at --maxWorkers=4, with no quiet wait (owner). It holds fan-out slots 2–8, and outside load is logged. The runner is .tmp/runs/otel/run-traced-gate.sh.
+
+Next free id: D960.
 
