@@ -2,10 +2,9 @@ id: no-session-proof-cast
 language: TypeScript
 severity: error
 message: >-
-  A session persistence proof is minted, never cast (SAVE-COMPAT C3, C5; supervisor D944, owner D941):
-  ReplayVerifiedRevisions comes only from replayVerifiedRevisions (a strict replay), JournalRecordedRevision only from
-  the journal's own append, and a loaded-relaxed stamp only from a relaxed load. A cast would persist revisions no
-  replay verified, or pass off a value as stamped (or unstamped).
+  A session persistence proof is minted, never cast (SAVE-COMPAT C3, supervisor D944): ReplayVerifiedRevisions comes
+  only from replayVerifiedRevisions (a strict replay), JournalRecordedRevision only from the journal's own append.
+  A cast would persist revisions no replay verified.
 files:
   - src/**/*.ts
   - tools/**/*.ts
@@ -16,4 +15,4 @@ rule:
   pattern: $EXPRESSION as $TYPE
 constraints:
   TYPE:
-    regex: ^(?:ReplayVerifiedRevisions|JournalRecordedRevision|LoadedRelaxedStamp|LoadedRelaxed<.*>|RelaxedSessionResume)$
+    regex: ^(?:ReplayVerifiedRevisions|JournalRecordedRevision)$

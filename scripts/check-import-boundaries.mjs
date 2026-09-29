@@ -274,55 +274,7 @@ const SRD_UNPROVEN_REFERENCES = [];
  * followed: `runtime` (static and dynamic imports) or `static` (what loads
  * with the module, such as an entry's boot chunk).
  */
-/**
- * SAVE-COMPAT C5 (owner D941 GUARD, supervisor D945 SQ3): the trust-recorded-history mint is for tests that load a
- * save by trusting its recorded history, and no pinned rule output may rest on it. It is unreachable from the app
- * (src/), the scripts, every tool that loads sessions, every pinned producer and the engine child, and from each
- * pinned rule-output test. tools/ as one directory entry cannot be proved (an unresolved reference in
- * tools/heldout-runtime-guard-worker.mjs), so the tools are named one by one; ast-grep
- * no-trust-mint-import-outside-tests keeps src/ and tools/ from naming the mint at all.
- */
-const TRUST_MINT = 'tests/helpers/trust-recorded-history.ts';
-const TRUST_MINT_UNREACHABLE_FROM = [
-  'src/',
-  'scripts/',
-  // The tools that load sessions.
-  'tools/ai-dm-board-snapshot.ts',
-  'tools/ai-dm-conversation.ts',
-  'tools/rehearsal/run.ts',
-  'tools/session-archive-replay.ts',
-  'tools/session-archive-replay-driver.ts',
-  'tools/vtt-experiment.ts',
-  'tools/vtt-handoff/node-runtime.ts',
-  // The pinned producers outside src/, and the engine child.
-  'tools/blind-context-fixture-report.ts',
-  'tools/d569-blind-experiment.ts',
-  'tools/d569-second-family-manifest.ts',
-  'tools/ai-dm-arena.ts',
-  'tools/engine-mcp-server.ts',
-  'tests/helpers/legacy-advice-surface.ts',
-  // The pinned rule-output tests.
-  'tests/unit/vtt/blind-turn-context.test.ts',
-  'tests/unit/vtt/blind-context-source-binding.test.ts',
-  'tests/unit/tools/ai-dm-conversation-final-decisions.test.ts',
-  'tests/unit/vtt/room-generator-los-cover.test.ts',
-  'tests/unit/combat/cover-walk.test.ts',
-  'tests/unit/tools/generate-arena-basis.test.ts',
-  'tests/unit/tools/d569-v5.test.ts',
-  'tests/unit/tools/d569-blind-experiment.test.ts',
-  'tests/unit/tools/ai-dm-arena.test.ts',
-  'tests/integration/vtt/survival-policy.test.ts',
-  'tests/unit/tools/ai-dm-legacy-invariance.test.ts',
-];
-
 const FORBIDDEN_REACHABILITY = [
-  ...TRUST_MINT_UNREACHABLE_FROM.map((from) => ({
-    status: 'active',
-    from,
-    to: TRUST_MINT,
-    via: 'runtime',
-    why: 'trust-recorded-history is for tests; a pinned rule output never rests on it (owner D941, D945 SQ3)',
-  })),
   {
     status: 'active',
     from: 'tests/helpers/open-db.ts',

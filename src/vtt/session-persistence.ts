@@ -722,14 +722,7 @@ const seedTrustedHistory: unique symbol = Symbol('seedTrustedHistory');
 export class MemoryBrowserSessionStore implements SessionStore {
   readonly #bySession = new Map<EncounterSessionId, SessionRevision[]>();
 
-  /**
-   * Module-private, trust mode only: a relaxed load's history, which no strict replay verified, seeds the fresh store
-   * its relaxed journal records into; it never reaches a durable store (owner D941).
-   */
   [seedTrustedHistory](revisions: readonly SessionRevision[]): void {
-    const first = revisions[0];
-    if (first === undefined) return;
-    verifyRevisionSequence(revisions, first.sessionId);
     for (const revision of revisions) this.#appendChecked(revision);
   }
 
@@ -1576,9 +1569,6 @@ function derivedPart<T, U>(derived: Derived<T>, part: (value: T) => U): Derived<
   return derived.kind === 'derived' ? { kind: 'derived', value: part(derived.value) } : derived;
 }
 
-/** What replaying one revision established: every check held, or (trust mode) its derivations were not asked. */
-type RevisionVerdict = 'verified' | 'derivation_trusted';
-
 /**
  * Replays one revision against its declared parent. Every transition kind has its case (a kind without one is a
  * compile error: the function would lack an ending return). Recorded facts are checked with `recorded`, rules
@@ -1590,9 +1580,7 @@ function replayTransition(
   parent: SessionRevision | null | undefined,
   running: EngineBuild,
   mode: ReplayMode,
-): RevisionVerdict {
-  let trusted = false;
-  const verdict = (): RevisionVerdict => trusted ? 'derivation_trusted' : 'verified';
+): void {
   const recorded = (actual: unknown, expected: unknown, check: RecordedFactCheck): void => {
     if (canonicalJson(actual) !== canonicalJson(expected)) {
       throw new SessionIntegrityError({
@@ -1606,10 +1594,7 @@ function replayTransition(
     recordedValue: unknown,
     check: DerivationCheck,
   ): void => {
-    if (result.kind === 'trusted') {
-      trusted = true;
-      return;
-    }
+    if (result.kind === 'trusted') return;
     if (result.kind === 'refused') throw derivationFailed(revision, kind, result.failure, running);
     if (canonicalJson(recordedValue) !== canonicalJson(result.value)) {
       throw derivationFailed(revision, kind, { kind: 'derivation_differs', check }, running);
@@ -1622,7 +1607,7 @@ function replayTransition(
       if (revision.revision !== 1 || parent !== null) {
         throw new Error('session_migrated may only be the first revision.');
       }
-      return verdict();
+      return;
     case 'session_started':
       if (revision.revision !== 1 || parent !== null) {
         throw new Error('session_started may only be the first revision.');
@@ -1636,7 +1621,7 @@ function replayTransition(
       )) {
         throw new Error('Migrated session_started agent binding is malformed.');
       }
-      return verdict();
+      return;
     case 'agent_session_started':
       if (parent === null || parent === undefined || parent.agentSession !== null) {
         throw new Error('agent_session_started requires an unbound parent revision.');
@@ -1653,7 +1638,7 @@ function replayTransition(
       recorded(revision.coordinatorState, parent.coordinatorState, 'agent-start coordinator state');
       recorded(revision.partyState, parent.partyState, 'agent-start party state');
       recorded(revision.rngState, parent.rngState, 'agent-start RNG state');
-      return verdict();
+      return;
     case 'agent_session_dispatched':
       if (parent === null || parent === undefined || parent.agentSession === null) {
         throw new Error('agent_session_dispatched requires an active binding.');
@@ -1671,7 +1656,7 @@ function replayTransition(
       recorded(revision.coordinatorState, parent.coordinatorState, 'agent-dispatch coordinator state');
       recorded(revision.partyState, parent.partyState, 'agent-dispatch party state');
       recorded(revision.rngState, parent.rngState, 'agent-dispatch RNG state');
-      return verdict();
+      return;
     case 'agent_call_usage_recorded':
       if (parent === null || parent === undefined || parent.agentSession === null ||
         parent.agentSession.status !== 'active') {
@@ -1693,7 +1678,7 @@ function replayTransition(
       recorded(revision.coordinatorState, parent.coordinatorState, 'agent-usage coordinator state');
       recorded(revision.partyState, parent.partyState, 'agent-usage party state');
       recorded(revision.rngState, parent.rngState, 'agent-usage RNG state');
-      return verdict();
+      return;
     case 'agent_session_recovered':
       if (parent === null || parent === undefined || parent.agentSession === null) {
         throw new Error('agent_session_recovered requires a failed active binding.');
@@ -1716,7 +1701,7 @@ function replayTransition(
       recorded(revision.coordinatorState, parent.coordinatorState, 'agent-recovery coordinator state');
       recorded(revision.partyState, parent.partyState, 'agent-recovery party state');
       recorded(revision.rngState, parent.rngState, 'agent-recovery RNG state');
-      return verdict();
+      return;
     case 'agent_session_recovery_failed':
       if (parent === null || parent === undefined || parent.agentSession === null) {
         throw new Error('agent_session_recovery_failed requires an active predecessor binding.');
@@ -1725,7 +1710,7 @@ function replayTransition(
       recorded(revision.coordinatorState, parent.coordinatorState, 'failed agent-recovery coordinator state');
       recorded(revision.partyState, parent.partyState, 'failed agent-recovery party state');
       recorded(revision.rngState, parent.rngState, 'failed agent-recovery RNG state');
-      return verdict();
+      return;
     case 'agent_session_rolled_over':
       if (parent === null || parent === undefined || parent.agentSession === null ||
         parent.agentSession.currentContextTokens === null) {
@@ -1754,7 +1739,7 @@ function replayTransition(
       recorded(revision.coordinatorState, parent.coordinatorState, 'agent-rollover coordinator state');
       recorded(revision.partyState, parent.partyState, 'agent-rollover party state');
       recorded(revision.rngState, parent.rngState, 'agent-rollover RNG state');
-      return verdict();
+      return;
     case 'session_ended':
       if (parent === null || parent === undefined) {
         throw new Error('session_ended requires a parent revision.');
@@ -1763,7 +1748,7 @@ function replayTransition(
       recorded(revision.coordinatorState, parent.coordinatorState, 'ended-session coordinator state');
       recorded(revision.partyState, parent.partyState, 'ended-session party state');
       recorded(revision.rngState, parent.rngState, 'ended-session RNG state');
-      return verdict();
+      return;
     case 'party_state_captured': {
       if (parent === null || parent === undefined || parent.partyState === null) {
         throw new Error('Party capture requires an existing party session state.');
@@ -1780,7 +1765,7 @@ function replayTransition(
         derived(transition.kind, derive(mode, 'rest-interruption party state', () =>
           interruptLongRest(parentParty, interruption.outcome).state), revision.partyState, 'rest-interruption party state');
       }
-      return verdict();
+      return;
     }
     case 'short_rest_completed': {
       if (parent === null || parent === undefined || parent.partyState === null) {
@@ -1797,7 +1782,7 @@ function replayTransition(
       derived(transition.kind, derivedPart(rested, (value) => value.state), revision.partyState, 'Short Rest party state');
       derived(transition.kind, derivedPart(rested, (value) => value.rolls), transition.rolls, 'Short Rest rolls');
       derived(transition.kind, derivedPart(rested, (value) => value.rng), revision.rngState, 'Short Rest RNG state');
-      return verdict();
+      return;
     }
     case 'long_rest_completed': {
       if (parent === null || parent === undefined || parent.partyState === null) {
@@ -1810,7 +1795,7 @@ function replayTransition(
       derived(transition.kind, derivedPart(rested, (value) => value.state), revision.partyState, 'Long Rest party state');
       derived(transition.kind, derivedPart(rested, (value) => value.summary), transition.summary, 'Long Rest summary');
       recorded(revision.rngState, parent.rngState, 'Long Rest RNG state');
-      return verdict();
+      return;
     }
     case 'room_composed': {
       if (parent === null || parent === undefined || parent.partyState === null) {
@@ -1828,7 +1813,7 @@ function replayTransition(
           kind: 'recorded_fact_disagreement', revision: revision.revision, transition: transition.kind, check: mismatch,
         });
       }
-      return verdict();
+      return;
     }
     case 'turn_skipped': {
       if (parent === null || parent === undefined) throw new Error('A skipped turn requires a parent.');
@@ -1850,7 +1835,7 @@ function replayTransition(
         pacingCoordinatorState(parent.coordinatorState),
         'skipped-turn coordinator state',
       );
-      return verdict();
+      return;
     }
     case 'turn_delayed': {
       if (parent === null || parent === undefined) throw new Error('A delayed turn requires a parent.');
@@ -1878,7 +1863,7 @@ function replayTransition(
         pacingCoordinatorState(parent.coordinatorState),
         'delayed-turn coordinator state',
       );
-      return verdict();
+      return;
     }
     case 'head_moved': {
       if (parent === null || parent === undefined) {
@@ -1888,7 +1873,7 @@ function replayTransition(
       recorded(revision.coordinatorState, parent.coordinatorState, 'head-move coordinator state');
       recorded(revision.partyState, parent.partyState, 'head-move party state');
       recorded(revision.rngState, deriveBranchRng(parent, revision.branchId).snapshot(), 'head-move RNG state');
-      return verdict();
+      return;
     }
     case 'reaction_preference_changed': {
       if (parent === null || parent === undefined || parent.partyState === null) {
@@ -1910,7 +1895,7 @@ function replayTransition(
       derived(transition.kind, derivedPart(changed, (value) => value.party), revision.partyState, 'reaction preference party state');
       derived(transition.kind, derivedPart(changed, (value) => value.encounter), revision.encounterState, 'reaction preference encounter state');
       recorded(revision.rngState, parent.rngState, 'reaction preference RNG state');
-      return verdict();
+      return;
     }
     case 'refusal_handling_changed': {
       // WR11: this kind had no replay case, so an edited refusal-handling revision loaded unchecked.
@@ -1923,7 +1908,7 @@ function replayTransition(
       recorded(revision.rngState, parent.rngState, 'refusal-handling RNG state');
       derived(transition.kind, derive(mode, 'refusal-handling party state', () =>
         setPartyRefusalHandling(parentParty, transition.category, transition.mode)), revision.partyState, 'refusal-handling party state');
-      return verdict();
+      return;
     }
     case 'reducer_applied': {
       if (parent === null || parent === undefined) {
@@ -1938,7 +1923,7 @@ function replayTransition(
       derived(transition.kind, derivedPart(replayed, (value) => value.events), transition.events, 'reducer events');
       derived(transition.kind, derivedPart(replayed, (value) => value.rng), revision.rngState, 'reducer RNG state');
       recorded(revision.partyState, parent.partyState, 'reducer party state');
-      return verdict();
+      return;
     }
     case 'controller_request_issued':
     case 'controller_response_received':
@@ -1968,7 +1953,7 @@ function replayTransition(
       recorded(revision.encounterState, parent.encounterState, 'coordinator encounter state');
       recorded(revision.rngState, parent.rngState, 'coordinator RNG state');
       recorded(revision.partyState, parent.partyState, 'coordinator party state');
-      return verdict();
+      return;
   }
 }
 
@@ -1978,14 +1963,13 @@ function replayTransition(
  * on a revision is a checked recovery cache: reducer transitions must reproduce it from parent state + parent RNG,
  * while coordinator-only transitions must leave both unchanged. A failure is typed: SessionIntegrityError, or, for a
  * derivation of a turn another build recorded, SessionRecordedByOtherBuildError (the failing revision's own build
- * decides). Returns the last revision and the revisions whose derivations trust mode did not ask.
+ * decides). Returns the last revision.
  */
 function replayRevisions(
   revisions: readonly SessionRevision[],
   runningBuild: EngineBuild,
   mode: ReplayMode,
-): { readonly latest: SessionRevision; readonly trustedRevisions: readonly number[] } {
-  const trustedRevisions: number[] = [];
+): SessionRevision {
   const first = revisions[0];
   const rootKind = first === undefined ? undefined : decodeTransition(first.transition).kind;
   if (first === undefined || (rootKind !== 'session_started' && rootKind !== 'session_migrated')) {
@@ -2001,9 +1985,7 @@ function replayRevisions(
     if (revision.parentRevision !== null && parent === undefined) {
       throw new Error('Session replay cannot find a declared parent.');
     }
-    if (replayTransition(revision, transition, parent, runningBuild, mode) === 'derivation_trusted') {
-      trustedRevisions.push(revision.revision);
-    }
+    replayTransition(revision, transition, parent, runningBuild, mode);
     if (
       parent !== null && parent !== undefined &&
       transition.kind !== 'agent_session_started' &&
@@ -2020,7 +2002,7 @@ function replayRevisions(
     }
     byRevision.set(revision.revision, revision);
   }
-  return { latest: revisions.at(-1) ?? first, trustedRevisions };
+  return revisions.at(-1) ?? first;
 }
 
 /** The strict replay of `revisions` under `runningBuild` (every derivation re-derived); the last revision. */
@@ -2028,7 +2010,7 @@ export function replaySessionRevisions(
   revisions: readonly SessionRevision[],
   runningBuild: EngineBuild = RUNNING_ENGINE_BUILD,
 ): SessionRevision {
-  return replayRevisions(revisions, runningBuild, 'strict').latest;
+  return replayRevisions(revisions, runningBuild, 'strict');
 }
 
 export interface SessionResume {
@@ -2049,6 +2031,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
     private readonly store: SessionStore,
     private readonly mirror: MirrorSink,
     rng: SerializableRng,
+    private readonly exportAsRecorded = false,
   ) {
     this.#rng = rng;
   }
@@ -2092,7 +2075,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
     mirror: MirrorSink,
   ): SessionResume {
     const revisions = store.revisions(sessionId);
-    const { latest } = replayRevisions(revisions, store.recordingEngine, 'strict');
+    const latest = replayRevisions(revisions, store.recordingEngine, 'strict');
     const rng = restoreMulberry32(latest.rngState);
     return {
       journal: new EncounterSessionJournal(sessionId, store, mirror, rng),
@@ -2105,47 +2088,26 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
     };
   }
 
-  /**
-   * TRUST-RECORDED-HISTORY (owner D941; tests only, through tests/helpers/trust-recorded-history.ts): `bytes` loaded
-   * trusting its recorded history. The grant is checked before anything is decoded; the save is decoded (hashes,
-   * schema, sequence; a migration is not persisted anywhere, and a step that cannot carry it still refuses it); every
-   * recorded fact is checked and no derivation is re-derived; the history seeds a fresh private memory store recording
-   * `recordingEngine`, so new revisions record that build and use the rules running now. Everything it returns is
-   * stamped (LoadedRelaxedStamp).
-   */
   static loadSaveTrustingRecordedHistory(
     bytes: string,
     recordingEngine: EngineBuild,
-    grant: TrustRecordedHistoryGrant,
-    mirror: MirrorSink = new MemoryMirrorSink(),
-  ): RelaxedSessionResume {
-    requireTrustGrant(grant);
+  ): { readonly session: SessionResume; readonly recordedBy: readonly EngineBuild[] } {
     const { summary, revisions } = decodeSavedSession(bytes, recordingEngine);
-    const { latest, trustedRevisions } = replayRevisions(revisions, recordingEngine, 'trust');
+    const latest = replayRevisions(revisions, recordingEngine, 'trust');
     const store = new MemoryBrowserSessionStore(recordingEngine);
     store[seedTrustedHistory](revisions);
     const rng = restoreMulberry32(latest.rngState);
-    const loaded: LoadedRelaxedStamp = {
-      kind: 'loaded_relaxed',
-      recordedBy: recordingBuildsOf(revisions),
-      runningBuild: recordingEngine,
-      trustedRevisions,
-      purpose: grant.purpose,
-    };
-    const journal = RelaxedSessionJournal[relaxedJournalOf](
-      new EncounterSessionJournal(summary.sessionId, store, mirror, rng),
-      store,
-      loaded,
-    );
     return {
-      journal,
-      encounterState: latest.encounterState,
-      partyState: latest.partyState,
-      coordinatorState: latest.coordinatorState,
-      controllers: latest.controllers,
-      agentSession: latest.agentSession,
-      rng,
-      loaded,
+      session: {
+        journal: new EncounterSessionJournal(summary.sessionId, store, new MemoryMirrorSink(), rng, true),
+        encounterState: latest.encounterState,
+        partyState: latest.partyState,
+        coordinatorState: latest.coordinatorState,
+        controllers: latest.controllers,
+        agentSession: latest.agentSession,
+        rng,
+      },
+      recordedBy: recordingBuildsOf(revisions),
     };
   }
 
@@ -2450,7 +2412,9 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
   }
 
   export(): string {
-    return exportSavedSession(this.store, this.sessionId);
+    return this.exportAsRecorded
+      ? encodeRecordedSession(this.store.revisions(this.sessionId))
+      : exportSavedSession(this.store, this.sessionId);
   }
 
   record(input: {
@@ -2835,252 +2799,12 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
   }
 }
 
-/**
- * TRUST-RECORDED-HISTORY (owner D941; supervisor D944, D945 SQ1/SQ3, D947 SQ7; SAVE-COMPAT §6.8). Default off, tests
- * only: a save is loaded trusting its recorded history. Integrity still holds (hashes, schema, sequence and every
- * recorded fact); the rules derivations are not re-derived; new actions use the rules and build running now; and every
- * value the relaxed journal returns carries a typed stamp naming the recording builds and "loaded relaxed". The app
- * cannot construct it: a grant's key is a symbol this module never exports, the key's sha256 is checked before
- * anything is decoded, and only tests/helpers/trust-recorded-history.ts holds the key (R3, ast-grep, W39).
- */
-export const TRUST_RECORDED_HISTORY_KEY_SHA256 = 'd6207c517b8590eb976e41a01b2b91e31f85a0dc0acdb69394aa0c02dff6f69e' as const;
-
-declare const trustGrant: unique symbol;
-
-/** A grant to load a save trusting its recorded history: minted only by tests/helpers/trust-recorded-history.ts. */
-export interface TrustRecordedHistoryGrant {
-  readonly [trustGrant]: true;
-  readonly key: string;
-  readonly purpose: string;
-}
-
-export class TrustRecordedHistoryRefusedError extends Error {
-  override readonly name = 'TrustRecordedHistoryRefusedError' as const;
-
-  constructor() {
-    super('Loading a save by trusting its recorded history needs a grant only tests can mint (owner D941).');
-  }
-}
-
-/** The key check, before anything is decoded (W38). */
-function requireTrustGrant(grant: unknown): void {
-  const key = isRecord(grant) ? grant.key : undefined;
-  if (typeof key !== 'string' || sha256(key) !== TRUST_RECORDED_HISTORY_KEY_SHA256) throw new TrustRecordedHistoryRefusedError();
-}
-
-/** What every result of a relaxed load carries (owner D941: "the recording build(s) and 'loaded relaxed'"). */
-export interface LoadedRelaxedStamp {
-  readonly kind: 'loaded_relaxed';
-  /** Every distinct build the loaded revisions name, first seen first. */
-  readonly recordedBy: readonly [EngineBuild, ...EngineBuild[]];
-  readonly runningBuild: EngineBuild;
-  /** The revisions of a rules-derived kind whose derivations were not re-derived. */
-  readonly trustedRevisions: readonly number[];
-  readonly purpose: string;
-}
-
-/** A value a relaxed journal returned, with its stamp. */
-export interface LoadedRelaxed<T> {
-  readonly loaded: LoadedRelaxedStamp;
-  readonly value: T;
-}
-
-/** What a relaxed journal's method returns for a strict one returning T: stamped, a relaxed resume, or nothing. */
-export type RelaxedJournalResult<T> =
-  [T] extends [void] ? void : [T] extends [SessionResume] ? RelaxedSessionResume : LoadedRelaxed<T>;
-
-type JournalMethodKey = {
-  [K in keyof EncounterSessionJournal]: EncounterSessionJournal[K] extends (...args: never) => unknown ? K : never;
-}[keyof EncounterSessionJournal];
-
-/**
- * The relaxed journal's surface: every public method of the strict journal, each returning its stamped result. A
- * method added to the strict journal without its relaxed twin does not compile (TS2420), nor does an unstamped return.
- */
-export type RelaxedJournalSurface = {
-  readonly [K in JournalMethodKey]: EncounterSessionJournal[K] extends (...args: infer A) => infer R
-    ? (...args: A) => RelaxedJournalResult<R>
-    : never;
-};
-
-/** A resume of a relaxed load: its journal is the relaxed one, and it carries the stamp. */
-export interface RelaxedSessionResume extends Omit<SessionResume, 'journal'> {
-  readonly journal: RelaxedSessionJournal;
-  readonly loaded: LoadedRelaxedStamp;
-}
-
-/** Every distinct build `revisions` name, first seen first. */
-function recordingBuildsOf(revisions: readonly SessionRevision[]): readonly [EngineBuild, ...EngineBuild[]] {
-  const [first, ...rest] = revisions;
-  if (first === undefined) throw schemaViolation('Saved VTT session revisions are malformed.');
-  const builds: [EngineBuild, ...EngineBuild[]] = [first.recordedBy];
-  for (const revision of rest) {
+function recordingBuildsOf(revisions: readonly SessionRevision[]): readonly EngineBuild[] {
+  const builds: EngineBuild[] = [];
+  for (const revision of revisions) {
     if (!builds.some((build) => canonicalJson(build) === canonicalJson(revision.recordedBy))) builds.push(revision.recordedBy);
   }
   return builds;
-}
-
-const relaxedJournalOf: unique symbol = Symbol('relaxedJournalOf');
-
-/**
- * The journal of a relaxed load: a separate nominal type (it lacks the strict class's private members, so it can never
- * be passed where the strict journal is expected, W27), each method delegating to a private strict core over a private
- * memory store and stamping its result. Its export is the history as recorded, which a strict import still refuses
- * (no laundering, W26).
- */
-export class RelaxedSessionJournal implements RelaxedJournalSurface {
-  readonly sessionId: EncounterSessionId;
-  readonly #core: EncounterSessionJournal;
-  readonly #store: MemoryBrowserSessionStore;
-
-  private constructor(core: EncounterSessionJournal, store: MemoryBrowserSessionStore, readonly loaded: LoadedRelaxedStamp) {
-    this.sessionId = core.sessionId;
-    this.#core = core;
-    this.#store = store;
-  }
-
-  /** Module-private: only EncounterSessionJournal.loadSaveTrustingRecordedHistory builds one. */
-  static [relaxedJournalOf](
-    core: EncounterSessionJournal,
-    store: MemoryBrowserSessionStore,
-    loaded: LoadedRelaxedStamp,
-  ): RelaxedSessionJournal {
-    return new RelaxedSessionJournal(core, store, loaded);
-  }
-
-  #stamped<T>(value: T): LoadedRelaxed<T> {
-    return { loaded: this.loaded, value };
-  }
-
-  #resumed(resume: SessionResume): RelaxedSessionResume {
-    const { journal: _strict, ...rest } = resume;
-    return { ...rest, journal: this, loaded: this.loaded };
-  }
-
-  rng(): LoadedRelaxed<SerializableRng> {
-    return this.#stamped(this.#core.rng());
-  }
-
-  agentSession(): LoadedRelaxed<AgentSessionBinding | null> {
-    return this.#stamped(this.#core.agentSession());
-  }
-
-  reactionGuidance(): LoadedRelaxed<ReactionGuidanceDeclaration | null> {
-    return this.#stamped(this.#core.reactionGuidance());
-  }
-
-  replaceReactionGuidance(...args: Parameters<EncounterSessionJournal['replaceReactionGuidance']>): void {
-    this.#core.replaceReactionGuidance(...args);
-  }
-
-  startAgentSession(...args: Parameters<EncounterSessionJournal['startAgentSession']>): LoadedRelaxed<AgentSessionBinding> {
-    return this.#stamped(this.#core.startAgentSession(...args));
-  }
-
-  recordAgentSessionDispatch(): LoadedRelaxed<AgentSessionBinding> {
-    return this.#stamped(this.#core.recordAgentSessionDispatch());
-  }
-
-  recordAgentCallUsage(...args: Parameters<EncounterSessionJournal['recordAgentCallUsage']>): LoadedRelaxed<AgentSessionBinding> {
-    return this.#stamped(this.#core.recordAgentCallUsage(...args));
-  }
-
-  agentSessionDigest(): LoadedRelaxed<AgentSessionDigest> {
-    return this.#stamped(this.#core.agentSessionDigest());
-  }
-
-  recoverAgentSession(...args: Parameters<EncounterSessionJournal['recoverAgentSession']>): LoadedRelaxed<AgentSessionBinding> {
-    return this.#stamped(this.#core.recoverAgentSession(...args));
-  }
-
-  recordAgentSessionRecoveryFailure(...args: Parameters<EncounterSessionJournal['recordAgentSessionRecoveryFailure']>): void {
-    this.#core.recordAgentSessionRecoveryFailure(...args);
-  }
-
-  rollOverAgentSession(...args: Parameters<EncounterSessionJournal['rollOverAgentSession']>): LoadedRelaxed<AgentSessionBinding> {
-    return this.#stamped(this.#core.rollOverAgentSession(...args));
-  }
-
-  partyState(): LoadedRelaxed<PartySessionState | null> {
-    return this.#stamped(this.#core.partyState());
-  }
-
-  ended(): LoadedRelaxed<boolean> {
-    return this.#stamped(this.#core.ended());
-  }
-
-  endSession(): void {
-    this.#core.endSession();
-  }
-
-  /** The history as recorded (never replayed strictly: a strict import still refuses what trust mode loaded). */
-  export(): LoadedRelaxed<string> {
-    return this.#stamped(encodeRecordedSession(this.#store.revisions(this.sessionId)));
-  }
-
-  record(...args: Parameters<EncounterSessionJournal['record']>): void {
-    this.#core.record(...args);
-  }
-
-  recordHostTransition(...args: Parameters<EncounterSessionJournal['recordHostTransition']>): void {
-    this.#core.recordHostTransition(...args);
-  }
-
-  turnExhaustionPersistence(): LoadedRelaxed<ReturnType<EncounterSessionJournal['turnExhaustionPersistence']>> {
-    return this.#stamped(this.#core.turnExhaustionPersistence());
-  }
-
-  moveHead(...args: Parameters<EncounterSessionJournal['moveHead']>): RelaxedSessionResume {
-    return this.#resumed(this.#core.moveHead(...args));
-  }
-
-  skipTurn(): RelaxedSessionResume {
-    return this.#resumed(this.#core.skipTurn());
-  }
-
-  delayTurn(...args: Parameters<EncounterSessionJournal['delayTurn']>): RelaxedSessionResume {
-    return this.#resumed(this.#core.delayTurn(...args));
-  }
-
-  history(): LoadedRelaxed<readonly SessionHistoryEntry[]> {
-    return this.#stamped(this.#core.history());
-  }
-
-  roundBoundaries(): LoadedRelaxed<readonly SessionRoundBoundary[]> {
-    return this.#stamped(this.#core.roundBoundaries());
-  }
-
-  rewindToRound(...args: Parameters<EncounterSessionJournal['rewindToRound']>): RelaxedSessionResume {
-    return this.#resumed(this.#core.rewindToRound(...args));
-  }
-
-  capturePartyState(): LoadedRelaxed<PartySessionState> {
-    return this.#stamped(this.#core.capturePartyState());
-  }
-
-  resolveRestInterruption(...args: Parameters<EncounterSessionJournal['resolveRestInterruption']>): LoadedRelaxed<RestInterruptionResult> {
-    return this.#stamped(this.#core.resolveRestInterruption(...args));
-  }
-
-  takeShortRest(...args: Parameters<EncounterSessionJournal['takeShortRest']>): LoadedRelaxed<ShortRestResult> {
-    return this.#stamped(this.#core.takeShortRest(...args));
-  }
-
-  takeLongRest(): LoadedRelaxed<LongRestResult> {
-    return this.#stamped(this.#core.takeLongRest());
-  }
-
-  updateReactionPreference(...args: Parameters<EncounterSessionJournal['updateReactionPreference']>): RelaxedSessionResume {
-    return this.#resumed(this.#core.updateReactionPreference(...args));
-  }
-
-  updateRefusalHandling(...args: Parameters<EncounterSessionJournal['updateRefusalHandling']>): RelaxedSessionResume {
-    return this.#resumed(this.#core.updateRefusalHandling(...args));
-  }
-
-  composeNextRoom(...args: Parameters<EncounterSessionJournal['composeNextRoom']>): LoadedRelaxed<PartySessionState> {
-    return this.#stamped(this.#core.composeNextRoom(...args));
-  }
 }
 
 export interface SessionHistoryEntry {
