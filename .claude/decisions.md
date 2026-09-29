@@ -3851,5 +3851,15 @@ LANDED: the branch was rebased (records only) onto c0e9acd3. Its tree outside .c
 - The empty legacy directory tests/test-input-boundary-probes/ is removed from main's working tree (untracked, empty).
 NEXT: the SAVE-COMPAT implementation (wave 14).
 
-Next free id: D950.
+## D950 — 2026-09-29 08:28 — SAVE-COMPAT WAVE 14 STOPPED BY THE CLAUDE WEEKLY LIMIT; CODEX FINISHES C6 (owner)
+
+WHAT HAPPENED: wave 14 (wf_aa407a34-740, one Opus agent) failed with "You've hit your weekly limit · resets Oct 3, 1am (America/New_York)" after 955,666 tokens and 356 tool uses. It returned no structured output.
+STATE (verified by me, 2026-09-29 08:26): branch claude/savecompat in dnd-probe-savecompat-8fba has 9 commits over a03d90c7 and a clean tree: C0 7694caa2, C1 e2e5266b, C2 822f8f7f + W34b f7b2bc41, C3 ade44fd6, C4 a3f821be, C5 b821e1cf + W23 8c4cae9d + W26 d5ed7baf. 57 files, +4,783/−1,254. Evidence in .tmp/runs/save-compat/impl/: plan-final.md, red/ logs for C0–C5, 63 mutant dirs, and pins logs at every commit.
+NOT VERIFIED: the agent's claims (red-first witnesses, mutant kills, pin values). No gate and no codex review have run. C6 (toggle registry: W28, W30, M40) is not started.
+QUESTION (AskUserQuestion; recommendation "Codex finishes C6"). OWNER chose: "Codex finishes C6 (Recommended)".
+- Codex gpt-6-sol (workspace-write) writes C6 on the same branch, in that clone only. The supervisor verifies C0–C6, runs the gates, and then sends the branch to a fresh read-only codex review.
+- No Claude subagents until the reset.
+NEXT: the C6 dispatch; then verification of C0–C6.
+
+Next free id: D951.
 
