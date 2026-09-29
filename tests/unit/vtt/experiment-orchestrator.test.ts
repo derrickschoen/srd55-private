@@ -471,7 +471,9 @@ describe('E04 state/context compression registration', () => {
           ? 300
           : entry.armId === 'initial-snapshot-revision-deltas' ? 200 : 100;
         return decodeExperimentTableRecord({
-          ...structuredClone(source),
+          ...source,
+          calls: [],
+          quality: { ...source.quality, rolloutInputCaptures: [] },
           preregistrationDigest: preregistration.digest,
           batchId: entry.batchId,
           pairId: entry.pairId,
@@ -496,7 +498,9 @@ describe('E04 state/context compression registration', () => {
         const source = e04Records.find((record) => record.armId === entry.armId);
         if (source === undefined) throw new Error(`Missing E04 source arm ${entry.armId}.`);
         return decodeExperimentTableRecord({
-          ...structuredClone(source),
+          ...source,
+          calls: [],
+          quality: { ...source.quality, rolloutInputCaptures: [] },
           preregistrationDigest: preregistration.digest,
           batchId: entry.batchId,
           pairId: entry.pairId,
@@ -1226,7 +1230,9 @@ describe('E01 experiment registry and orchestration', () => {
         maximumActive = Math.max(maximumActive, active);
         await Promise.resolve();
         const record = decodeExperimentTableRecord({
-          ...structuredClone(liveRecord),
+          ...liveRecord,
+          calls: [],
+          quality: { ...liveRecord.quality, rolloutInputCaptures: [] },
           preregistrationDigest: preregistration.digest,
           armId: entry.armId,
           batchId: entry.batchId,

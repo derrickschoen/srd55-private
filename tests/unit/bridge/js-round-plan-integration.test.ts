@@ -3,9 +3,11 @@ import type { ControllerRequest } from '../../../src/combat/controllers';
 import { createEncounter, type EncounterState } from '../../../src/combat/encounter';
 import type { EncounterCommand } from '../../../src/combat/events';
 import { projectDmView } from '../../../src/combat/visibility';
+import { mulberry32 } from '../../../src/combat/random';
 import { damageType, dieSides, feet } from '../../../src/combat/values';
 import {
   agentSessionId,
+  encounterBranchId,
   encounterSessionId,
   type CombatantId,
 } from '../../../src/combat/values';
@@ -39,13 +41,15 @@ import {
 } from '../../../src/vtt/dm-bridge/turn-program-types';
 import {
   ReplayTranscriptRecorder,
+  createReplayBundle,
   decodeReplayBundle,
   emptyFleetTelemetry,
   exportReplayBundle,
   replayBundle,
   type ReplayBundle,
 } from '../../../src/vtt/replay';
-import { recordScriptedReferenceSkirmish } from '../../../src/vtt/scripted-skirmish';
+import { encounterStateFromApprovedFixture } from '../../../src/vtt/generated-encounter-fixtures';
+import { EncounterSessionJournal, MemoryBrowserSessionStore, MemoryMirrorSink } from '../../../src/vtt/session-persistence';
 import { TEST_APPROVED_FIRST_SKIRMISH_FIXTURE } from '../../../src/vtt/test-approved-first-skirmish';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
@@ -672,7 +676,27 @@ describe('JS round-plan protocol and replay integration', () => {
       },
       fleet: emptyFleetTelemetry(),
     });
-    const baseline = recordScriptedReferenceSkirmish().bundle;
+    const store = new MemoryBrowserSessionStore();
+    const sessionId = encounterSessionId('encounter:js-program-replay');
+    EncounterSessionJournal.create({
+      sessionId,
+      branchId: encounterBranchId('branch:js-program-replay'),
+      encounterState: encounterStateFromApprovedFixture(TEST_APPROVED_FIRST_SKIRMISH_FIXTURE),
+      coordinatorState: IDLE,
+      controllers: [],
+      rng: mulberry32(0x317010),
+      store,
+      mirror: new MemoryMirrorSink(),
+    });
+    const baseline = createReplayBundle({
+      fixture: TEST_APPROVED_FIRST_SKIRMISH_FIXTURE,
+      revisions: store.revisions(sessionId),
+      transcripts: [],
+      build: { buildId: 'js-program-replay', commit: 'test' },
+      protocolVersions: [],
+      licensingVersions: [],
+      gapReports: [],
+    });
     const bundle: ReplayBundle = { ...baseline, transcripts: recorder.records() };
     const bytes = exportReplayBundle(bundle);
     const decoded = decodeReplayBundle(bytes);

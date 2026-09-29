@@ -2667,7 +2667,7 @@ describe('database migration chain', () => {
     expect(() => lifecycle.open()).toThrow(
       'UNIQUE constraint failed: catalog_content_identities.content_key',
     );
-    expect(await storage.exportFile()).toEqual(before);
+    expectIdenticalDatabaseImages(await storage.exportFile(), before, 'pre-0020 refusal image');
   }, 20_000);
 
   it('moves every inline class-feature effect into its child table', async () => {
@@ -3282,7 +3282,7 @@ describe('database migration chain', () => {
     expect(() => lifecycle.open()).toThrow(
       'background_equipment_items id 302 coin_copper=5050 cannot be rendered as whole GP',
     );
-    expect(await storage.exportFile()).toEqual(before);
+    expectIdenticalDatabaseImages(await storage.exportFile(), before, 'historical copper refusal image');
   }, 20_000);
 
   it('renders a large whole-GP value without clamping it', async () => {
@@ -3339,7 +3339,7 @@ describe('database migration chain', () => {
           `character_weapons id 37 ${column}=${value}`,
         );
 
-        expect(await storage.exportFile()).toEqual(before);
+        expectIdenticalDatabaseImages(await storage.exportFile(), before, 'historical range refusal image');
       },
       timeoutMs,
     );
@@ -3502,7 +3502,7 @@ describe('database migration chain', () => {
     expect(() => lifecycle.open()).toThrow('migration_failure_injected');
 
     const after = await storage.exportFile();
-    expect(after).toEqual(original);
+    expectIdenticalDatabaseImages(after, original, 'mid-chain failure image');
     const inspect = openDatabaseImage(sqlite3, after);
     try {
       expect(databaseSchemaSignature(inspect)).toBe(originalSignature);
@@ -3581,7 +3581,7 @@ describe('database migration chain', () => {
     lifecycle.reopen();
     const secondExport = await lifecycle.exportBytes();
 
-    expect(secondExport).toEqual(firstExport);
+    expectIdenticalDatabaseImages(secondExport, firstExport, 'reopened migrated image');
     expect(
       lifecycle.database.allRaw('SELECT name FROM characters'),
     ).toEqual([{ name: 'Migrated import' }]);

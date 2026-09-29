@@ -61,6 +61,13 @@ function mutable(bundle: ReplayBundle): MutableReplayBundle {
   return structuredClone(bundle) as unknown as MutableReplayBundle;
 }
 
+let defaultGate: ReturnType<typeof recordScriptedReferenceSkirmish> | undefined;
+
+function defaultScriptedGate(): ReturnType<typeof recordScriptedReferenceSkirmish> {
+  defaultGate ??= recordScriptedReferenceSkirmish();
+  return structuredClone(defaultGate);
+}
+
 function expectDivergence(
   action: () => unknown,
   source: ReplayDivergenceError['source'],
@@ -186,7 +193,7 @@ describe('increment 10 deterministic replay and playable exit', () => {
   });
 
   it('PLAYABLE-EXIT replays the four-round scripted skirmish offline byte-for-byte', () => {
-    const gate = recordScriptedReferenceSkirmish();
+    const gate = defaultScriptedGate();
     const replayed = replayBundle(gate.bundle, TEST_APPROVED_FIRST_SKIRMISH_FIXTURE);
     const transitions = gate.bundle.revisions.map((entry) => entry.revision.transition.kind);
     const events = gate.bundle.revisions.flatMap((entry) =>
@@ -226,7 +233,7 @@ describe('increment 10 deterministic replay and playable exit', () => {
   });
 
   it('M61-TELEMETRY-OMITS-RNG-TRANSITION identifies the first missing RNG post-state', () => {
-    const gate = recordScriptedReferenceSkirmish();
+    const gate = defaultScriptedGate();
     const candidate = mutable(gate.bundle);
     const index = candidate.revisions.findIndex((entry) => entry.rng.post.draws > entry.rng.pre.draws);
     expect(index).toBeGreaterThanOrEqual(0);
@@ -270,7 +277,7 @@ describe('increment 10 deterministic replay and playable exit', () => {
   });
 
   it('M62-CONTROLLER-RESPONSE-MISATTRIBUTED rejects a valid response linked to the prior request', () => {
-    const gate = recordScriptedReferenceSkirmish();
+    const gate = defaultScriptedGate();
     const candidate = mutable(gate.bundle);
     const requests = gate.bundle.transcripts.filter((entry) => entry.kind === 'controller_request');
     const first = requests[0];
@@ -301,7 +308,7 @@ describe('increment 10 deterministic replay and playable exit', () => {
   });
 
   it('M63-LATENCY-CHANGES-REPLAY-HASH keeps clocks outside authoritative replay hashing', () => {
-    const gate = recordScriptedReferenceSkirmish();
+    const gate = defaultScriptedGate();
     const candidate = mutable(gate.bundle);
     const modeled = candidate.transcripts.find((entry) => entry.fleet.latencyMs !== null);
     if (modeled === undefined || modeled.fleet.latencyMs === null) throw new Error('Missing model telemetry.');
@@ -318,11 +325,11 @@ describe('increment 10 deterministic replay and playable exit', () => {
     const implementation = replayBundle.toString();
     expect(replayBundle.length).toBe(2);
     expect(implementation).not.toMatch(/\.choose\s*\(|\.exchange\s*\(/u);
-    expect(() => replayBundle(recordScriptedReferenceSkirmish().bundle)).not.toThrow();
+    expect(() => replayBundle(defaultScriptedGate().bundle)).not.toThrow();
   });
 
   it('M65-VOID-BRANCH-REPLAYED-AS-LIVE refuses a void revision marked active', () => {
-    const gate = recordScriptedReferenceSkirmish();
+    const gate = defaultScriptedGate();
     const candidate = mutable(gate.bundle);
     const index = candidate.revisions.findIndex((entry) => entry.void);
     expect(index).toBeGreaterThanOrEqual(0);
@@ -336,7 +343,7 @@ describe('increment 10 deterministic replay and playable exit', () => {
   });
 
   it('M66-PROJECTION-DIVERGENCE-IGNORED pinpoints the first bad player projection hash', () => {
-    const gate = recordScriptedReferenceSkirmish();
+    const gate = defaultScriptedGate();
     const candidate = mutable(gate.bundle);
     const index = candidate.revisions.findIndex((entry) => entry.projectionHashes.players.length > 0);
     candidate.revisions[index]!.projectionHashes.players[0]!.hash = '0'.repeat(64);
@@ -349,7 +356,7 @@ describe('increment 10 deterministic replay and playable exit', () => {
   });
 
   it('CORRUPTION-EVENT identifies the first bad event record and field', () => {
-    const gate = recordScriptedReferenceSkirmish();
+    const gate = defaultScriptedGate();
     const candidate = mutable(gate.bundle);
     const index = candidate.revisions.findIndex((entry) =>
       entry.revision.transition.kind === 'reducer_applied' &&
@@ -365,7 +372,7 @@ describe('increment 10 deterministic replay and playable exit', () => {
   });
 
   it('CORRUPTION-TRANSCRIPT identifies the first bad transcript content record', () => {
-    const gate = recordScriptedReferenceSkirmish();
+    const gate = defaultScriptedGate();
     const candidate = mutable(gate.bundle);
     const index = candidate.transcripts.findIndex((entry) => entry.kind === 'narration');
     candidate.transcripts[index]!.kind = 'resume';
@@ -378,7 +385,7 @@ describe('increment 10 deterministic replay and playable exit', () => {
   });
 
   it('OWN-TOKEN-COUNTS-CANNOT-INFLUENCE-REDUCER keeps usage out of state and view hashes', () => {
-    const gate = recordScriptedReferenceSkirmish();
+    const gate = defaultScriptedGate();
     const candidate = mutable(gate.bundle);
     const modeled = candidate.transcripts.find((entry) => entry.fleet.tokenCounts !== null);
     if (modeled?.fleet.tokenCounts === null || modeled === undefined) throw new Error('Missing token telemetry.');
@@ -390,7 +397,7 @@ describe('increment 10 deterministic replay and playable exit', () => {
   });
 
   it('CORRECTION-ATTEMPTS are schema-validated telemetry and remain non-authoritative', () => {
-    const gate = recordScriptedReferenceSkirmish();
+    const gate = defaultScriptedGate();
     const candidate = mutable(gate.bundle);
     const modeled = candidate.transcripts.find((entry) => entry.fleet.correctionAttempts !== null);
     if (modeled === undefined) throw new Error('Missing correction telemetry.');
@@ -408,7 +415,7 @@ describe('increment 10 deterministic replay and playable exit', () => {
   });
 
   it('OWN-BUNDLE-VERSION-OUTSIDE-WINDOW is refused while the adjacent migration remains exact', () => {
-    const gate = recordScriptedReferenceSkirmish();
+    const gate = defaultScriptedGate();
     expect(decodeReplayBundle(exportReplayBundleV1ForMigrationTest(gate.bundle))).toEqual(gate.bundle);
     for (const version of [0, 9]) {
       const candidate = mutable(gate.bundle);
@@ -466,7 +473,7 @@ describe('increment 10 deterministic replay and playable exit', () => {
   });
 
   it('REPLAY-COMMAND reads only the recorded bundle and approved fixture', async () => {
-    const gate = recordScriptedReferenceSkirmish();
+    const gate = defaultScriptedGate();
     const requested: string[] = [];
     const proof = await runVttReplayCommand(
       ['recording.json', 'fixture.json'],

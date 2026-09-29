@@ -1,6 +1,7 @@
 import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseContext } from '../../../src/db/database';
+import { openDatabaseImage } from '../../../src/db/database-lifecycle';
 import {
   CharacterClassMembershipError,
   ClassProgressionRowMissingError,
@@ -23,7 +24,24 @@ import {
   srdSubclassClassNames,
 } from '../../../src/rules/srd-subclasses-reader';
 import { bundledSrdSubclassManifest } from '../../../src/rules/srd-subclasses';
-import { openTestDatabase } from '../../helpers/open-db';
+import { getSqlite3, openTestDatabase } from '../../helpers/open-db';
+import { expectIdenticalDatabaseImages } from '../../helpers/database-image-equality';
+
+let seededImage: Promise<Uint8Array> | undefined;
+
+async function openClassProgressionDatabase(): Promise<Database> {
+  const sqlite3 = await getSqlite3();
+  seededImage ??= (async () => {
+    const fresh = await openTestDatabase();
+    try {
+      applicationSeed(new DatabaseContext(fresh));
+      return sqlite3.capi.sqlite3_js_db_export(fresh).slice();
+    } finally {
+      fresh.close();
+    }
+  })();
+  return openDatabaseImage(sqlite3, (await seededImage).slice(), { readonly: false });
+}
 
 function defect(run: () => unknown): unknown {
   try {
@@ -186,13 +204,29 @@ describe('persisted class progression catalog', () => {
   let db: DatabaseContext;
 
   beforeEach(async () => {
-    connection = await openTestDatabase();
+    connection = await openClassProgressionDatabase();
     db = new DatabaseContext(connection);
-    applicationSeed(db);
   });
 
   afterEach(() => {
     connection.close();
+  });
+
+  it('clones the byte-identical seeded image independently of a fresh seed', async () => {
+    const secondClone = await openClassProgressionDatabase();
+    try {
+      const sqlite3 = await getSqlite3();
+      expectIdenticalDatabaseImages(
+        sqlite3.capi.sqlite3_js_db_export(connection).slice(),
+        await seededImage!,
+        'class progression seeded clone',
+      );
+      connection.exec("INSERT INTO characters (name) VALUES ('Clone only')");
+      expect(connection.selectValue('SELECT count(*) FROM characters')).toBe(1);
+      expect(secondClone.selectValue('SELECT count(*) FROM characters')).toBe(0);
+    } finally {
+      secondClone.close();
+    }
   });
 
   it('persists the bundled class and subclass catalogs at exact cardinality', () => {
