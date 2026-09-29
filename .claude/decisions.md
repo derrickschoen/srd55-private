@@ -4050,5 +4050,23 @@ SHA-NI's contribution, measured by masking OPENSSL_ia32cap bit 29: node createHa
 
 **The async-conversion report is still in progress.** Community research is done (codex session 01a0ee6d-80da-7ee3-9bfd-045be1c03e6d). The call-graph cost analysis is running (01a0ee6d-809c-7c53-b807-fafd37015576).
 
-Next free id: D961.
+### D961 — 2026-09-29 14:48 — SHA-SPLIT: browser SHA-256 is @noble/hashes, not hash-wasm (owner; amends D959)
+
+**Owner (verbatim):** "looks like @noble/hashes is close enough to hash-wasm, lets use noble instead".
+
+**What changes.**
+- The browser file is `bytesToHex(nobleSha256(utf8ToBytes(value)))` from @noble/hashes 2.4.0 (MIT, exact version). It is synchronous, with no init and no top-level await.
+- The top-level-await and worker checks from D959 are dropped.
+- The named mutant becomes a latin-1 truncation (`Uint8Array.from(value, c => c.charCodeAt(0))` in place of utf8ToBytes), killed by the non-ASCII differential vectors.
+
+**VERIFIED by me.** The noble browser file matches node:crypto on 10 of 10 vectors: empty, lone surrogates, astral characters, the 55/56/64-byte boundaries and 1 MB. My benchmark (D959) timed noble at 1.75 / 6.8 / 305 / 5112 µs per call against hash-wasm's 0.96 / 4.4 / 266 / 4299, at 64 B / 1 KB / 64 KB / 1 MB.
+
+**How the switch was done.**
+- I stopped the codex draft by PID during `npm run build`; no orphaned build process remained.
+- Its WIP (the '#sha256' rename across 104 files) is committed as 4a857963.
+- I swapped hash-wasm for @noble/hashes, and wrote the 6-line browser file myself (commit after 4a857963). Under the consensus rules it needs the independent codex review before landing.
+- I resumed the same codex session (full UUID 01a0ee77-090f-7503-8c8a-d7af0a422cc8) with resume1.md: revert unplanned WIP edits, tsc, build, resolution proof, differential test and mutant, and smoke files.
+- The resumed session reports `network access enabled` from user config. The brief says no network is needed.
+
+Next free id: D962.
 
