@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import type { EngineBuild } from '../src/vtt/engine-build';
+import type { EngineBuild, EngineCommit } from '../src/vtt/engine-build';
 import {
   importSavedSession,
   MemoryBrowserSessionStore,
@@ -21,7 +21,12 @@ import {
  * a stored stream as parsed revisions rather than texts; the driver passes texts, then the parsed revisions if
  * those are refused as malformed.
  *
- * argv[2]: a JSON file { "source": ArchivedSource }. stdout: one line of JSON, a DriverReport.
+ * It replays at the build it is given (SAVE-COMPAT, D929/D946): the recording commit, passed as the running build, so
+ * a turn that does not replay there is an integrity fault of the save. A commit before SAVE-COMPAT ignores the
+ * argument (its replay takes none).
+ *
+ * argv[2]: a JSON file { "source": ArchivedSource, "replayAt": EngineCommit }. stdout: one line of JSON, a
+ * DriverReport.
  */
 
 /**
@@ -59,7 +64,8 @@ function loadedRevisions(source: ArchivedSource): readonly SessionRevision[] {
       try {
         return migrateStoredSessionRevisions(texts, REPLAY_RECORDS_NOTHING);
       } catch (error) {
-        if (!(error instanceof TypeError) || !error.message.includes('Stored VTT session revision stream is malformed')) throw error;
+        // By message: this is a TypeError at the commits it is for, a typed integrity error since SAVE-COMPAT.
+        if (!(error instanceof Error) || !error.message.includes('Stored VTT session revision stream is malformed')) throw error;
         // A commit before fix1: its stored-stream loader takes parsed revisions.
         const parsed = texts.map((text): unknown => JSON.parse(text)) as unknown as readonly string[];
         return migrateStoredSessionRevisions(parsed, REPLAY_RECORDS_NOTHING);
@@ -68,10 +74,10 @@ function loadedRevisions(source: ArchivedSource): readonly SessionRevision[] {
   }
 }
 
-/** Null when the first `count` revisions replay under this commit's reducer, else why not. */
-function prefixRefusal(revisions: readonly SessionRevision[], count: number): string | null {
+/** Null when the first `count` revisions replay under this commit's reducer, run as `replayAt`, else why not. */
+function prefixRefusal(revisions: readonly SessionRevision[], count: number, replayAt: EngineBuild): string | null {
   try {
-    replaySessionRevisions(revisions.slice(0, count));
+    replaySessionRevisions(revisions.slice(0, count), replayAt);
     return null;
   } catch (error) {
     return described(error);
@@ -83,19 +89,19 @@ function prefixRefusal(revisions: readonly SessionRevision[], count: number): st
  * smallest failing prefix (binary search; the prefix verdict is monotone). Turns after it are not checked: their
  * parent chain holds a turn that does not replay.
  */
-export function replayedTurns(revisions: readonly SessionRevision[]): readonly DriverTurn[] {
+export function replayedTurns(revisions: readonly SessionRevision[], replayAt: EngineBuild): readonly DriverTurn[] {
   let failedAt = revisions.length + 1;
-  let failure: string | null = prefixRefusal(revisions, revisions.length);
+  let failure: string | null = prefixRefusal(revisions, revisions.length, replayAt);
   if (failure !== null) {
     let low = 1;
     let high = revisions.length;
     while (low < high) {
       const middle = Math.floor((low + high) / 2);
-      if (prefixRefusal(revisions, middle) === null) low = middle + 1;
+      if (prefixRefusal(revisions, middle, replayAt) === null) low = middle + 1;
       else high = middle;
     }
     failedAt = low;
-    failure = prefixRefusal(revisions, low);
+    failure = prefixRefusal(revisions, low, replayAt);
   }
   return revisions.map((revision, index): DriverTurn => {
     const at = { revision: revision.revision, transition: revision.transition.kind };
@@ -106,14 +112,17 @@ export function replayedTurns(revisions: readonly SessionRevision[]): readonly D
 }
 
 function driverReport(archivePath: string): DriverReport {
-  const { source } = JSON.parse(readFileSync(archivePath, 'utf8')) as { readonly source: ArchivedSource };
+  const { source, replayAt } = JSON.parse(readFileSync(archivePath, 'utf8')) as {
+    readonly source: ArchivedSource;
+    readonly replayAt: EngineCommit;
+  };
   let revisions: readonly SessionRevision[];
   try {
     revisions = loadedRevisions(source);
   } catch (error) {
     return { loaded: false, error: described(error) };
   }
-  return { loaded: true, turns: replayedTurns(revisions) };
+  return { loaded: true, turns: replayedTurns(revisions, { kind: 'engine_commit', commit: replayAt }) };
 }
 
 const invokedPath = process.argv[1];

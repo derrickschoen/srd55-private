@@ -86,12 +86,17 @@ import {
 import {
   decodeEngineBuild,
   decodeRecordedEngine,
+  describeEngineBuild,
+  engineBuildRelation,
   RECORDED_BEFORE_ENGINE_RECORDING,
   recordedEngineOf,
   RUNNING_ENGINE_BUILD,
   type EngineBuild,
+  type EngineBuildRelation,
+  type EngineCommit,
   type RecordedEngine,
 } from './engine-build';
+import { EncounterRuleError } from '../combat/encounter-rule-error';
 import type { JsonValue } from '../domain/models';
 import {
   isAgentSessionBinding,
@@ -347,20 +352,232 @@ type MissingSessionTransitionKind = Exclude<
 const sessionTransitionKindInventoryIsComplete: MissingSessionTransitionKind extends never ? true : never = true;
 void sessionTransitionKindInventoryIsComplete;
 
-export class UnknownSessionTransitionKindError extends TypeError {
-  override readonly name = 'UnknownSessionTransitionKindError' as const;
+/**
+ * SAVE-COMPAT (owner D939, D946; supervisor D943-D945). Replaying a revision checks two kinds of thing, and a failure
+ * of each means something different:
+ *   a RECORDED FACT is checked against something the save itself records (a carried parent field, the transition's
+ *     own payload, session-persistence's own bookkeeping): a disagreement means the save was altered after it was
+ *     written, whatever build runs;
+ *   a DERIVATION is checked against what the rules (party-session-state, the reducer, the pacing advance, the v12
+ *     repair) derive from the recorded input: a disagreement under another build than the one that recorded the turn
+ *     is indeterminate (the rules changed, or the save was altered), and under the recording build it is integrity.
+ * The two label sets are closed and disjoint. A unit that makes a transition's recorded field rules-derived moves its
+ * label here, in the same commit, with a witness.
+ */
+export const RECORDED_FACT_CHECKS = [
+  'started agent binding', 'agent-start encounter state', 'agent-start coordinator state', 'agent-start party state',
+  'agent-start RNG state',
+  'dispatched agent binding', 'agent-dispatch encounter state', 'agent-dispatch coordinator state',
+  'agent-dispatch party state', 'agent-dispatch RNG state',
+  'agent call usage binding', 'agent-usage encounter state', 'agent-usage coordinator state', 'agent-usage party state',
+  'agent-usage RNG state',
+  'superseded agent binding', 'recovery successor binding', 'agent-recovery encounter state',
+  'agent-recovery coordinator state', 'agent-recovery party state', 'agent-recovery RNG state',
+  'failed agent-recovery encounter state', 'failed agent-recovery coordinator state',
+  'failed agent-recovery party state', 'failed agent-recovery RNG state',
+  'rollover superseded binding', 'rollover successor binding', 'agent-rollover encounter state',
+  'agent-rollover coordinator state', 'agent-rollover party state', 'agent-rollover RNG state',
+  'ended-session encounter state', 'ended-session coordinator state', 'ended-session party state',
+  'ended-session RNG state',
+  'party-capture encounter state', 'party-capture coordinator state', 'party-capture RNG state',
+  'Short Rest encounter state', 'Short Rest coordinator state',
+  'Long Rest encounter state', 'Long Rest coordinator state', 'Long Rest RNG state',
+  'room-composition RNG state',
+  'preloaded party Hit Points', 'preloaded party life state', 'preloaded party death state',
+  'preloaded party spell slots', 'preloaded party limited resources',
+  'skipped-turn party state', 'skipped-turn coordinator state',
+  'delayed-turn party state', 'delayed-turn coordinator state',
+  'head-move encounter state', 'head-move coordinator state', 'head-move party state', 'head-move RNG state',
+  'reaction preference RNG state',
+  'refusal-handling encounter state', 'refusal-handling coordinator state', 'refusal-handling RNG state',
+  'reducer party state',
+  'coordinator encounter state', 'coordinator RNG state', 'coordinator party state',
+  'unchanged agent binding',
+] as const;
 
-  constructor(readonly transitionKind: string) {
-    super(`Unknown VTT session transition kind ${transitionKind}.`);
+export const DERIVATION_CHECKS = [
+  'captured party state', 'rest-interruption party state', 'Short Rest party state', 'Short Rest rolls',
+  'Short Rest RNG state', 'Long Rest party state', 'Long Rest summary', 'advanced room party state',
+  'advanced room ordinal', 'skipped-turn state', 'skipped-turn events', 'skipped-turn RNG state',
+  'delayed-turn reposition', 'delayed-turn state', 'delayed-turn events', 'delayed-turn RNG state',
+  'reaction preference party state', 'reaction preference encounter state', 'refusal-handling party state',
+  'reducer state', 'reducer events', 'reducer RNG state', 'migrated root',
+] as const;
+
+export type RecordedFactCheck = (typeof RECORDED_FACT_CHECKS)[number];
+export type DerivationCheck = (typeof DERIVATION_CHECKS)[number];
+const DISJOINT_CHECKS: [Extract<RecordedFactCheck, DerivationCheck>] extends [never] ? true : never = true;
+void DISJOINT_CHECKS;
+
+/** The transitions whose replay re-derives a recorded result under the running rules. */
+export const DERIVED_TRANSITIONS = [
+  'party_state_captured', 'short_rest_completed', 'long_rest_completed', 'room_composed', 'turn_skipped',
+  'turn_delayed', 'reaction_preference_changed', 'refusal_handling_changed', 'reducer_applied',
+] as const satisfies readonly SessionTransition['kind'][];
+export type DerivedTransitionKind = (typeof DERIVED_TRANSITIONS)[number];
+
+/** How a derivation failed: the rules derived something else, or refused the recorded input outright. */
+export type DerivationFailure =
+  | { readonly kind: 'derivation_differs'; readonly check: DerivationCheck }
+  /** Only an EncounterRuleError (a typed rules refusal): `${error.name}: ${error.message}`. */
+  | { readonly kind: 'rules_refused_recorded_input'; readonly check: DerivationCheck; readonly error: string };
+
+/** What a hash that does not match covers. */
+export const SESSION_HASH_SUBJECTS = [
+  'bundle_fingerprint', 'revision_checksum', 'branch_rng_fingerprint', 'legacy_revision_checksum',
+  'recorded_build_checksum',
+] as const;
+export type SessionHashSubject = (typeof SESSION_HASH_SUBJECTS)[number];
+
+/** Why a save fails its own integrity: whatever build runs, it is not what a build wrote. */
+export type SessionIntegrityFault =
+  | {
+      readonly kind: 'recorded_fact_disagreement';
+      readonly revision: number;
+      readonly transition: SessionTransition['kind'];
+      readonly check: RecordedFactCheck;
+    }
+  | {
+      readonly kind: 'same_build_rederivation';
+      readonly revision: number;
+      readonly transition: DerivedTransitionKind | 'session_migrated';
+      readonly check: DerivationCheck;
+      readonly failure: DerivationFailure;
+      readonly build: EngineCommit;
+    }
+  | {
+      readonly kind: 'hash_mismatch';
+      readonly subject: SessionHashSubject;
+      readonly revision: number | null;
+      readonly detail: string;
+    }
+  | { readonly kind: 'schema_violation'; readonly detail: string }
+  | { readonly kind: 'sequence_violation'; readonly detail: string }
+  | { readonly kind: 'archive_refused'; readonly detail: string };
+
+function derivationFailureText(failure: DerivationFailure): string {
+  switch (failure.kind) {
+    case 'derivation_differs': return failure.check;
+    case 'rules_refused_recorded_input': return `${failure.check}: ${failure.error}`;
   }
 }
 
-export class SessionFingerprintMismatchError extends Error {
-  override readonly name = 'SessionFingerprintMismatchError' as const;
-
-  constructor() {
-    super('Saved VTT session fingerprint mismatch.');
+function integrityMessage(fault: SessionIntegrityFault): string {
+  switch (fault.kind) {
+    case 'same_build_rederivation':
+      return `Save refused: turn ${String(fault.revision)} (${fault.transition}) does not play out as recorded under ` +
+        `${describeEngineBuild({ kind: 'engine_commit', commit: fault.build })}, the build that recorded it ` +
+        `(${derivationFailureText(fault.failure)}). The save was altered after it was written, or this build is not ` +
+        'deterministic.';
+    case 'recorded_fact_disagreement':
+      return `Save refused: turn ${String(fault.revision)} (${fault.transition}) disagrees with its own recorded ` +
+        `history (${fault.check}). The save was altered after it was written.`;
+    case 'hash_mismatch':
+      return `Save refused: ${fault.detail} The save was altered or damaged after it was written.`;
+    case 'schema_violation':
+      return `Save refused: ${fault.detail} The save does not match the session format this build reads: it was ` +
+        'altered after it was written, or written by a build whose format this build does not read.';
+    case 'sequence_violation':
+      return `Save refused: ${fault.detail} Its revision chain is broken: it was altered or damaged after it was written.`;
+    case 'archive_refused':
+      return `Save refused: ${fault.detail}`;
   }
+}
+
+/** A save that fails its own integrity (D943): never the cross-build refusal, whatever build runs. */
+export class SessionIntegrityError extends Error {
+  override readonly name = 'SessionIntegrityError' as const;
+
+  constructor(readonly fault: SessionIntegrityFault) {
+    super(integrityMessage(fault));
+  }
+}
+
+function hashMismatch(subject: SessionHashSubject, revision: number | null, detail: string): SessionIntegrityError {
+  return new SessionIntegrityError({ kind: 'hash_mismatch', subject, revision, detail });
+}
+
+function schemaViolation(detail: string): SessionIntegrityError {
+  return new SessionIntegrityError({ kind: 'schema_violation', detail });
+}
+
+function sequenceViolation(detail: string): SessionIntegrityError {
+  return new SessionIntegrityError({ kind: 'sequence_violation', detail });
+}
+
+/** The revision number a raw (pre-decode) revision states, when it states one. */
+function statedRevision(value: unknown): number | null {
+  return isRecord(value) && Number.isSafeInteger(value.revision) ? value.revision as number : null;
+}
+
+/** A turn another build recorded that the build running now does not reproduce (owner D939, D946). */
+export interface RecordedByOtherBuild {
+  readonly revision: number;
+  readonly transition: DerivedTransitionKind | 'session_migrated';
+  readonly relation: Exclude<EngineBuildRelation, { readonly kind: 'same_commit' }>;
+  readonly failure: DerivationFailure;
+}
+
+/** The builds a cross-build relation names, as EngineBuilds. */
+function relationBuilds(
+  relation: RecordedByOtherBuild['relation'],
+): { readonly recorded: EngineBuild; readonly running: EngineBuild } {
+  switch (relation.kind) {
+    case 'other_commit':
+      return {
+        recorded: { kind: 'engine_commit', commit: relation.recorded },
+        running: { kind: 'engine_commit', commit: relation.running },
+      };
+    case 'unrecorded':
+      return { recorded: relation.recorded, running: relation.running };
+  }
+}
+
+function recordedByOtherBuildMessage(refusal: RecordedByOtherBuild): string {
+  const { recorded, running } = relationBuilds(refusal.relation);
+  const decider = recorded.kind === 'engine_commit'
+    ? ' Replaying the save at the recording build (tools/session-archive-replay.ts --save) tells which; export a ' +
+      'browser save first.'
+    : ' The recording build names no commit, so the offline replay (tools/session-archive-replay.ts --save) cannot ' +
+      'tell which either.';
+  return `Save refused: turn ${String(refusal.revision)} (${refusal.transition}) was recorded by ` +
+    `${describeEngineBuild(recorded)} and cannot be verified by ${describeEngineBuild(running)}, the build running ` +
+    `now: under this build that turn does not play out as recorded (${derivationFailureText(refusal.failure)}). ` +
+    'Either the rules changed between these builds or the save was altered after it was recorded; this build cannot ' +
+    `tell which.${decider}`;
+}
+
+/**
+ * The typed refusal of a turn another build recorded (owner D939, D946): it names both builds, says that either the
+ * rules changed or the save was altered and that this build cannot tell which, and points to the offline replay at
+ * the recording build, which can.
+ */
+export class SessionRecordedByOtherBuildError extends Error {
+  override readonly name = 'SessionRecordedByOtherBuildError' as const;
+
+  constructor(readonly refusal: RecordedByOtherBuild) {
+    super(recordedByOtherBuildMessage(refusal));
+  }
+}
+
+/**
+ * A derivation of revision `revision` failed. The build that recorded THAT revision decides (D943): the build running
+ * now recorded it, so it is integrity; another build (or either side unrecorded), so it is the cross-build refusal.
+ */
+function derivationFailed(
+  revision: SessionRevision,
+  transition: DerivedTransitionKind | 'session_migrated',
+  failure: DerivationFailure,
+  running: EngineBuild,
+): SessionIntegrityError | SessionRecordedByOtherBuildError {
+  const relation = engineBuildRelation(revision.recordedBy, running);
+  if (relation.kind === 'same_commit') {
+    return new SessionIntegrityError({
+      kind: 'same_build_rederivation', revision: revision.revision, transition, check: failure.check, failure,
+      build: relation.commit,
+    });
+  }
+  return new SessionRecordedByOtherBuildError({ revision: revision.revision, transition, relation, failure });
 }
 
 interface SessionRevisionBody {
@@ -451,13 +668,13 @@ function verifyRevisionSequence(
   for (const [index, revision] of revisions.entries()) {
     const expected = index + 1;
     if (revision.sessionId !== sessionId || revision.revision !== expected) {
-      throw new Error('Session revision stream is not contiguous.');
+      throw sequenceViolation('Session revision stream is not contiguous.');
     }
     if (
       revision.parentRevision !== null &&
       (!seen.has(revision.parentRevision) || revision.parentRevision >= revision.revision)
     ) {
-      throw new Error('Session revision parent is outside the preceding stream.');
+      throw sequenceViolation('Session revision parent is outside the preceding stream.');
     }
     seen.add(revision.revision);
   }
@@ -648,10 +865,10 @@ function validReactionGuidance(value: unknown): value is ReactionGuidanceDeclara
 
 function decodeTransition(value: unknown): SessionTransition {
   if (!isRecord(value) || typeof value.kind !== 'string') {
-    throw new TypeError('Malformed VTT session transition.');
+    throw schemaViolation('Malformed VTT session transition.');
   }
   if (!SESSION_TRANSITION_KINDS.includes(value.kind as SessionTransition['kind'])) {
-    throw new UnknownSessionTransitionKindError(value.kind);
+    throw schemaViolation(`Unknown VTT session transition kind ${value.kind}.`);
   }
   switch (value.kind as SessionTransition['kind']) {
     case 'session_started':
@@ -952,7 +1169,7 @@ function decodeTransition(value: unknown): SessionTransition {
       if (hasExactlyKeys(value, ['kind', 'pause']) && validPause(value.pause)) return value as unknown as SessionTransition;
       break;
   }
-  throw new TypeError(`Malformed VTT session transition ${value.kind}.`);
+  throw schemaViolation(`Malformed VTT session transition ${value.kind}.`);
 }
 
 function decodeRevision(value: unknown): SessionRevision {
@@ -984,11 +1201,11 @@ function decodeRevision(value: unknown): SessionRevision {
     !(value.agentSession === null || isAgentSessionBinding(value.agentSession)) ||
     typeof value.checksum !== 'string'
   ) {
-    throw new TypeError('Malformed VTT session revision.');
+    throw schemaViolation('Malformed VTT session revision.');
   }
   decodeEngineBuild(value.recordedBy, 'VTT session revision recordedBy');
   const bounds = value.encounterState.bounds;
-  if (!isRecord(bounds)) throw new TypeError('Persisted encounter bounds are malformed.');
+  if (!isRecord(bounds)) throw schemaViolation('Persisted encounter bounds are malformed.');
   const grid = { columns: bounds.columns, rows: bounds.rows };
   assertSupportedGrid(grid);
   const transition = decodeTransition(value.transition);
@@ -996,15 +1213,15 @@ function decodeRevision(value: unknown): SessionRevision {
     ? null
     : decodePartySessionState(value.partyState);
   if (!Array.isArray(value.encounterState.combatants)) {
-    throw new TypeError('Persisted encounter combatants are malformed.');
+    throw schemaViolation('Persisted encounter combatants are malformed.');
   }
   const encounterCombatants = value.encounterState.combatants.map((combatant) => {
-    if (!isRecord(combatant)) throw new TypeError('Persisted encounter combatant is malformed.');
+    if (!isRecord(combatant)) throw schemaViolation('Persisted encounter combatant is malformed.');
     if (!Object.hasOwn(combatant, 'wildShapeUses')) {
-      throw new TypeError('Persisted encounter combatant lacks Wild Shape use state.');
+      throw schemaViolation('Persisted encounter combatant lacks Wild Shape use state.');
     }
     if (!Object.hasOwn(combatant, 'deathAt')) {
-      throw new TypeError('Persisted encounter combatant lacks a typed time of death.');
+      throw schemaViolation('Persisted encounter combatant lacks a typed time of death.');
     }
     if (combatant.deathAt !== null && (
       !isRecord(combatant.deathAt) ||
@@ -1014,7 +1231,7 @@ function decodeRevision(value: unknown): SessionRevision {
       (combatant.deathAt.round as number) < 0 ||
       (combatant.deathAt.initiativeIndex as number) < 0
     )) {
-      throw new TypeError('Persisted encounter combatant time of death is malformed.');
+      throw schemaViolation('Persisted encounter combatant time of death is malformed.');
     }
     const wildShapeUses = combatant.wildShapeUses === null
       ? null
@@ -1032,16 +1249,16 @@ function decodeRevision(value: unknown): SessionRevision {
       !Number.isSafeInteger(entry.cell.row) || (entry.cell.row as number) < 0 ||
       !Number.isSafeInteger(entry.round) || (entry.round as number) < 0 ||
       !Number.isSafeInteger(entry.revision) || (entry.revision as number) < 0) {
-      throw new TypeError('Persisted combatant observation is malformed.');
+      throw schemaViolation('Persisted combatant observation is malformed.');
     }
     const key = `${entry.observer}\u0000${entry.subject}`;
-    if (observationKeys.has(key)) throw new TypeError('Persisted combatant observations duplicate an observer-subject pair.');
+    if (observationKeys.has(key)) throw schemaViolation('Persisted combatant observations duplicate an observer-subject pair.');
     observationKeys.add(key);
     return structuredClone(entry) as unknown as EncounterState['observationHistory'][number];
   });
   const orderedObservationKeys = observationHistory.map((entry) => `${String(entry.observer)}\u0000${String(entry.subject)}`);
   if (orderedObservationKeys.some((key, index) => index > 0 && key.localeCompare(orderedObservationKeys[index - 1]!) < 0)) {
-    throw new TypeError('Persisted combatant observations are not canonical.');
+    throw schemaViolation('Persisted combatant observations are not canonical.');
   }
   // The decoded state holds minted tokens, not the loaded ones (D895, D900): each board body is checked
   // whole against the grid and the decoded combatants' effective sizes; an absent token keeps an
@@ -1059,7 +1276,7 @@ function decodeRevision(value: unknown): SessionRevision {
       : undefined,
   );
   if (branchRngStateFingerprint(encounterState) !== value.branchRngStateFingerprint) {
-    throw new Error('Persisted VTT branch RNG state fingerprint mismatch.');
+    throw hashMismatch('branch_rng_fingerprint', value.revision as number, 'Persisted VTT branch RNG state fingerprint mismatch.');
   }
   // Every other field was checked above; it holds no token, so its record is the only cast here.
   const revisionRest = value as unknown as Omit<SessionRevisionBody, 'transition' | 'encounterState' | 'partyState'> & {
@@ -1068,7 +1285,7 @@ function decodeRevision(value: unknown): SessionRevision {
   const revision: SessionRevision = { ...revisionRest, transition, encounterState, partyState };
   const { checksum: _checksum, ...body } = revision;
   if (revisionChecksum(body) !== revision.checksum) {
-    throw new Error('VTT session revision checksum mismatch.');
+    throw hashMismatch('revision_checksum', revision.revision, 'VTT session revision checksum mismatch.');
   }
   return revision;
 }
@@ -1235,33 +1452,25 @@ export function replayPacingTransition(
     : advanceDelayedTurn(state, transition.afterCombatant, rng);
 }
 
-function requireCanonicalEqual(
-  actual: unknown,
-  expected: unknown,
-  label: string,
-): void {
-  if (canonicalJson(actual) !== canonicalJson(expected)) {
-    throw new Error(`Session replay disagrees with persisted ${label}.`);
-  }
-}
-
-function requireEncounterMatchesParty(
+/** The first preloaded-party check a composed room fails against `party`, or null when it holds every one. */
+function encounterPartyMismatch(
   encounter: EncounterState,
   party: PartySessionState,
-): void {
+): Extract<RecordedFactCheck, `preloaded party ${string}`> | null {
   const playerCharacters = encounter.combatants.filter(
     (subject) => subject.profile.kind === 'player_character',
   );
   if (playerCharacters.length !== party.characters.length) {
     throw new Error('Composed room does not contain the persisted party.');
   }
+  const differs = (actual: unknown, expected: unknown): boolean => canonicalJson(actual) !== canonicalJson(expected);
   for (const persisted of party.characters) {
     const subject = playerCharacters.find((candidate) => candidate.profile.id === persisted.combatantId);
     if (subject === undefined) throw new Error('Composed room omitted a persisted party character.');
-    requireCanonicalEqual(subject.hitPoints, persisted.currentHitPoints, 'preloaded party Hit Points');
-    requireCanonicalEqual(subject.life, persisted.life, 'preloaded party life state');
-    requireCanonicalEqual(subject.deathSaves, persisted.deathSaves, 'preloaded party death state');
-    requireCanonicalEqual(
+    if (differs(subject.hitPoints, persisted.currentHitPoints)) return 'preloaded party Hit Points';
+    if (differs(subject.life, persisted.life)) return 'preloaded party life state';
+    if (differs(subject.deathSaves, persisted.deathSaves)) return 'preloaded party death state';
+    if (differs(
       subject.spellSlots.map((slot) => ({
         level: slot.level,
         maximum: slot.maximum,
@@ -1274,24 +1483,434 @@ function requireEncounterMatchesParty(
         remaining: slot.remaining,
         recharge: slot.recharge,
       })),
-      'preloaded party spell slots',
-    );
-    requireCanonicalEqual(
-      subject.limitedResources ?? [],
-      persisted.limitedResources,
-      'preloaded party limited resources',
-    );
+    )) return 'preloaded party spell slots';
+    if (differs(subject.limitedResources ?? [], persisted.limitedResources)) return 'preloaded party limited resources';
+  }
+  return null;
+}
+
+/** What the rules derive from a recorded input: the value, or their typed refusal of that input. */
+type Derived<T> =
+  | { readonly kind: 'derived'; readonly value: T }
+  | { readonly kind: 'refused'; readonly failure: DerivationFailure };
+
+/**
+ * Runs a rules derivation. Only a typed rules refusal (EncounterRuleError) is a refusal of the recorded input
+ * (P1-2); any other throw is not the rules deciding and propagates as it is.
+ */
+function derive<T>(check: DerivationCheck, compute: () => T): Derived<T> {
+  try {
+    return { kind: 'derived', value: compute() };
+  } catch (error) {
+    if (!(error instanceof EncounterRuleError)) throw error;
+    return { kind: 'refused', failure: { kind: 'rules_refused_recorded_input', check, error: `${error.name}: ${error.message}` } };
+  }
+}
+
+function derivedPart<T, U>(derived: Derived<T>, part: (value: T) => U): Derived<U> {
+  return derived.kind === 'derived' ? { kind: 'derived', value: part(derived.value) } : derived;
+}
+
+/** What replaying one revision established. */
+type RevisionVerdict = 'verified';
+const VERIFIED: RevisionVerdict = 'verified';
+
+/**
+ * Replays one revision against its declared parent. Every transition kind has its case (a kind without one is a
+ * compile error: the function would lack an ending return). Recorded facts are checked with `recorded`, rules
+ * derivations with `derived` (§5.1's classification); structural faults stay plain Errors (D945 SQ4).
+ */
+function replayTransition(
+  revision: SessionRevision,
+  transition: SessionTransition,
+  parent: SessionRevision | null | undefined,
+  running: EngineBuild,
+): RevisionVerdict {
+  const recorded = (actual: unknown, expected: unknown, check: RecordedFactCheck): void => {
+    if (canonicalJson(actual) !== canonicalJson(expected)) {
+      throw new SessionIntegrityError({
+        kind: 'recorded_fact_disagreement', revision: revision.revision, transition: transition.kind, check,
+      });
+    }
+  };
+  const derived = <T>(
+    kind: DerivedTransitionKind,
+    result: Derived<T>,
+    recordedValue: unknown,
+    check: DerivationCheck,
+  ): void => {
+    if (result.kind === 'refused') throw derivationFailed(revision, kind, result.failure, running);
+    if (canonicalJson(recordedValue) !== canonicalJson(result.value)) {
+      throw derivationFailed(revision, kind, { kind: 'derivation_differs', check }, running);
+    }
+  };
+  switch (transition.kind) {
+    case 'session_migrated':
+      // D919: the root of a migrated save. Its state is the repaired current state of the archived history,
+      // which v13 does not replay; the archive is verified on demand (verifySessionHistoryArchive).
+      if (revision.revision !== 1 || parent !== null) {
+        throw new Error('session_migrated may only be the first revision.');
+      }
+      return VERIFIED;
+    case 'session_started':
+      if (revision.revision !== 1 || parent !== null) {
+        throw new Error('session_started may only be the first revision.');
+      }
+      if (revision.agentSession !== null && (
+        revision.agentSession.cli !== 'codex' ||
+        revision.agentSession.status !== 'active' ||
+        revision.agentSession.generation !== 0 ||
+        revision.agentSession.predecessorSessionHash !== null ||
+        revision.agentSession.startedAtRevision !== 1
+      )) {
+        throw new Error('Migrated session_started agent binding is malformed.');
+      }
+      return VERIFIED;
+    case 'agent_session_started':
+      if (parent === null || parent === undefined || parent.agentSession !== null) {
+        throw new Error('agent_session_started requires an unbound parent revision.');
+      }
+      recorded(revision.agentSession, transition.binding, 'started agent binding');
+      if (
+        transition.binding.status !== 'active' ||
+        transition.binding.generation !== 0 ||
+        transition.binding.predecessorSessionHash !== null ||
+        transition.binding.startedAtRevision !== revision.revision ||
+        transition.binding.lastDispatchedRevision !== 0
+      ) throw new Error('Initial agent session binding is malformed.');
+      recorded(revision.encounterState, parent.encounterState, 'agent-start encounter state');
+      recorded(revision.coordinatorState, parent.coordinatorState, 'agent-start coordinator state');
+      recorded(revision.partyState, parent.partyState, 'agent-start party state');
+      recorded(revision.rngState, parent.rngState, 'agent-start RNG state');
+      return VERIFIED;
+    case 'agent_session_dispatched':
+      if (parent === null || parent === undefined || parent.agentSession === null) {
+        throw new Error('agent_session_dispatched requires an active binding.');
+      }
+      if (
+        parent.agentSession.status !== 'active' ||
+        transition.dispatchedRevision !== parent.revision
+      ) throw new Error('Agent dispatch revision does not identify its active parent.');
+      recorded(
+        revision.agentSession,
+        { ...parent.agentSession, lastDispatchedRevision: transition.dispatchedRevision },
+        'dispatched agent binding',
+      );
+      recorded(revision.encounterState, parent.encounterState, 'agent-dispatch encounter state');
+      recorded(revision.coordinatorState, parent.coordinatorState, 'agent-dispatch coordinator state');
+      recorded(revision.partyState, parent.partyState, 'agent-dispatch party state');
+      recorded(revision.rngState, parent.rngState, 'agent-dispatch RNG state');
+      return VERIFIED;
+    case 'agent_call_usage_recorded':
+      if (parent === null || parent === undefined || parent.agentSession === null ||
+        parent.agentSession.status !== 'active') {
+        throw new Error('agent_call_usage_recorded requires an active binding.');
+      }
+      if (transition.usage.ordinal !== parent.agentSession.callUsage.length + 1) {
+        throw new Error('Recorded agent call usage ordinal is not contiguous.');
+      }
+      recorded(
+        revision.agentSession,
+        {
+          ...parent.agentSession,
+          callUsage: [...parent.agentSession.callUsage, transition.usage],
+          currentContextTokens: transition.usage.contextInputTokens,
+        },
+        'agent call usage binding',
+      );
+      recorded(revision.encounterState, parent.encounterState, 'agent-usage encounter state');
+      recorded(revision.coordinatorState, parent.coordinatorState, 'agent-usage coordinator state');
+      recorded(revision.partyState, parent.partyState, 'agent-usage party state');
+      recorded(revision.rngState, parent.rngState, 'agent-usage RNG state');
+      return VERIFIED;
+    case 'agent_session_recovered':
+      if (parent === null || parent === undefined || parent.agentSession === null) {
+        throw new Error('agent_session_recovered requires a failed active binding.');
+      }
+      recorded(
+        transition.failedBinding,
+        { ...parent.agentSession, status: 'superseded_after_resume_failure' },
+        'superseded agent binding',
+      );
+      recorded(revision.agentSession, transition.binding, 'recovery successor binding');
+      if (
+        transition.binding.cli !== parent.agentSession.cli ||
+        transition.binding.status !== 'active' ||
+        transition.binding.generation !== parent.agentSession.generation + 1 ||
+        transition.binding.startedAtRevision !== revision.revision ||
+        transition.binding.lastDispatchedRevision !== 0 ||
+        transition.binding.predecessorSessionHash === null
+      ) throw new Error('Agent recovery successor is malformed.');
+      recorded(revision.encounterState, parent.encounterState, 'agent-recovery encounter state');
+      recorded(revision.coordinatorState, parent.coordinatorState, 'agent-recovery coordinator state');
+      recorded(revision.partyState, parent.partyState, 'agent-recovery party state');
+      recorded(revision.rngState, parent.rngState, 'agent-recovery RNG state');
+      return VERIFIED;
+    case 'agent_session_recovery_failed':
+      if (parent === null || parent === undefined || parent.agentSession === null) {
+        throw new Error('agent_session_recovery_failed requires an active predecessor binding.');
+      }
+      recorded(revision.encounterState, parent.encounterState, 'failed agent-recovery encounter state');
+      recorded(revision.coordinatorState, parent.coordinatorState, 'failed agent-recovery coordinator state');
+      recorded(revision.partyState, parent.partyState, 'failed agent-recovery party state');
+      recorded(revision.rngState, parent.rngState, 'failed agent-recovery RNG state');
+      return VERIFIED;
+    case 'agent_session_rolled_over':
+      if (parent === null || parent === undefined || parent.agentSession === null ||
+        parent.agentSession.currentContextTokens === null) {
+        throw new Error('agent_session_rolled_over requires an active binding with measured usage.');
+      }
+      recorded(
+        transition.supersededBinding,
+        { ...parent.agentSession, status: 'superseded_after_context_rollover' },
+        'rollover superseded binding',
+      );
+      recorded(revision.agentSession, transition.binding, 'rollover successor binding');
+      if (
+        transition.latestInputTokens !== parent.agentSession.currentContextTokens ||
+        transition.latestInputTokens < transition.threshold ||
+        transition.binding.cli !== parent.agentSession.cli ||
+        transition.binding.status !== 'active' ||
+        transition.binding.generation !== parent.agentSession.generation + 1 ||
+        transition.binding.rolloverTriggerCount !== parent.agentSession.rolloverTriggerCount + 1 ||
+        transition.binding.measuredRolloverThreshold !== transition.threshold ||
+        transition.binding.lastDigestHash !== transition.digestHash ||
+        transition.binding.startedAtRevision !== revision.revision ||
+        transition.binding.lastDispatchedRevision !== 0 ||
+        transition.binding.predecessorSessionHash === null
+      ) throw new Error('Agent rollover successor is malformed.');
+      recorded(revision.encounterState, parent.encounterState, 'agent-rollover encounter state');
+      recorded(revision.coordinatorState, parent.coordinatorState, 'agent-rollover coordinator state');
+      recorded(revision.partyState, parent.partyState, 'agent-rollover party state');
+      recorded(revision.rngState, parent.rngState, 'agent-rollover RNG state');
+      return VERIFIED;
+    case 'session_ended':
+      if (parent === null || parent === undefined) {
+        throw new Error('session_ended requires a parent revision.');
+      }
+      recorded(revision.encounterState, parent.encounterState, 'ended-session encounter state');
+      recorded(revision.coordinatorState, parent.coordinatorState, 'ended-session coordinator state');
+      recorded(revision.partyState, parent.partyState, 'ended-session party state');
+      recorded(revision.rngState, parent.rngState, 'ended-session RNG state');
+      return VERIFIED;
+    case 'party_state_captured': {
+      if (parent === null || parent === undefined || parent.partyState === null) {
+        throw new Error('Party capture requires an existing party session state.');
+      }
+      const parentParty = parent.partyState;
+      recorded(revision.encounterState, parent.encounterState, 'party-capture encounter state');
+      recorded(revision.coordinatorState, parent.coordinatorState, 'party-capture coordinator state');
+      recorded(revision.rngState, parent.rngState, 'party-capture RNG state');
+      const interruption = transition.restInterruption;
+      if (interruption === undefined) {
+        derived(transition.kind, derive('captured party state', () =>
+          capturePartySessionState(parentParty, parent.encounterState)), revision.partyState, 'captured party state');
+      } else {
+        derived(transition.kind, derive('rest-interruption party state', () =>
+          interruptLongRest(parentParty, interruption.outcome).state), revision.partyState, 'rest-interruption party state');
+      }
+      return VERIFIED;
+    }
+    case 'short_rest_completed': {
+      if (parent === null || parent === undefined || parent.partyState === null) {
+        throw new Error('A Short Rest requires an existing party session state.');
+      }
+      const parentParty = parent.partyState;
+      const rested = derive('Short Rest party state', () => {
+        const restRng = restoreMulberry32(parent.rngState);
+        const result = takeShortRest(parentParty, transition.spends, restRng);
+        return { state: result.state, rolls: result.rolls, rng: restRng.snapshot() };
+      });
+      recorded(revision.encounterState, parent.encounterState, 'Short Rest encounter state');
+      recorded(revision.coordinatorState, parent.coordinatorState, 'Short Rest coordinator state');
+      derived(transition.kind, derivedPart(rested, (value) => value.state), revision.partyState, 'Short Rest party state');
+      derived(transition.kind, derivedPart(rested, (value) => value.rolls), transition.rolls, 'Short Rest rolls');
+      derived(transition.kind, derivedPart(rested, (value) => value.rng), revision.rngState, 'Short Rest RNG state');
+      return VERIFIED;
+    }
+    case 'long_rest_completed': {
+      if (parent === null || parent === undefined || parent.partyState === null) {
+        throw new Error('A Long Rest requires an existing party session state.');
+      }
+      const parentParty = parent.partyState;
+      const rested = derive('Long Rest party state', () => takeLongRest(parentParty));
+      recorded(revision.encounterState, parent.encounterState, 'Long Rest encounter state');
+      recorded(revision.coordinatorState, parent.coordinatorState, 'Long Rest coordinator state');
+      derived(transition.kind, derivedPart(rested, (value) => value.state), revision.partyState, 'Long Rest party state');
+      derived(transition.kind, derivedPart(rested, (value) => value.summary), transition.summary, 'Long Rest summary');
+      recorded(revision.rngState, parent.rngState, 'Long Rest RNG state');
+      return VERIFIED;
+    }
+    case 'room_composed': {
+      if (parent === null || parent === undefined || parent.partyState === null) {
+        throw new Error('Room composition requires an existing party session state.');
+      }
+      const parentParty = parent.partyState;
+      const advanced = derive('advanced room party state', () => enterNextRoom(parentParty));
+      derived(transition.kind, advanced, revision.partyState, 'advanced room party state');
+      recorded(revision.rngState, parent.rngState, 'room-composition RNG state');
+      derived(transition.kind, derivedPart(advanced, (value) => value.room), transition.room, 'advanced room ordinal');
+      if (revision.partyState === null) throw new Error('A composed room records no party state.');
+      const mismatch = encounterPartyMismatch(revision.encounterState, revision.partyState);
+      if (mismatch !== null) {
+        throw new SessionIntegrityError({
+          kind: 'recorded_fact_disagreement', revision: revision.revision, transition: transition.kind, check: mismatch,
+        });
+      }
+      return VERIFIED;
+    }
+    case 'turn_skipped': {
+      if (parent === null || parent === undefined) throw new Error('A skipped turn requires a parent.');
+      if (
+        parent.encounterState.activeCombatant !== transition.combatant ||
+        parent.encounterState.round !== transition.round
+      ) throw new Error('Skipped-turn metadata disagrees with its parent state.');
+      const replayed = derive('skipped-turn state', () => {
+        const replayRng = restoreMulberry32(parent.rngState);
+        const advance = advanceSkippedTurn(parent.encounterState, replayRng);
+        return { ...advance, rng: replayRng.snapshot() };
+      });
+      derived(transition.kind, derivedPart(replayed, (value) => value.encounterState), revision.encounterState, 'skipped-turn state');
+      derived(transition.kind, derivedPart(replayed, (value) => value.events), transition.events, 'skipped-turn events');
+      derived(transition.kind, derivedPart(replayed, (value) => value.rng), revision.rngState, 'skipped-turn RNG state');
+      recorded(revision.partyState, parent.partyState, 'skipped-turn party state');
+      recorded(
+        revision.coordinatorState,
+        pacingCoordinatorState(parent.coordinatorState),
+        'skipped-turn coordinator state',
+      );
+      return VERIFIED;
+    }
+    case 'turn_delayed': {
+      if (parent === null || parent === undefined) throw new Error('A delayed turn requires a parent.');
+      if (
+        parent.encounterState.activeCombatant !== transition.combatant ||
+        parent.encounterState.round !== transition.round
+      ) throw new Error('Delayed-turn metadata disagrees with its parent state.');
+      const replayed = derive('delayed-turn reposition', () => {
+        const replayRng = restoreMulberry32(parent.rngState);
+        const advance = advanceDelayedTurn(parent.encounterState, transition.afterCombatant, replayRng);
+        return { ...advance, rng: replayRng.snapshot() };
+      });
+      derived(
+        transition.kind,
+        derivedPart(replayed, (value) => ({ fromIndex: value.fromIndex, toIndex: value.toIndex })),
+        { fromIndex: transition.fromIndex, toIndex: transition.toIndex },
+        'delayed-turn reposition',
+      );
+      derived(transition.kind, derivedPart(replayed, (value) => value.encounterState), revision.encounterState, 'delayed-turn state');
+      derived(transition.kind, derivedPart(replayed, (value) => value.events), transition.events, 'delayed-turn events');
+      derived(transition.kind, derivedPart(replayed, (value) => value.rng), revision.rngState, 'delayed-turn RNG state');
+      recorded(revision.partyState, parent.partyState, 'delayed-turn party state');
+      recorded(
+        revision.coordinatorState,
+        pacingCoordinatorState(parent.coordinatorState),
+        'delayed-turn coordinator state',
+      );
+      return VERIFIED;
+    }
+    case 'head_moved': {
+      if (parent === null || parent === undefined) {
+        throw new Error('A head move requires a target parent.');
+      }
+      recorded(revision.encounterState, parent.encounterState, 'head-move encounter state');
+      recorded(revision.coordinatorState, parent.coordinatorState, 'head-move coordinator state');
+      recorded(revision.partyState, parent.partyState, 'head-move party state');
+      recorded(revision.rngState, deriveBranchRng(parent, revision.branchId).snapshot(), 'head-move RNG state');
+      return VERIFIED;
+    }
+    case 'reaction_preference_changed': {
+      if (parent === null || parent === undefined || parent.partyState === null) {
+        throw new Error('A reaction preference revision requires party state.');
+      }
+      const parentParty = parent.partyState;
+      const changed = derive('reaction preference party state', () => {
+        const party = setPartyReactionPolicy(parentParty, transition.combatant, transition.reactionKind, transition.policy);
+        const partyIds = new Set(party.characters.map((entry) => entry.combatantId));
+        const encounter = {
+          ...parent.encounterState,
+          reactionPolicies: [
+            ...parent.encounterState.reactionPolicies.filter((entry) => !partyIds.has(entry.combatant)),
+            ...party.reactionPolicies,
+          ],
+        };
+        return { party, encounter };
+      });
+      derived(transition.kind, derivedPart(changed, (value) => value.party), revision.partyState, 'reaction preference party state');
+      derived(transition.kind, derivedPart(changed, (value) => value.encounter), revision.encounterState, 'reaction preference encounter state');
+      recorded(revision.rngState, parent.rngState, 'reaction preference RNG state');
+      return VERIFIED;
+    }
+    case 'refusal_handling_changed': {
+      // WR11: this kind had no replay case, so an edited refusal-handling revision loaded unchecked.
+      if (parent === null || parent === undefined || parent.partyState === null) {
+        throw new Error('A refusal-handling revision requires party state.');
+      }
+      const parentParty = parent.partyState;
+      recorded(revision.encounterState, parent.encounterState, 'refusal-handling encounter state');
+      recorded(revision.coordinatorState, parent.coordinatorState, 'refusal-handling coordinator state');
+      recorded(revision.rngState, parent.rngState, 'refusal-handling RNG state');
+      derived(transition.kind, derive('refusal-handling party state', () =>
+        setPartyRefusalHandling(parentParty, transition.category, transition.mode)), revision.partyState, 'refusal-handling party state');
+      return VERIFIED;
+    }
+    case 'reducer_applied': {
+      if (parent === null || parent === undefined) {
+        throw new Error('A reducer revision requires a parent.');
+      }
+      const replayed = derive('reducer state', () => {
+        const replayRng = restoreMulberry32(parent.rngState);
+        const reduction = reduceSessionEncounter(parent.encounterState, transition.command, replayRng);
+        return { state: reduction.state, events: reduction.events, rng: replayRng.snapshot() };
+      });
+      derived(transition.kind, derivedPart(replayed, (value) => value.state), revision.encounterState, 'reducer state');
+      derived(transition.kind, derivedPart(replayed, (value) => value.events), transition.events, 'reducer events');
+      derived(transition.kind, derivedPart(replayed, (value) => value.rng), revision.rngState, 'reducer RNG state');
+      recorded(revision.partyState, parent.partyState, 'reducer party state');
+      return VERIFIED;
+    }
+    case 'controller_request_issued':
+    case 'controller_response_received':
+    case 'controller_request_cancelled':
+    case 'controller_replaced':
+    case 'reaction_policy_resolved':
+    case 'controller_response_refused':
+    case 'coordinator_paused':
+    case 'coordinator_resumed':
+    case 'proposal_fallback_resolved':
+    case 'proposal_correction_requested':
+    case 'proposal_correction_resolved':
+    case 'proposal_correction_failed':
+    case 'proposal_auto_resolved':
+    case 'proposal_auto_resolution_failed':
+    case 'unattended_reaction_auto_resolved':
+    case 'reaction_guidance_replaced':
+    case 'reaction_guidance_auto_resolved':
+    case 'engine_adjudication_requested':
+    case 'engine_adjudication_resolved':
+    case 'dm_takeover_started':
+    case 'dm_handback_requested':
+    case 'dm_handback_completed':
+      if (parent === null || parent === undefined) {
+        throw new Error('A host-state revision requires a parent.');
+      }
+      recorded(revision.encounterState, parent.encounterState, 'coordinator encounter state');
+      recorded(revision.rngState, parent.rngState, 'coordinator RNG state');
+      recorded(revision.partyState, parent.partyState, 'coordinator party state');
+      return VERIFIED;
   }
 }
 
 /**
- * Rebuilds and verifies every revision against its declared parent. The full
- * state held on a revision is a checked recovery cache: reducer transitions
- * must reproduce it from parent state + parent RNG, while coordinator-only
- * transitions must leave both unchanged.
+ * Rebuilds and verifies every revision against its declared parent, under `running` (the build replaying it: a
+ * store's recording build, or the build the offline tool replays at). The full state held on a revision is a checked
+ * recovery cache: reducer transitions must reproduce it from parent state + parent RNG, while coordinator-only
+ * transitions must leave both unchanged. A failure is typed: SessionIntegrityError, or, for a derivation of a turn
+ * another build recorded, SessionRecordedByOtherBuildError (the failing revision's own build decides).
  */
 export function replaySessionRevisions(
   revisions: readonly SessionRevision[],
+  runningBuild: EngineBuild = RUNNING_ENGINE_BUILD,
 ): SessionRevision {
   const first = revisions[0];
   const rootKind = first === undefined ? undefined : decodeTransition(first.transition).kind;
@@ -1308,366 +1927,20 @@ export function replaySessionRevisions(
     if (revision.parentRevision !== null && parent === undefined) {
       throw new Error('Session replay cannot find a declared parent.');
     }
-    switch (transition.kind) {
-      case 'session_migrated':
-        // D919: the root of a migrated save. Its state is the repaired current state of the archived history,
-        // which v13 does not replay; the archive is verified on demand (verifySessionHistoryArchive).
-        if (revision.revision !== 1 || parent !== null) {
-          throw new Error('session_migrated may only be the first revision.');
-        }
-        break;
-      case 'session_started':
-        if (revision.revision !== 1 || parent !== null) {
-          throw new Error('session_started may only be the first revision.');
-        }
-        if (revision.agentSession !== null && (
-          revision.agentSession.cli !== 'codex' ||
-          revision.agentSession.status !== 'active' ||
-          revision.agentSession.generation !== 0 ||
-          revision.agentSession.predecessorSessionHash !== null ||
-          revision.agentSession.startedAtRevision !== 1
-        )) {
-          throw new Error('Migrated session_started agent binding is malformed.');
-        }
-        break;
-      case 'agent_session_started':
-        if (parent === null || parent === undefined || parent.agentSession !== null) {
-          throw new Error('agent_session_started requires an unbound parent revision.');
-        }
-        requireCanonicalEqual(revision.agentSession, transition.binding, 'started agent binding');
-        if (
-          transition.binding.status !== 'active' ||
-          transition.binding.generation !== 0 ||
-          transition.binding.predecessorSessionHash !== null ||
-          transition.binding.startedAtRevision !== revision.revision ||
-          transition.binding.lastDispatchedRevision !== 0
-        ) throw new Error('Initial agent session binding is malformed.');
-        requireCanonicalEqual(revision.encounterState, parent.encounterState, 'agent-start encounter state');
-        requireCanonicalEqual(revision.coordinatorState, parent.coordinatorState, 'agent-start coordinator state');
-        requireCanonicalEqual(revision.partyState, parent.partyState, 'agent-start party state');
-        requireCanonicalEqual(revision.rngState, parent.rngState, 'agent-start RNG state');
-        break;
-      case 'agent_session_dispatched':
-        if (parent === null || parent === undefined || parent.agentSession === null) {
-          throw new Error('agent_session_dispatched requires an active binding.');
-        }
-        if (
-          parent.agentSession.status !== 'active' ||
-          transition.dispatchedRevision !== parent.revision
-        ) throw new Error('Agent dispatch revision does not identify its active parent.');
-        requireCanonicalEqual(
-          revision.agentSession,
-          { ...parent.agentSession, lastDispatchedRevision: transition.dispatchedRevision },
-          'dispatched agent binding',
-        );
-        requireCanonicalEqual(revision.encounterState, parent.encounterState, 'agent-dispatch encounter state');
-        requireCanonicalEqual(revision.coordinatorState, parent.coordinatorState, 'agent-dispatch coordinator state');
-        requireCanonicalEqual(revision.partyState, parent.partyState, 'agent-dispatch party state');
-        requireCanonicalEqual(revision.rngState, parent.rngState, 'agent-dispatch RNG state');
-        break;
-      case 'agent_call_usage_recorded':
-        if (parent === null || parent === undefined || parent.agentSession === null ||
-          parent.agentSession.status !== 'active') {
-          throw new Error('agent_call_usage_recorded requires an active binding.');
-        }
-        if (transition.usage.ordinal !== parent.agentSession.callUsage.length + 1) {
-          throw new Error('Recorded agent call usage ordinal is not contiguous.');
-        }
-        requireCanonicalEqual(
-          revision.agentSession,
-          {
-            ...parent.agentSession,
-            callUsage: [...parent.agentSession.callUsage, transition.usage],
-            currentContextTokens: transition.usage.contextInputTokens,
-          },
-          'agent call usage binding',
-        );
-        requireCanonicalEqual(revision.encounterState, parent.encounterState, 'agent-usage encounter state');
-        requireCanonicalEqual(revision.coordinatorState, parent.coordinatorState, 'agent-usage coordinator state');
-        requireCanonicalEqual(revision.partyState, parent.partyState, 'agent-usage party state');
-        requireCanonicalEqual(revision.rngState, parent.rngState, 'agent-usage RNG state');
-        break;
-      case 'agent_session_recovered':
-        if (parent === null || parent === undefined || parent.agentSession === null) {
-          throw new Error('agent_session_recovered requires a failed active binding.');
-        }
-        requireCanonicalEqual(
-          transition.failedBinding,
-          { ...parent.agentSession, status: 'superseded_after_resume_failure' },
-          'superseded agent binding',
-        );
-        requireCanonicalEqual(revision.agentSession, transition.binding, 'recovery successor binding');
-        if (
-          transition.binding.cli !== parent.agentSession.cli ||
-          transition.binding.status !== 'active' ||
-          transition.binding.generation !== parent.agentSession.generation + 1 ||
-          transition.binding.startedAtRevision !== revision.revision ||
-          transition.binding.lastDispatchedRevision !== 0 ||
-          transition.binding.predecessorSessionHash === null
-        ) throw new Error('Agent recovery successor is malformed.');
-        requireCanonicalEqual(revision.encounterState, parent.encounterState, 'agent-recovery encounter state');
-        requireCanonicalEqual(revision.coordinatorState, parent.coordinatorState, 'agent-recovery coordinator state');
-        requireCanonicalEqual(revision.partyState, parent.partyState, 'agent-recovery party state');
-        requireCanonicalEqual(revision.rngState, parent.rngState, 'agent-recovery RNG state');
-        break;
-      case 'agent_session_recovery_failed':
-        if (parent === null || parent === undefined || parent.agentSession === null) {
-          throw new Error('agent_session_recovery_failed requires an active predecessor binding.');
-        }
-        requireCanonicalEqual(revision.encounterState, parent.encounterState, 'failed agent-recovery encounter state');
-        requireCanonicalEqual(revision.coordinatorState, parent.coordinatorState, 'failed agent-recovery coordinator state');
-        requireCanonicalEqual(revision.partyState, parent.partyState, 'failed agent-recovery party state');
-        requireCanonicalEqual(revision.rngState, parent.rngState, 'failed agent-recovery RNG state');
-        break;
-      case 'agent_session_rolled_over':
-        if (parent === null || parent === undefined || parent.agentSession === null ||
-          parent.agentSession.currentContextTokens === null) {
-          throw new Error('agent_session_rolled_over requires an active binding with measured usage.');
-        }
-        requireCanonicalEqual(
-          transition.supersededBinding,
-          { ...parent.agentSession, status: 'superseded_after_context_rollover' },
-          'rollover superseded binding',
-        );
-        requireCanonicalEqual(revision.agentSession, transition.binding, 'rollover successor binding');
-        if (
-          transition.latestInputTokens !== parent.agentSession.currentContextTokens ||
-          transition.latestInputTokens < transition.threshold ||
-          transition.binding.cli !== parent.agentSession.cli ||
-          transition.binding.status !== 'active' ||
-          transition.binding.generation !== parent.agentSession.generation + 1 ||
-          transition.binding.rolloverTriggerCount !== parent.agentSession.rolloverTriggerCount + 1 ||
-          transition.binding.measuredRolloverThreshold !== transition.threshold ||
-          transition.binding.lastDigestHash !== transition.digestHash ||
-          transition.binding.startedAtRevision !== revision.revision ||
-          transition.binding.lastDispatchedRevision !== 0 ||
-          transition.binding.predecessorSessionHash === null
-        ) throw new Error('Agent rollover successor is malformed.');
-        requireCanonicalEqual(revision.encounterState, parent.encounterState, 'agent-rollover encounter state');
-        requireCanonicalEqual(revision.coordinatorState, parent.coordinatorState, 'agent-rollover coordinator state');
-        requireCanonicalEqual(revision.partyState, parent.partyState, 'agent-rollover party state');
-        requireCanonicalEqual(revision.rngState, parent.rngState, 'agent-rollover RNG state');
-        break;
-      case 'session_ended':
-        if (parent === null || parent === undefined) {
-          throw new Error('session_ended requires a parent revision.');
-        }
-        requireCanonicalEqual(revision.encounterState, parent.encounterState, 'ended-session encounter state');
-        requireCanonicalEqual(revision.coordinatorState, parent.coordinatorState, 'ended-session coordinator state');
-        requireCanonicalEqual(revision.partyState, parent.partyState, 'ended-session party state');
-        requireCanonicalEqual(revision.rngState, parent.rngState, 'ended-session RNG state');
-        break;
-      case 'party_state_captured': {
-        if (parent === null || parent === undefined || parent.partyState === null) {
-          throw new Error('Party capture requires an existing party session state.');
-        }
-        requireCanonicalEqual(revision.encounterState, parent.encounterState, 'party-capture encounter state');
-        requireCanonicalEqual(revision.coordinatorState, parent.coordinatorState, 'party-capture coordinator state');
-        requireCanonicalEqual(revision.rngState, parent.rngState, 'party-capture RNG state');
-        const expectedPartyState = transition.restInterruption === undefined
-          ? capturePartySessionState(parent.partyState, parent.encounterState)
-          : interruptLongRest(parent.partyState, transition.restInterruption.outcome).state;
-        requireCanonicalEqual(revision.partyState, expectedPartyState, transition.restInterruption === undefined
-          ? 'captured party state'
-          : 'rest-interruption party state');
-        break;
-      }
-      case 'short_rest_completed': {
-        if (parent === null || parent === undefined || parent.partyState === null) {
-          throw new Error('A Short Rest requires an existing party session state.');
-        }
-        const restRng = restoreMulberry32(parent.rngState);
-        const rested = takeShortRest(parent.partyState, transition.spends, restRng);
-        requireCanonicalEqual(revision.encounterState, parent.encounterState, 'Short Rest encounter state');
-        requireCanonicalEqual(revision.coordinatorState, parent.coordinatorState, 'Short Rest coordinator state');
-        requireCanonicalEqual(revision.partyState, rested.state, 'Short Rest party state');
-        requireCanonicalEqual(transition.rolls, rested.rolls, 'Short Rest rolls');
-        requireCanonicalEqual(revision.rngState, restRng.snapshot(), 'Short Rest RNG state');
-        break;
-      }
-      case 'long_rest_completed': {
-        if (parent === null || parent === undefined || parent.partyState === null) {
-          throw new Error('A Long Rest requires an existing party session state.');
-        }
-        const rested = takeLongRest(parent.partyState);
-        requireCanonicalEqual(revision.encounterState, parent.encounterState, 'Long Rest encounter state');
-        requireCanonicalEqual(revision.coordinatorState, parent.coordinatorState, 'Long Rest coordinator state');
-        requireCanonicalEqual(revision.partyState, rested.state, 'Long Rest party state');
-        requireCanonicalEqual(transition.summary, rested.summary, 'Long Rest summary');
-        requireCanonicalEqual(revision.rngState, parent.rngState, 'Long Rest RNG state');
-        break;
-      }
-      case 'room_composed': {
-        if (parent === null || parent === undefined || parent.partyState === null) {
-          throw new Error('Room composition requires an existing party session state.');
-        }
-        const advanced = enterNextRoom(parent.partyState);
-        requireCanonicalEqual(revision.partyState, advanced, 'advanced room party state');
-        requireCanonicalEqual(revision.rngState, parent.rngState, 'room-composition RNG state');
-        if (transition.room !== advanced.room) throw new Error('Room transition ordinal disagrees with party state.');
-        requireEncounterMatchesParty(revision.encounterState, advanced);
-        break;
-      }
-      case 'turn_skipped': {
-        if (parent === null || parent === undefined) throw new Error('A skipped turn requires a parent.');
-        if (
-          parent.encounterState.activeCombatant !== transition.combatant ||
-          parent.encounterState.round !== transition.round
-        ) throw new Error('Skipped-turn metadata disagrees with its parent state.');
-        const replayRng = restoreMulberry32(parent.rngState);
-        const replayed = advanceSkippedTurn(parent.encounterState, replayRng);
-        requireCanonicalEqual(revision.encounterState, replayed.encounterState, 'skipped-turn state');
-        requireCanonicalEqual(transition.events, replayed.events, 'skipped-turn events');
-        requireCanonicalEqual(revision.rngState, replayRng.snapshot(), 'skipped-turn RNG state');
-        requireCanonicalEqual(revision.partyState, parent.partyState, 'skipped-turn party state');
-        requireCanonicalEqual(
-          revision.coordinatorState,
-          pacingCoordinatorState(parent.coordinatorState),
-          'skipped-turn coordinator state',
-        );
-        break;
-      }
-      case 'turn_delayed': {
-        if (parent === null || parent === undefined) throw new Error('A delayed turn requires a parent.');
-        if (
-          parent.encounterState.activeCombatant !== transition.combatant ||
-          parent.encounterState.round !== transition.round
-        ) throw new Error('Delayed-turn metadata disagrees with its parent state.');
-        const replayRng = restoreMulberry32(parent.rngState);
-        const replayed = advanceDelayedTurn(
-          parent.encounterState,
-          transition.afterCombatant,
-          replayRng,
-        );
-        requireCanonicalEqual(
-          { fromIndex: transition.fromIndex, toIndex: transition.toIndex },
-          { fromIndex: replayed.fromIndex, toIndex: replayed.toIndex },
-          'delayed-turn reposition',
-        );
-        requireCanonicalEqual(revision.encounterState, replayed.encounterState, 'delayed-turn state');
-        requireCanonicalEqual(transition.events, replayed.events, 'delayed-turn events');
-        requireCanonicalEqual(revision.rngState, replayRng.snapshot(), 'delayed-turn RNG state');
-        requireCanonicalEqual(revision.partyState, parent.partyState, 'delayed-turn party state');
-        requireCanonicalEqual(
-          revision.coordinatorState,
-          pacingCoordinatorState(parent.coordinatorState),
-          'delayed-turn coordinator state',
-        );
-        break;
-      }
-      case 'head_moved': {
-        if (parent === null || parent === undefined) {
-          throw new Error('A head move requires a target parent.');
-        }
-        requireCanonicalEqual(
-          revision.encounterState,
-          parent.encounterState,
-          'head-move encounter state',
-        );
-        requireCanonicalEqual(
-          revision.coordinatorState,
-          parent.coordinatorState,
-          'head-move coordinator state',
-        );
-        requireCanonicalEqual(revision.partyState, parent.partyState, 'head-move party state');
-        const expected = deriveBranchRng(parent, revision.branchId).snapshot();
-        requireCanonicalEqual(revision.rngState, expected, 'head-move RNG state');
-        break;
-      }
-      case 'reaction_preference_changed': {
-        if (parent === null || parent === undefined || parent.partyState === null) {
-          throw new Error('A reaction preference revision requires party state.');
-        }
-        const expectedParty = setPartyReactionPolicy(
-          parent.partyState,
-          transition.combatant,
-          transition.reactionKind,
-          transition.policy,
-        );
-        requireCanonicalEqual(revision.partyState, expectedParty, 'reaction preference party state');
-        const partyIds = new Set(expectedParty.characters.map((entry) => entry.combatantId));
-        const expectedEncounter = {
-          ...parent.encounterState,
-          reactionPolicies: [
-            ...parent.encounterState.reactionPolicies.filter((entry) => !partyIds.has(entry.combatant)),
-            ...expectedParty.reactionPolicies,
-          ],
-        };
-        requireCanonicalEqual(revision.encounterState, expectedEncounter, 'reaction preference encounter state');
-        requireCanonicalEqual(revision.rngState, parent.rngState, 'reaction preference RNG state');
-        break;
-      }
-      case 'reducer_applied': {
-        if (parent === null || parent === undefined) {
-          throw new Error('A reducer revision requires a parent.');
-        }
-        const replayRng = restoreMulberry32(parent.rngState);
-        const replayed = reduceSessionEncounter(
-          parent.encounterState,
-          transition.command,
-          replayRng,
-        );
-        requireCanonicalEqual(
-          revision.encounterState,
-          replayed.state,
-          'reducer state',
-        );
-        requireCanonicalEqual(
-          transition.events,
-          replayed.events,
-          'reducer events',
-        );
-        requireCanonicalEqual(revision.rngState, replayRng.snapshot(), 'reducer RNG state');
-        requireCanonicalEqual(revision.partyState, parent.partyState, 'reducer party state');
-        break;
-      }
-      case 'controller_request_issued':
-      case 'controller_response_received':
-      case 'controller_request_cancelled':
-      case 'controller_replaced':
-      case 'reaction_policy_resolved':
-      case 'controller_response_refused':
-      case 'coordinator_paused':
-      case 'coordinator_resumed':
-      case 'proposal_fallback_resolved':
-      case 'proposal_correction_requested':
-      case 'proposal_correction_resolved':
-      case 'proposal_correction_failed':
-      case 'proposal_auto_resolved':
-      case 'proposal_auto_resolution_failed':
-      case 'unattended_reaction_auto_resolved':
-      case 'reaction_guidance_replaced':
-      case 'reaction_guidance_auto_resolved':
-      case 'engine_adjudication_requested':
-      case 'engine_adjudication_resolved':
-      case 'dm_takeover_started':
-      case 'dm_handback_requested':
-      case 'dm_handback_completed':
-        if (parent === null || parent === undefined) {
-          throw new Error('A host-state revision requires a parent.');
-        }
-        requireCanonicalEqual(
-          revision.encounterState,
-          parent.encounterState,
-          'coordinator encounter state',
-        );
-        requireCanonicalEqual(
-          revision.rngState,
-          parent.rngState,
-          'coordinator RNG state',
-        );
-        requireCanonicalEqual(revision.partyState, parent.partyState, 'coordinator party state');
-        break;
-    }
+    replayTransition(revision, transition, parent, runningBuild);
     if (
       parent !== null && parent !== undefined &&
       transition.kind !== 'agent_session_started' &&
       transition.kind !== 'agent_session_dispatched' &&
       transition.kind !== 'agent_call_usage_recorded' &&
       transition.kind !== 'agent_session_recovered' &&
-      transition.kind !== 'agent_session_rolled_over'
+      transition.kind !== 'agent_session_rolled_over' &&
+      canonicalJson(revision.agentSession) !== canonicalJson(parent.agentSession)
     ) {
-      requireCanonicalEqual(revision.agentSession, parent.agentSession, 'unchanged agent binding');
+      throw new SessionIntegrityError({
+        kind: 'recorded_fact_disagreement', revision: revision.revision, transition: transition.kind,
+        check: 'unchanged agent binding',
+      });
     }
     byRevision.set(revision.revision, revision);
   }
@@ -1735,7 +2008,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
     mirror: MirrorSink,
   ): SessionResume {
     const revisions = store.revisions(sessionId);
-    const latest = replaySessionRevisions(revisions);
+    const latest = replaySessionRevisions(revisions, store.recordingEngine);
     const rng = restoreMulberry32(latest.rngState);
     return {
       journal: new EncounterSessionJournal(sessionId, store, mirror, rng),
@@ -2348,7 +2621,8 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
     const latest = this.#latest();
     if (latest.partyState === null) throw new Error('Encounter session has no party state to advance.');
     const partyState = enterNextRoom(latest.partyState);
-    requireEncounterMatchesParty(input.encounterState, partyState);
+    const mismatch = encounterPartyMismatch(input.encounterState, partyState);
+    if (mismatch !== null) throw new Error(`The composed room disagrees with the party state (${mismatch}).`);
     this.#append({
       parentRevision: latest.revision,
       branchId: latest.branchId,
@@ -2577,60 +2851,60 @@ function decodeJournalDagValues(
   rawRevisionRoots: unknown,
 ): readonly JsonValue[] {
   if (!Array.isArray(rawNodes) || !Array.isArray(rawRevisionRoots) || rawRevisionRoots.length === 0) {
-    throw new TypeError('Saved VTT session journal DAG is malformed.');
+    throw schemaViolation('Saved VTT session journal DAG is malformed.');
   }
   const values: JsonValue[] = [];
   const dereference = (reference: unknown, nodeIndex: number): JsonValue => {
     if (!Number.isSafeInteger(reference) || (reference as number) < 0 || (reference as number) >= nodeIndex) {
-      throw new TypeError('Saved VTT session journal DAG has an invalid child reference.');
+      throw schemaViolation('Saved VTT session journal DAG has an invalid child reference.');
     }
     const value = values[reference as number];
-    if (value === undefined) throw new TypeError('Saved VTT session journal DAG has a missing child.');
+    if (value === undefined) throw schemaViolation('Saved VTT session journal DAG has a missing child.');
     return value;
   };
   for (const [nodeIndex, rawNode] of rawNodes.entries()) {
     if (!Array.isArray(rawNode) || typeof rawNode[0] !== 'string') {
-      throw new TypeError('Saved VTT session journal DAG has a malformed node.');
+      throw schemaViolation('Saved VTT session journal DAG has a malformed node.');
     }
     switch (rawNode[0]) {
       case 'n':
-        if (rawNode.length !== 1) throw new TypeError('Saved VTT session journal DAG has a malformed null node.');
+        if (rawNode.length !== 1) throw schemaViolation('Saved VTT session journal DAG has a malformed null node.');
         values.push(null);
         break;
       case 'b':
         if (rawNode.length !== 2 || typeof rawNode[1] !== 'boolean') {
-          throw new TypeError('Saved VTT session journal DAG has a malformed boolean node.');
+          throw schemaViolation('Saved VTT session journal DAG has a malformed boolean node.');
         }
         values.push(rawNode[1]);
         break;
       case 'd':
         if (rawNode.length !== 2 || typeof rawNode[1] !== 'number' || !Number.isFinite(rawNode[1])) {
-          throw new TypeError('Saved VTT session journal DAG has a malformed number node.');
+          throw schemaViolation('Saved VTT session journal DAG has a malformed number node.');
         }
         values.push(rawNode[1]);
         break;
       case 's':
         if (rawNode.length !== 2 || typeof rawNode[1] !== 'string') {
-          throw new TypeError('Saved VTT session journal DAG has a malformed string node.');
+          throw schemaViolation('Saved VTT session journal DAG has a malformed string node.');
         }
         values.push(rawNode[1]);
         break;
       case 'a':
         if (rawNode.length !== 2 || !Array.isArray(rawNode[1])) {
-          throw new TypeError('Saved VTT session journal DAG has a malformed array node.');
+          throw schemaViolation('Saved VTT session journal DAG has a malformed array node.');
         }
         values.push(rawNode[1].map((reference) => dereference(reference, nodeIndex)));
         break;
       case 'o': {
         if (rawNode.length !== 2 || !Array.isArray(rawNode[1]) || rawNode[1].length % 2 !== 0) {
-          throw new TypeError('Saved VTT session journal DAG has a malformed object node.');
+          throw schemaViolation('Saved VTT session journal DAG has a malformed object node.');
         }
         const object = Object.create(null) as Record<string, JsonValue>;
         for (let index = 0; index < rawNode[1].length; index += 2) {
           const key = rawNode[1][index];
           const reference = rawNode[1][index + 1];
           if (typeof key !== 'string' || Object.hasOwn(object, key)) {
-            throw new TypeError('Saved VTT session journal DAG has a malformed object entry.');
+            throw schemaViolation('Saved VTT session journal DAG has a malformed object entry.');
           }
           object[key] = dereference(reference, nodeIndex);
         }
@@ -2638,12 +2912,12 @@ function decodeJournalDagValues(
         break;
       }
       default:
-        throw new TypeError(`Saved VTT session journal DAG has unknown node kind ${JSON.stringify(rawNode[0])}.`);
+        throw schemaViolation(`Saved VTT session journal DAG has unknown node kind ${JSON.stringify(rawNode[0])}.`);
     }
   }
   return rawRevisionRoots.map((root) => {
     if (!Number.isSafeInteger(root) || (root as number) < 0 || (root as number) >= values.length) {
-      throw new TypeError('Saved VTT session journal DAG has an invalid revision root.');
+      throw schemaViolation('Saved VTT session journal DAG has an invalid revision root.');
     }
     return values[root as number]!;
   });
@@ -2662,7 +2936,7 @@ function decodeJournalDagBundle(value: Readonly<Record<string, unknown>>): Saved
     typeof value.sessionId !== 'string' ||
     typeof value.fingerprint !== 'string'
   ) {
-    throw new TypeError('Saved VTT session journal DAG header is malformed.');
+    throw schemaViolation('Saved VTT session journal DAG header is malformed.');
   }
   const body: JournalDagBundleBody = {
     format: JOURNAL_DAG_FORMAT,
@@ -2672,7 +2946,7 @@ function decodeJournalDagBundle(value: Readonly<Record<string, unknown>>): Saved
     revisions: value.revisions as readonly number[],
   };
   if (sha256(canonicalJson(body)) !== value.fingerprint) {
-    throw new SessionFingerprintMismatchError();
+    throw hashMismatch('bundle_fingerprint', null, 'Saved VTT session fingerprint mismatch.');
   }
   const revisions = decodeJournalDag(value.nodes, value.revisions);
   const expanded: SavedSessionBundleV2Body = {
@@ -2721,7 +2995,7 @@ function migrationOriginatingToken(value: unknown): MigrationOriginatingToken | 
 function migrateV10EncounterState(value: unknown): DecodedStateRest {
   if (!isRecord(value) || !Array.isArray(value.combatants) || !Array.isArray(value.tokens) ||
     !Array.isArray(value.effects) || !isRecord(value.environment)) {
-    throw new TypeError('VTT session v10 encounter state is malformed.');
+    throw schemaViolation('VTT session v10 encounter state is malformed.');
   }
   const knownSizes = new Set<string>(creatureSizes);
   const sizes = new Map<string, KnownCreatureSize>();
@@ -2729,16 +3003,16 @@ function migrateV10EncounterState(value: unknown): DecodedStateRest {
   const oldTokens = new Map<string, MigrationOriginatingToken>();
   for (const rawToken of value.tokens) {
     const token = migrationOriginatingToken(rawToken);
-    if (token === null) throw new TypeError('VTT session v10 token is malformed.');
+    if (token === null) throw schemaViolation('VTT session v10 token is malformed.');
     oldTokens.set(token.combatantId, token);
   }
   for (const entry of value.combatants) {
     if (!isRecord(entry) || !isRecord(entry.profile)) {
-      throw new TypeError('VTT session v10 combatant is malformed.');
+      throw schemaViolation('VTT session v10 combatant is malformed.');
     }
     const profile = entry.profile;
     if (typeof profile.id !== 'string' || !isRecord(profile.rules)) {
-      throw new TypeError('VTT session v10 combatant profile is malformed.');
+      throw schemaViolation('VTT session v10 combatant profile is malformed.');
     }
     const rules = profile.rules;
     const sourceSize = rules.sizeCategory;
@@ -2757,14 +3031,14 @@ function migrateV10EncounterState(value: unknown): DecodedStateRest {
   }
   const activeEffects = value.effects.flatMap((entry) => {
     if (!isRecord(entry) || !isRecord(entry.payload)) {
-      throw new TypeError('VTT session v10 effect is malformed.');
+      throw schemaViolation('VTT session v10 effect is malformed.');
     }
     if (entry.payload.kind !== 'size_alteration') return [entry];
     if (typeof entry.id !== 'string' || !Array.isArray(entry.targets) || entry.targets.length !== 1 ||
       typeof entry.targets[0] !== 'string' || entry.payload.selection !== 'selected_when_cast' ||
       !Number.isSafeInteger(entry.payload.damageDieCount) ||
       !Number.isSafeInteger(entry.payload.damageDieSides)) {
-      throw new TypeError('VTT session v10 size effect is not a resolvable single-target effect.');
+      throw schemaViolation('VTT session v10 size effect is not a resolvable single-target effect.');
     }
     const combatant = entry.targets[0] as EncounterState['combatants'][number]['profile']['id'];
     const oldToken = oldTokens.get(combatant);
@@ -2817,7 +3091,7 @@ function migrateV10EncounterState(value: unknown): DecodedStateRest {
   const pendingCombatants = new Set(orderedPending.map((entry) => entry.combatant));
   const tokens = value.tokens.flatMap((entry) => {
     if (!isRecord(entry) || typeof entry.combatantId !== 'string') {
-      throw new TypeError('VTT session v10 token is malformed.');
+      throw schemaViolation('VTT session v10 token is malformed.');
     }
     const size = sizes.get(entry.combatantId);
     return size === undefined || pendingCombatants.has(entry.combatantId as MigrationOriginatingToken['combatantId'])
@@ -2826,7 +3100,7 @@ function migrateV10EncounterState(value: unknown): DecodedStateRest {
   });
   const originalPhase = value.phase;
   if (!isEncounterPhase(originalPhase) || originalPhase.kind === 'awaiting_placement') {
-    throw new TypeError('VTT session v10 encounter phase is malformed.');
+    throw schemaViolation('VTT session v10 encounter phase is malformed.');
   }
   const migrated = {
     ...value,
@@ -2871,10 +3145,10 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
       checksum: '0a6dd026931de184063de3aa5173901c1876fb8ef8f89ac340de241511e5303a',
       migrate: (bundle: Readonly<Record<string, unknown>>) => {
         if (!Array.isArray(bundle.revisions)) {
-          throw new TypeError('VTT session v2 revisions are malformed.');
+          throw schemaViolation('VTT session v2 revisions are malformed.');
         }
         const revisions = bundle.revisions.map((revision) => {
-          if (!isRecord(revision)) throw new TypeError('VTT session v2 revision is malformed.');
+          if (!isRecord(revision)) throw schemaViolation('VTT session v2 revision is malformed.');
           const { checksum: _oldChecksum, ...oldBody } = revision;
           const body = {
             ...oldBody,
@@ -2901,11 +3175,11 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
       checksum: '03fad58a6864c3419f1243aa818fdcb6b38e3411d832de8b32a2e9364ba4bd20',
       migrate: (bundle: Readonly<Record<string, unknown>>) => {
         if (!Array.isArray(bundle.revisions)) {
-          throw new TypeError('VTT session v3 revisions are malformed.');
+          throw schemaViolation('VTT session v3 revisions are malformed.');
         }
         const revisions = bundle.revisions.map((revision) => {
           if (!isRecord(revision) || !isRecord(revision.encounterState)) {
-            throw new TypeError('VTT session v3 revision is malformed.');
+            throw schemaViolation('VTT session v3 revision is malformed.');
           }
           const { checksum: _oldChecksum, ...oldBody } = revision;
           const body = {
@@ -2935,17 +3209,17 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
       checksum: '2b0d139e3b2c7c9c5491fe09a103cc667beb246f8d199f093c058b0835cb9c3d',
       migrate: (bundle: Readonly<Record<string, unknown>>) => {
         if (!Array.isArray(bundle.revisions)) {
-          throw new TypeError('VTT session v4 revisions are malformed.');
+          throw schemaViolation('VTT session v4 revisions are malformed.');
         }
         const priorDeathMoments = new Map<string, unknown>();
         const revisions = bundle.revisions.map((revision, revisionIndex) => {
           if (!isRecord(revision) || !isRecord(revision.encounterState)) {
-            throw new TypeError('VTT session v4 revision is malformed.');
+            throw schemaViolation('VTT session v4 revision is malformed.');
           }
           const encounterState = revision.encounterState;
           const rawCombatants = encounterState.combatants;
           if (!Array.isArray(rawCombatants)) {
-            throw new TypeError('VTT session v4 combatants are malformed.');
+            throw schemaViolation('VTT session v4 combatants are malformed.');
           }
           const round = Number.isSafeInteger(encounterState.round) ? encounterState.round as number : 0;
           const initiativeIndex = Number.isSafeInteger(encounterState.activeInitiativeIndex)
@@ -2953,7 +3227,7 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
             : 0;
           const combatants = rawCombatants.map((combatant: unknown) => {
             if (!isRecord(combatant) || !isRecord(combatant.profile) || typeof combatant.profile.id !== 'string') {
-              throw new TypeError('VTT session v4 combatant is malformed.');
+              throw schemaViolation('VTT session v4 combatant is malformed.');
             }
             const id = combatant.profile.id;
             const existing = Reflect.get(combatant, 'deathAt');
@@ -2995,14 +3269,14 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
       checksum: '29795e2183f7e7c3831d4d233722a51ba2beee75e124abd434976499132ef174',
       migrate: (bundle: Readonly<Record<string, unknown>>) => {
         if (!Array.isArray(bundle.revisions)) {
-          throw new TypeError('VTT session v5 revisions are malformed.');
+          throw schemaViolation('VTT session v5 revisions are malformed.');
         }
         const revisions = bundle.revisions.map((revision) => {
           if (!isRecord(revision) || !isRecord(revision.encounterState)) {
-            throw new TypeError('VTT session v5 revision is malformed.');
+            throw schemaViolation('VTT session v5 revision is malformed.');
           }
           if (typeof revision.encounterState.hideDeathSaveRolls !== 'boolean') {
-            throw new TypeError('VTT session v5 death-save visibility setting is malformed.');
+            throw schemaViolation('VTT session v5 death-save visibility setting is malformed.');
           }
           const { hideDeathSaveRolls, ...legacyEncounterState } = revision.encounterState;
           const migratedEncounterState = {
@@ -3036,7 +3310,7 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
       checksum: '523db2c861ce38aeeec95824f4d73de203fa98a475ffaf3ad488e79696beaa2e',
       migrate: (bundle: Readonly<Record<string, unknown>>) => {
         if (!Array.isArray(bundle.revisions)) {
-          throw new TypeError('VTT session v6 revisions are malformed.');
+          throw schemaViolation('VTT session v6 revisions are malformed.');
         }
         const migratedByRevision = new Map<number, DecodedStateRest>();
         const revisions = bundle.revisions.map((revision) => {
@@ -3045,7 +3319,7 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
             !Number.isSafeInteger(revision.revision) ||
             !isRecord(revision.encounterState)
           ) {
-            throw new TypeError('VTT session v6 revision is malformed.');
+            throw schemaViolation('VTT session v6 revision is malformed.');
           }
           const activeEncounterState = {
             ...revision.encounterState,
@@ -3090,24 +3364,24 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
       checksum: '7438ba7c327f99cfe6eaecedaad97c2e5cd63c0cfdb31b26152eacc9cb2ef5ee',
       migrate: (bundle: Readonly<Record<string, unknown>>) => {
         if (!Array.isArray(bundle.revisions)) {
-          throw new TypeError('VTT session v7 revisions are malformed.');
+          throw schemaViolation('VTT session v7 revisions are malformed.');
         }
         const { fingerprint: legacyFingerprint, ...legacyBundleBody } = bundle;
         if (
           typeof legacyFingerprint !== 'string' ||
           sha256(canonicalJson(legacyBundleBody)) !== legacyFingerprint
-        ) throw new SessionFingerprintMismatchError();
+        ) throw hashMismatch('bundle_fingerprint', null, 'Saved VTT session fingerprint mismatch.');
         const revisions = bundle.revisions.map((revision) => {
           if (
             !isRecord(revision) ||
             typeof revision.codexSessionId !== 'string' ||
             typeof revision.checksum !== 'string'
           ) {
-            throw new TypeError('VTT session v7 revision has no Codex session ID.');
+            throw schemaViolation('VTT session v7 revision has no Codex session ID.');
           }
           const { checksum: _oldChecksum, codexSessionId: legacySessionId, ...oldBody } = revision;
           if (sha256(canonicalJson({ ...oldBody, codexSessionId: legacySessionId })) !== revision.checksum) {
-            throw new Error('VTT session v7 revision checksum mismatch.');
+            throw hashMismatch('legacy_revision_checksum', statedRevision(revision), 'VTT session v7 revision checksum mismatch.');
           }
           const body = {
             ...oldBody,
@@ -3143,20 +3417,20 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
       checksum: 'cf56e83a7fad46c19ab76b437cbb943ba48ce9122022207031ffa7d22f8f826a',
       migrate: (bundle: Readonly<Record<string, unknown>>) => {
         if (!Array.isArray(bundle.revisions)) {
-          throw new TypeError('VTT session v8 revisions are malformed.');
+          throw schemaViolation('VTT session v8 revisions are malformed.');
         }
         const migrateBinding = (value: unknown): unknown => {
           if (value === null) return null;
-          if (!isRecord(value)) throw new TypeError('VTT session v8 agent binding is malformed.');
+          if (!isRecord(value)) throw schemaViolation('VTT session v8 agent binding is malformed.');
           return { ...value, callUsage: [], currentContextTokens: null };
         };
         const revisions = bundle.revisions.map((revision) => {
           if (!isRecord(revision) || typeof revision.checksum !== 'string' || !isRecord(revision.transition)) {
-            throw new TypeError('VTT session v8 revision is malformed.');
+            throw schemaViolation('VTT session v8 revision is malformed.');
           }
           const { checksum: _oldChecksum, ...oldBody } = revision;
           if (sha256(canonicalJson(oldBody)) !== revision.checksum) {
-            throw new Error('VTT session v8 revision checksum mismatch.');
+            throw hashMismatch('legacy_revision_checksum', statedRevision(revision), 'VTT session v8 revision checksum mismatch.');
           }
           const transition = revision.transition.kind === 'agent_session_started'
             ? { ...revision.transition, binding: migrateBinding(revision.transition.binding) }
@@ -3193,12 +3467,12 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
       checksum: 'e32f5335315cd5202b872cadf87f171560933a172f562d9ef2483c3a2d7665a8',
       migrate: (bundle: Readonly<Record<string, unknown>>) => {
         if (!Array.isArray(bundle.revisions)) {
-          throw new TypeError('VTT session v9 revisions are malformed.');
+          throw schemaViolation('VTT session v9 revisions are malformed.');
         }
         const migrateBinding = (value: unknown): unknown => {
           if (value === null) return null;
           if (!isRecord(value) || !Number.isSafeInteger(value.recoveryGeneration)) {
-            throw new TypeError('VTT session v9 agent binding is malformed.');
+            throw schemaViolation('VTT session v9 agent binding is malformed.');
           }
           const { recoveryGeneration, ...binding } = value;
           return {
@@ -3211,11 +3485,11 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
         };
         const revisions = bundle.revisions.map((revision) => {
           if (!isRecord(revision) || typeof revision.checksum !== 'string' || !isRecord(revision.transition)) {
-            throw new TypeError('VTT session v9 revision is malformed.');
+            throw schemaViolation('VTT session v9 revision is malformed.');
           }
           const { checksum: _oldChecksum, ...oldBody } = revision;
           if (sha256(canonicalJson(oldBody)) !== revision.checksum) {
-            throw new Error('VTT session v9 revision checksum mismatch.');
+            throw hashMismatch('legacy_revision_checksum', statedRevision(revision), 'VTT session v9 revision checksum mismatch.');
           }
           const transition = revision.transition.kind === 'agent_session_started'
             ? { ...revision.transition, binding: migrateBinding(revision.transition.binding) }
@@ -3252,15 +3526,15 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
       checksum: '7c407f3ed1d3ad12692deeca519742dcef3b6a89e8b8de16e76964b3d2d583ef',
       migrate: (bundle: Readonly<Record<string, unknown>>) => {
         if (!Array.isArray(bundle.revisions)) {
-          throw new TypeError('VTT session v10 revisions are malformed.');
+          throw schemaViolation('VTT session v10 revisions are malformed.');
         }
         const revisions = bundle.revisions.map((revision) => {
           if (!isRecord(revision) || typeof revision.checksum !== 'string') {
-            throw new TypeError('VTT session v10 revision is malformed.');
+            throw schemaViolation('VTT session v10 revision is malformed.');
           }
           const { checksum: _oldChecksum, ...oldBody } = revision;
           if (sha256(canonicalJson(oldBody)) !== revision.checksum) {
-            throw new Error('VTT session v10 revision checksum mismatch.');
+            throw hashMismatch('legacy_revision_checksum', statedRevision(revision), 'VTT session v10 revision checksum mismatch.');
           }
           const encounterState = migrateV10EncounterState(revision.encounterState);
           const body = {
@@ -3289,15 +3563,15 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
       checksum: '0e45635886c5cd0f61e1ae8df72d030417642154833165bdec642a520813b976',
       migrate: (bundle: Readonly<Record<string, unknown>>) => {
         if (!Array.isArray(bundle.revisions)) {
-          throw new TypeError('VTT session v11 revisions are malformed.');
+          throw schemaViolation('VTT session v11 revisions are malformed.');
         }
         const revisions = bundle.revisions.map((revision) => {
           if (!isRecord(revision) || typeof revision.checksum !== 'string' || !isRecord(revision.encounterState)) {
-            throw new TypeError('VTT session v11 revision is malformed.');
+            throw schemaViolation('VTT session v11 revision is malformed.');
           }
           const { checksum: _oldChecksum, ...oldBody } = revision;
           if (sha256(canonicalJson(oldBody)) !== revision.checksum) {
-            throw new Error('VTT session v11 revision checksum mismatch.');
+            throw hashMismatch('legacy_revision_checksum', statedRevision(revision), 'VTT session v11 revision checksum mismatch.');
           }
           const encounterState = {
             ...revision.encounterState,
@@ -3389,14 +3663,14 @@ function schemaVersionGroups(
     !isRecord(first) ||
     typeof first.sessionId !== 'string' ||
     !Number.isSafeInteger(first.schemaVersion)
-  ) throw new TypeError('Stored VTT session revision stream is malformed.');
+  ) throw schemaViolation('Stored VTT session revision stream is malformed.');
   const groups: Array<{ readonly schemaVersion: number; readonly revisions: unknown[] }> = [];
   for (const revision of revisions) {
     if (
       !isRecord(revision) ||
       revision.sessionId !== first.sessionId ||
       !Number.isSafeInteger(revision.schemaVersion)
-    ) throw new TypeError('Stored VTT session revision stream is malformed.');
+    ) throw schemaViolation('Stored VTT session revision stream is malformed.');
     const schemaVersion = revision.schemaVersion as number;
     const current = groups.at(-1);
     if (current?.schemaVersion === schemaVersion) current.revisions.push(revision);
@@ -3424,7 +3698,7 @@ function expandedLegacyJournalDag(value: Readonly<Record<string, unknown>>): Rea
       value.schemaVersion !== 10 && value.schemaVersion !== 11 && value.schemaVersion !== 12) ||
     typeof value.sessionId !== 'string' ||
     typeof value.fingerprint !== 'string'
-  ) throw new TypeError('Saved VTT session journal DAG header is malformed.');
+  ) throw schemaViolation('Saved VTT session journal DAG header is malformed.');
   const legacySchemaVersion = value.schemaVersion;
   const legacyBody = {
     format: JOURNAL_DAG_FORMAT,
@@ -3434,7 +3708,7 @@ function expandedLegacyJournalDag(value: Readonly<Record<string, unknown>>): Rea
     revisions: value.revisions,
   };
   if (sha256(canonicalJson(legacyBody)) !== value.fingerprint) {
-    throw new SessionFingerprintMismatchError();
+    throw hashMismatch('bundle_fingerprint', null, 'Saved VTT session fingerprint mismatch.');
   }
   const expandedLegacyBody = {
     format: 'vtt-session-revisions',
@@ -3452,12 +3726,12 @@ function expandedLegacyJournalDag(value: Readonly<Record<string, unknown>>): Rea
 function migratedToV12(value: unknown): Readonly<Record<string, unknown>> {
   const expanded = isRecord(value) && value.format === JOURNAL_DAG_FORMAT ? expandedLegacyJournalDag(value) : value;
   if (!isRecord(expanded) || !Number.isSafeInteger(expanded.schemaVersion)) {
-    throw new TypeError('Saved VTT session has no valid schema version.');
+    throw schemaViolation('Saved VTT session has no valid schema version.');
   }
   let migrated: Readonly<Record<string, unknown>> = expanded;
   let version: number = expanded.schemaVersion as number;
   if (version < VTT_SESSION_MINIMUM_SCHEMA_VERSION || version > VTT_SESSION_LAST_V12_SCHEMA_VERSION) {
-    throw new Error('Saved VTT session is outside the migration window.');
+    throw schemaViolation('Saved VTT session is outside the migration window.');
   }
   while (version < VTT_SESSION_LAST_V12_SCHEMA_VERSION) {
     const migration = VTT_SESSION_MIGRATIONS.find((candidate) => candidate.from === version);
@@ -3471,14 +3745,14 @@ function migratedToV12(value: unknown): Readonly<Record<string, unknown>> {
 /** The v12 revisions of a bundle, each with its v12 checksum verified. */
 function verifiedV12Revisions(bundle: Readonly<Record<string, unknown>>): readonly Readonly<Record<string, unknown>>[] {
   if (bundle.schemaVersion !== VTT_SESSION_LAST_V12_SCHEMA_VERSION || !Array.isArray(bundle.revisions) || bundle.revisions.length === 0) {
-    throw new TypeError('VTT session v12 revisions are malformed.');
+    throw schemaViolation('VTT session v12 revisions are malformed.');
   }
   return bundle.revisions.map((revision) => {
     if (!isRecord(revision) || typeof revision.checksum !== 'string' || !isRecord(revision.encounterState)) {
-      throw new TypeError('VTT session v12 revision is malformed.');
+      throw schemaViolation('VTT session v12 revision is malformed.');
     }
     const { checksum: _checksum, ...body } = revision;
-    if (sha256(canonicalJson(body)) !== revision.checksum) throw new Error('VTT session v12 revision checksum mismatch.');
+    if (sha256(canonicalJson(body)) !== revision.checksum) throw hashMismatch('legacy_revision_checksum', statedRevision(revision), 'VTT session v12 revision checksum mismatch.');
     return revision;
   });
 }
@@ -3517,7 +3791,7 @@ function archivedV13Bundle(
 ): Readonly<Record<string, unknown>> {
   const revisions = verifiedV12Revisions(bundle);
   const head = revisions.at(-1);
-  if (head === undefined) throw new TypeError('VTT session v12 revisions are malformed.');
+  if (head === undefined) throw schemaViolation('VTT session v12 revisions are malformed.');
   const repaired = repairV12EncounterState(head.encounterState as Readonly<Record<string, unknown>>);
   const body = {
     schemaVersion: 13 as const,
@@ -3556,13 +3830,13 @@ function archivedV13Bundle(
  * older names none.
  */
 function recordedByOf(revision: unknown, label: string): EngineBuild {
-  if (!isRecord(revision) || !Number.isSafeInteger(revision.schemaVersion)) throw new TypeError(`${label} is malformed.`);
+  if (!isRecord(revision) || !Number.isSafeInteger(revision.schemaVersion)) throw schemaViolation(`${label} is malformed.`);
   if ((revision.schemaVersion as number) <= VTT_SESSION_LAST_V12_SCHEMA_VERSION) return RECORDED_BEFORE_ENGINE_RECORDING;
   // FOOTPRINT fix2 (codex r2 P1): the build is read only from inside the revision's own checksum, so a build
   // written over the recorded one is refused rather than believed.
   const { checksum, ...body } = revision;
   if (typeof checksum !== 'string' || sha256(canonicalJson(body)) !== checksum) {
-    throw new TypeError(`${label} checksum does not cover its recorded engine build.`);
+    throw hashMismatch('recorded_build_checksum', statedRevision(revision), `${label} checksum does not cover its recorded engine build.`);
   }
   return decodeEngineBuild(revision.recordedBy, `${label} recordedBy`);
 }
@@ -3573,11 +3847,11 @@ function recordedByOf(revision: unknown, label: string): EngineBuild {
  * expanded) each name theirs.
  */
 function savedSessionRecording(value: unknown): readonly { readonly schemaVersion: number; readonly recordedBy: EngineBuild }[] {
-  if (!isRecord(value) || !Number.isSafeInteger(value.schemaVersion)) throw new TypeError('Saved VTT session has no valid schema version.');
+  if (!isRecord(value) || !Number.isSafeInteger(value.schemaVersion)) throw schemaViolation('Saved VTT session has no valid schema version.');
   const schemaVersion = value.schemaVersion as number;
   if (schemaVersion <= VTT_SESSION_LAST_V12_SCHEMA_VERSION) return [{ schemaVersion, recordedBy: RECORDED_BEFORE_ENGINE_RECORDING }];
   const revisions = value.format === JOURNAL_DAG_FORMAT ? decodeJournalDagValues(value.nodes, value.revisions) : value.revisions;
-  if (!Array.isArray(revisions) || revisions.length === 0) throw new TypeError('Saved VTT session revisions are malformed.');
+  if (!Array.isArray(revisions) || revisions.length === 0) throw schemaViolation('Saved VTT session revisions are malformed.');
   return revisions.map((revision, index) => ({ schemaVersion, recordedBy: recordedByOf(revision, `Saved revision ${String(index + 1)}`) }));
 }
 
@@ -3640,7 +3914,7 @@ function decodedV13Bundle(migrated: Readonly<Record<string, unknown>>): SavedSes
     !Array.isArray(migrated.revisions) ||
     typeof migrated.fingerprint !== 'string'
   ) {
-    throw new TypeError('Saved VTT session bundle is malformed.');
+    throw schemaViolation('Saved VTT session bundle is malformed.');
   }
   const body: SavedSessionBundleV2Body = {
     format: 'vtt-session-revisions',
@@ -3649,7 +3923,7 @@ function decodedV13Bundle(migrated: Readonly<Record<string, unknown>>): SavedSes
     revisions: migrated.revisions.map(decodeRevision),
   };
   if (sessionFingerprint(body) !== migrated.fingerprint) {
-    throw new SessionFingerprintMismatchError();
+    throw hashMismatch('bundle_fingerprint', null, 'Saved VTT session fingerprint mismatch.');
   }
   return { ...body, fingerprint: migrated.fingerprint };
 }
@@ -3684,7 +3958,7 @@ export function migrateStoredSessionRevisions(
     return decodedV13Bundle(revisionBundleOf(sessionId, VTT_SESSION_SCHEMA_VERSION, revisions)).revisions;
   }
   if (groups.some((group) => group.schemaVersion > VTT_SESSION_LAST_V12_SCHEMA_VERSION)) {
-    throw new TypeError('Stored VTT session revision stream mixes v13 revisions with older ones.');
+    throw schemaViolation('Stored VTT session revision stream mixes v13 revisions with older ones.');
   }
   validateVttSessionMigrationRegistry();
   const v13 = migratedToV13(storedStreamV12Bundle(sessionId, groups), { kind: 'stored_stream', texts }, recordingEngine);
@@ -3711,7 +3985,7 @@ export class ReplayHistoryNotExpressibleError extends Error {
  */
 export function migrateReplayEmbeddedRevision(revision: unknown): SessionRevision {
   if (!isRecord(revision) || typeof revision.sessionId !== 'string' || !Number.isSafeInteger(revision.schemaVersion)) {
-    throw new TypeError('Embedded VTT replay revision is malformed.');
+    throw schemaViolation('Embedded VTT replay revision is malformed.');
   }
   const bundleOf = (schemaVersion: number, revisions: readonly unknown[]) => {
     const body = { format: 'vtt-session-revisions' as const, schemaVersion, sessionId: revision.sessionId, revisions };
@@ -3719,7 +3993,7 @@ export function migrateReplayEmbeddedRevision(revision: unknown): SessionRevisio
   };
   if (revision.schemaVersion === VTT_SESSION_SCHEMA_VERSION) {
     const [decoded] = decodedV13Bundle(bundleOf(VTT_SESSION_SCHEMA_VERSION, [revision])).revisions;
-    if (decoded === undefined) throw new TypeError('Embedded VTT replay revision is malformed.');
+    if (decoded === undefined) throw schemaViolation('Embedded VTT replay revision is malformed.');
     return decoded;
   }
   validateVttSessionMigrationRegistry();
@@ -3728,7 +4002,7 @@ export function migrateReplayEmbeddedRevision(revision: unknown): SessionRevisio
     v13PlacementIssues(entry.encounterState as Readonly<Record<string, unknown>>));
   if (issues.length > 0) throw new ReplayHistoryNotExpressibleError(issues);
   const [decoded] = decodedV13Bundle(bumpedV12Bundle(v12)).revisions;
-  if (decoded === undefined) throw new TypeError('Embedded VTT replay revision is malformed.');
+  if (decoded === undefined) throw schemaViolation('Embedded VTT replay revision is malformed.');
   return decoded;
 }
 
@@ -3839,15 +4113,22 @@ export class SessionHistoryArchiveMetadataError extends Error {
  *   3. the migration re-derived from the archive equals the root revision: the repaired state, every repair and
  *      every carried field.
  * A full reducer replay of the archived turns belongs to the last v12 build (exportSessionHistoryArchive).
- * Returns the archive; throws SessionHistoryArchiveError naming the first check that fails.
+ * Returns the archive; throws SessionHistoryArchiveError naming the first check that fails. The root re-derivation (3)
+ * runs the v12 repair, a derivation: when the root does not follow and another build than `runningBuild` recorded
+ * it (the root's own build), the refusal is the cross-build one (SAVE-COMPAT, D943); under its own build it is
+ * the archive error.
  */
-export function verifySessionHistoryArchive(root: SessionRevision): SessionHistoryArchive {
+export function verifySessionHistoryArchive(
+  root: SessionRevision,
+  runningBuild: EngineBuild = RUNNING_ENGINE_BUILD,
+): SessionHistoryArchive {
   if (root.revision !== 1 || root.transition.kind !== 'session_migrated') {
     throw new SessionHistoryArchiveError('Only a session_migrated root carries a history archive.');
   }
   const archive = decodeSessionHistoryArchive(root.transition.archive);
-  let v12Bundle: Readonly<Record<string, unknown>>;
+  let rederived: Derived<unknown>;
   try {
+    let v12Bundle: Readonly<Record<string, unknown>>;
     switch (archive.source.kind) {
       case 'saved_session':
         v12Bundle = migratedToV12(JSON.parse(archive.source.save.text));
@@ -3856,21 +4137,33 @@ export function verifySessionHistoryArchive(root: SessionRevision): SessionHisto
         const { sessionId, groups } = schemaVersionGroups(
           archive.source.revisions.map((revision): unknown => JSON.parse(revision.text)),
         );
-        if (sessionId !== root.sessionId) throw new TypeError('The archived stream belongs to another session.');
+        if (sessionId !== root.sessionId) throw schemaViolation('The archived stream belongs to another session.');
         v12Bundle = storedStreamV12Bundle(sessionId, groups);
         break;
       }
     }
-    const rederived = archivedV13Bundle(v12Bundle, archive, root.recordedBy);
-    const [expected] = Array.isArray(rederived.revisions) ? rederived.revisions : [];
-    if (canonicalJson(expected) !== canonicalJson(root)) {
-      throw new SessionHistoryArchiveError('The migrated root does not follow from its archived history.');
-    }
+    rederived = derive('migrated root', () => {
+      const bundle = archivedV13Bundle(v12Bundle, archive, root.recordedBy);
+      const [expected] = Array.isArray(bundle.revisions) ? bundle.revisions : [];
+      return expected;
+    });
   } catch (error) {
     if (error instanceof SessionHistoryArchiveError) throw error;
     throw new SessionHistoryArchiveError(
       `The archived history does not verify under its recorded rules: ${error instanceof Error ? error.message : String(error)}`,
     );
+  }
+  const failure: DerivationFailure | null = rederived.kind === 'refused'
+    ? rederived.failure
+    : canonicalJson(rederived.value) === canonicalJson(root)
+      ? null
+      : { kind: 'derivation_differs', check: 'migrated root' };
+  if (failure !== null) {
+    const refusal = derivationFailed(root, 'session_migrated', failure, runningBuild);
+    if (refusal instanceof SessionIntegrityError) {
+      throw new SessionHistoryArchiveError('The migrated root does not follow from its archived history.');
+    }
+    throw refusal;
   }
   return archive;
 }
@@ -3889,7 +4182,7 @@ export function exportSavedSession(
 ): string {
   const revisions = store.revisions(sessionId);
   if (revisions.length === 0) throw new Error('Encounter session does not exist.');
-  replaySessionRevisions(revisions);
+  replaySessionRevisions(revisions, store.recordingEngine);
   const encoded = encodeJournalDag(revisions);
   const body: JournalDagBundleBody = {
     format: JOURNAL_DAG_FORMAT,
@@ -3913,7 +4206,7 @@ export function decodeSavedSessionFingerprint(
   recordingEngine: EngineBuild = RUNNING_ENGINE_BUILD,
 ): DecodedSavedSessionFingerprint {
   const bundle = migrateSavedBundle(bytes, recordingEngine);
-  const latest = replaySessionRevisions(bundle.revisions);
+  const latest = replaySessionRevisions(bundle.revisions, recordingEngine);
   return {
     sessionId: bundle.sessionId,
     fingerprint: bundle.fingerprint,
@@ -3922,6 +4215,20 @@ export function decodeSavedSessionFingerprint(
     round: latest.encounterState.round,
     initialSeed: latest.rngState.initialSeed,
   };
+}
+
+/**
+ * A saved session's revisions as recorded: decoded and migrated, every hash, the schema and the revision sequence
+ * checked, and NOT replayed (no rule re-derives anything). A save that migrates by archive gets a root
+ * `recordingEngine` records. What the offline replay decodes before it replays a save at its recording build.
+ */
+export function decodeSavedSessionRevisions(
+  bytes: string,
+  recordingEngine: EngineBuild = RUNNING_ENGINE_BUILD,
+): readonly SessionRevision[] {
+  const bundle = migrateSavedBundle(bytes, recordingEngine);
+  verifyRevisionSequence(bundle.revisions, bundle.sessionId);
+  return bundle.revisions;
 }
 
 export function importSavedSession(

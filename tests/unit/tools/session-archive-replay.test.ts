@@ -27,8 +27,11 @@ import {
   exitCodeOf,
   replaySessionArchive,
   replaySessionArchiveFile,
+  runSessionArchiveReplayCommand,
   sessionArchiveReplayArguments,
 } from '../../../tools/session-archive-replay';
+import { replayedTurns } from '../../../tools/session-archive-replay-driver';
+import { BUILD_A, bundle, e1, recordS } from '../../helpers/save-compat-fixtures';
 import { mkdtempSync, rmSync, writeFileSync } from '../../helpers/test-filesystem';
 import { declareTestInputs } from '../../helpers/test-inputs';
 
@@ -311,5 +314,45 @@ describe('FOOTPRINT fix1: an archive replays offline at the commit it was record
 
   it('the running build of a test run records no commit', () => {
     expect(RUNNING_ENGINE_BUILD).toEqual({ kind: 'unrecorded', reason: 'build_without_commit' });
+  });
+});
+
+describe('SAVE-COMPAT C1: the offline replay decides what the app cannot (D929, D946)', () => {
+  // The app refuses a save whose turn does not play out under the build running now, and cannot tell a rules change
+  // from an altered save. Replayed at the build that RECORDED the turn: a pass means the rules differ; a failure is
+  // an integrity fault of the save (the same build does not reproduce what it wrote). S is recorded at HEAD here.
+  it('W9a: a save edited at turn 2 and rehashed, replayed at the commit that recorded it: integrity at turn 2', async () => {
+    const commit = head();
+    const { plain } = recordS({ kind: 'engine_commit', commit: engineCommit(commit) }, inputs.fixtures.readText(OVERHANG));
+    const report = await replaySessionArchive(sessionHistoryArchiveOf({ kind: 'saved_session', text: bundle(e1(plain)) }));
+    if (report.kind !== 'replayed') throw new Error(`Expected a replay, got ${report.kind}.`);
+    expect(report.turns.map((turn) => [turn.revision, turn.status])).toEqual([[1, 'pass'], [2, 'fail'], [3, 'not_checked']]);
+    const failed = report.turns[1];
+    expect(failed?.status === 'fail' ? failed.error : '').toMatch(/^SessionIntegrityError: Save refused: turn 2 \(reducer_applied\)/u);
+  });
+
+  it('W9b: the command replays a v13 save\'s own turns with --save, not only an archive', async () => {
+    const commit = head();
+    const { plain } = recordS({ kind: 'engine_commit', commit: engineCommit(commit) }, inputs.fixtures.readText(OVERHANG));
+    const directory = mkdtempSync(join(tmpdir(), 'archive-replay-save-'));
+    try {
+      const path = join(directory, 'edited.save.json');
+      writeFileSync(path, bundle(e1(plain)));
+      await expect(runSessionArchiveReplayCommand(['--save', path])).resolves.toMatchObject({
+        kind: 'replayed', commit, basis: 'recorded', verdict: 'fail', load: { kind: 'loaded' },
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('W9c: the driver replays at the build it is given: turn 2 recorded by A, replayed at A, is integrity', () => {
+    const { plain } = recordS(BUILD_A, inputs.fixtures.readText(OVERHANG));
+    const store = new MemoryBrowserSessionStore(BUILD_A);
+    const revisions = store.revisions(importSavedSession(store, bundle(e1(plain))));
+    const turns = replayedTurns(revisions, BUILD_A);
+    expect(turns.map((turn) => [turn.revision, turn.status])).toEqual([[1, 'pass'], [2, 'fail'], [3, 'not_checked']]);
+    const failed = turns[1];
+    expect(failed?.status === 'fail' ? failed.error : '').toMatch(/^SessionIntegrityError: /u);
   });
 });

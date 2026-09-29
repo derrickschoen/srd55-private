@@ -1,0 +1,19 @@
+id: session-persistence-typed-decode-throws
+valid:
+  - >-
+    throw schemaViolation('Malformed VTT session revision.');
+  - >-
+    throw hashMismatch('revision_checksum', revision.revision, 'VTT session revision checksum mismatch.');
+  - >-
+    throw sequenceViolation('Session revision stream is not contiguous.');
+  - >-
+    throw new Error('A skipped turn requires a parent.');
+invalid:
+  - >-
+    throw new TypeError('Malformed VTT session revision.');
+  - >-
+    throw new TypeError(`${label} is malformed.`);
+  - >-
+    throw new Error('VTT session v12 revision checksum mismatch.');
+  - >-
+    throw new Error('Persisted VTT branch RNG state fingerprint mismatch.');

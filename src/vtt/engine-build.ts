@@ -36,6 +36,41 @@ export type EngineBuild =
   | { readonly kind: 'engine_commit'; readonly commit: EngineCommit }
   | { readonly kind: 'unrecorded'; readonly reason: UnrecordedEngineReason };
 
+/**
+ * How the build that recorded a revision relates to the build running now (SAVE-COMPAT, owner D939/D946). Only two
+ * named commits can be compared: the same commit, or two different ones. When either side names no commit, whether
+ * the code differs cannot be told (two uncommitted builds relate as 'unrecorded' too, D945 SQ5).
+ */
+export type EngineBuildRelation =
+  | { readonly kind: 'same_commit'; readonly commit: EngineCommit }
+  | { readonly kind: 'other_commit'; readonly recorded: EngineCommit; readonly running: EngineCommit }
+  /** Either side names no commit: whether the code differs cannot be told. */
+  | { readonly kind: 'unrecorded'; readonly recorded: EngineBuild; readonly running: EngineBuild };
+
+export function engineBuildRelation(recorded: EngineBuild, running: EngineBuild): EngineBuildRelation {
+  if (recorded.kind === 'engine_commit' && running.kind === 'engine_commit') {
+    return recorded.commit === running.commit
+      ? { kind: 'same_commit', commit: recorded.commit }
+      : { kind: 'other_commit', recorded: recorded.commit, running: running.commit };
+  }
+  return { kind: 'unrecorded', recorded, running };
+}
+
+/** An engine build as a refusal names it to the player. */
+export function describeEngineBuild(build: EngineBuild): string {
+  switch (build.kind) {
+    case 'engine_commit':
+      return `engine build ${build.commit}`;
+    case 'unrecorded':
+      switch (build.reason) {
+        case 'build_without_commit':
+          return 'an unrecorded engine build (a development, test or uncommitted build, which records no commit)';
+        case 'recorded_before_engine_recording':
+          return 'an unrecorded engine build (saved before saves recorded their engine build, session schema 12 or older)';
+      }
+  }
+}
+
 /** A revision migrated from schema 12 or older: it was recorded before revisions named their engine build. */
 export const RECORDED_BEFORE_ENGINE_RECORDING: EngineBuild = Object.freeze({
   kind: 'unrecorded',

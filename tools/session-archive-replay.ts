@@ -7,12 +7,14 @@ import * as esbuild from 'esbuild';
 import { canonicalJson } from '../src/commands/canonical-json';
 import { engineCommit, type EngineCommit, type UnknownRecordedCommitReason } from '../src/vtt/engine-build';
 import {
+  decodeSavedSessionRevisions,
   decodeSessionHistoryArchiveDocument,
   importSavedSession,
   MemoryBrowserSessionStore,
   SessionHistoryArchiveError,
   SessionHistoryArchiveMetadataError,
   sessionHistoryArchiveDocument,
+  sessionHistoryArchiveOf,
   verifySessionHistoryArchive,
   type ArchivedSourceRecording,
   type SessionHistoryArchive,
@@ -41,7 +43,14 @@ import { SESSION_ARCHIVE_REPLAY_DRIVER_PATH, type DriverReport, type DriverTurn 
  * It never writes to the repository, its index or its worktrees. Packages resolve from this checkout's
  * node_modules, so a commit whose dependencies differ runs against today's: a stated limit.
  *
+ * SAVE-COMPAT (owner D946): `--save <save.json>` replays a v13 save's OWN turns (not a migrated root's archive) at
+ * the commit its revisions record: what decides a cross-build refusal the app cannot. The in-app decode runs first
+ * (every hash, the schema and the sequence; no replay). Replayed at the recording commit, PASS means the rules
+ * differ between that build and the one that refused the save; a failure there is an integrity fault of the save
+ * (the driver replays AS the recording commit, so the same build fails to reproduce what it wrote).
+ *
  * CLI: vite-node tools/session-archive-replay.ts -- --archive <archive-or-save.json> [--assume-commit <sha>]
+ *      vite-node tools/session-archive-replay.ts -- --save <save.json> [--assume-commit <sha>]
  * Prints the report as canonical JSON. Exit 0: every turn replayed. 1: a turn failed, the archive was refused or
  * the replay could not run. 3: no commit to replay at (unknown, or not in this repository).
  */
@@ -218,7 +227,8 @@ export async function replaySessionArchive(
       return { kind: 'replay_not_run', ...target, stage: 'bundle', error: described(error) };
     }
     const archivePath = join(directory, 'archive.json');
-    writeFileSync(archivePath, canonicalJson({ source: checked.source }));
+    // The driver replays as the target commit (SAVE-COMPAT): a turn it recorded that does not replay is integrity.
+    writeFileSync(archivePath, canonicalJson({ source: checked.source, replayAt: target.commit }));
     const run = spawnSync(process.execPath, [bundle, archivePath], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
     if (run.error !== undefined || run.status !== 0) {
       return { kind: 'replay_not_run', ...target, stage: 'driver', error: run.error?.message ?? run.stderr };
@@ -255,6 +265,21 @@ export async function replaySessionArchiveFile(text: string, options: ReplayOpti
   return replaySessionArchive(archive, options);
 }
 
+/**
+ * A v13 save's own turns, replayed at the commit its revisions record (SAVE-COMPAT `--save`): the in-app decode first
+ * (a save that does not decode is refused, typed), then the replay of its archive as a saved session.
+ */
+export async function replaySessionSaveFile(text: string, options: ReplayOptions = {}): Promise<ArchiveReplayReport> {
+  let archive: SessionHistoryArchive;
+  try {
+    decodeSavedSessionRevisions(text);
+    archive = sessionHistoryArchiveOf({ kind: 'saved_session', text });
+  } catch (error) {
+    return refusalOf(error);
+  }
+  return replaySessionArchive(archive, options);
+}
+
 export function exitCodeOf(report: ArchiveReplayReport): 0 | 1 | 3 {
   switch (report.kind) {
     case 'replayed': return report.verdict === 'pass' ? 0 : 1;
@@ -266,36 +291,52 @@ export function exitCodeOf(report: ArchiveReplayReport): 0 | 1 | 3 {
   }
 }
 
-const COMMAND_USAGE = 'Usage: vite-node tools/session-archive-replay.ts -- --archive <archive-or-save.json> [--assume-commit <sha>]';
+const COMMAND_USAGE = 'Usage: vite-node tools/session-archive-replay.ts -- --archive <archive-or-save.json> [--assume-commit <sha>]' +
+  ' | --save <save.json> [--assume-commit <sha>]';
 
-/** The command's arguments: `--archive <path>`, and `--assume-commit <sha>` at most once each; Error otherwise. */
-export function sessionArchiveReplayArguments(args: readonly string[]): { readonly path: string; readonly options: ReplayOptions } {
+/** What the command replays: an archive (or a migrated save's archive), or a v13 save's own turns. */
+export type SessionArchiveReplayArguments =
+  | { readonly path: string; readonly options: ReplayOptions }
+  | { readonly save: string; readonly options: ReplayOptions };
+
+/**
+ * The command's arguments: exactly one of `--archive <path>` and `--save <path>`, and `--assume-commit <sha>` at most
+ * once; Error otherwise.
+ */
+export function sessionArchiveReplayArguments(args: readonly string[]): SessionArchiveReplayArguments {
   const values = new Map<string, string>();
   for (let index = 0; index < args.length; index += 2) {
     const flag = args[index];
     const value = args[index + 1];
-    if ((flag !== '--archive' && flag !== '--assume-commit') || value === undefined || values.has(flag)) throw new Error(COMMAND_USAGE);
+    if ((flag !== '--archive' && flag !== '--save' && flag !== '--assume-commit') || value === undefined || values.has(flag)) {
+      throw new Error(COMMAND_USAGE);
+    }
     values.set(flag, value);
   }
-  const path = values.get('--archive');
-  if (path === undefined) throw new Error(COMMAND_USAGE);
   const commit = values.get('--assume-commit');
-  return { path, options: commit === undefined ? {} : { assumeCommit: engineCommit(commit) } };
+  const options: ReplayOptions = commit === undefined ? {} : { assumeCommit: engineCommit(commit) };
+  const path = values.get('--archive');
+  const save = values.get('--save');
+  if (path !== undefined && save === undefined) return { path, options };
+  if (save !== undefined && path === undefined) return { save, options };
+  throw new Error(COMMAND_USAGE);
 }
 
 export async function runSessionArchiveReplayCommand(args: readonly string[]): Promise<ArchiveReplayReport> {
-  const { path, options } = sessionArchiveReplayArguments(args);
-  return replaySessionArchiveFile(readFileSync(path, 'utf8'), options);
+  const parsed = sessionArchiveReplayArguments(args);
+  return 'save' in parsed
+    ? replaySessionSaveFile(readFileSync(parsed.save, 'utf8'), parsed.options)
+    : replaySessionArchiveFile(readFileSync(parsed.path, 'utf8'), parsed.options);
 }
 
 // Run as a command (FOOTPRINT fix2): by node on this file, or by vite-node, which keeps its own path as argv[1]
-// and passes only the arguments after `--`, so there the command is recognized by its --archive flag (as
+// and passes only the arguments after `--`, so there the command is recognized by its --archive or --save flag (as
 // ai-dm-arena.ts is by its flags). fix1 compared argv[1] with this module alone, so under vite-node the documented
 // command printed nothing and exited 0.
 const invokedPath = process.argv[1];
 if (process.env['VITEST'] !== 'true' && invokedPath !== undefined && (
   import.meta.url === pathToFileURL(invokedPath).href ||
-  (/[\\/]vite-node(?:\.mjs)?$/u.test(invokedPath) && process.argv.includes('--archive'))
+  (/[\\/]vite-node(?:\.mjs)?$/u.test(invokedPath) && (process.argv.includes('--archive') || process.argv.includes('--save')))
 )) {
   runSessionArchiveReplayCommand(process.argv.slice(2))
     .then((report) => {

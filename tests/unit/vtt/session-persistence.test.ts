@@ -45,8 +45,7 @@ import {
   EncounterSessionJournal,
   MemoryBrowserSessionStore,
   MemoryMirrorSink,
-  SessionFingerprintMismatchError,
-  UnknownSessionTransitionKindError,
+  SessionIntegrityError,
   VTT_SESSION_MIGRATIONS,
   exportSavedSession,
   exportSavedSessionV1ForMigrationTest,
@@ -564,7 +563,9 @@ describe('event-sourced encounter persistence', () => {
     const destination = new MemoryBrowserSessionStore();
 
     expect(() => importSavedSession(destination, JSON.stringify(document))).toThrowError(
-      new UnknownSessionTransitionKindError('transition_from_the_future'),
+      new SessionIntegrityError({
+        kind: 'schema_violation', detail: 'Unknown VTT session transition kind transition_from_the_future.',
+      }),
     );
     expect(destination.revisions(encounterSessionId('session:persistence-test'))).toEqual([]);
 
@@ -575,7 +576,9 @@ describe('event-sourced encounter persistence', () => {
       transition: { kind: 'transition_from_the_future' } as unknown as SessionRevision['transition'],
     };
     expect(() => replaySessionRevisions([forged])).toThrowError(
-      new UnknownSessionTransitionKindError('transition_from_the_future'),
+      new SessionIntegrityError({
+        kind: 'schema_violation', detail: 'Unknown VTT session transition kind transition_from_the_future.',
+      }),
     );
   });
 
@@ -671,7 +674,9 @@ describe('event-sourced encounter persistence', () => {
     const destination = new MemoryBrowserSessionStore();
 
     expect(() => importSavedSession(destination, JSON.stringify(document))).toThrowError(
-      new SessionFingerprintMismatchError(),
+      new SessionIntegrityError({
+        kind: 'hash_mismatch', subject: 'bundle_fingerprint', revision: null, detail: 'Saved VTT session fingerprint mismatch.',
+      }),
     );
     expect(destination.revisions(encounterSessionId('session:persistence-test'))).toEqual([]);
   });

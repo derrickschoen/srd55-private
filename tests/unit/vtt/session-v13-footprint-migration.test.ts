@@ -13,7 +13,7 @@ import { V12CheckpointError } from '../../../src/combat/token-placement';
 import { combatantId, encounterSessionId, type CombatantId } from '../../../src/combat/values';
 import { sha256 } from '../../../src/crypto/sha256';
 import { IndexedDbBrowserSessionStore } from '../../../src/vtt/local-session-store';
-import { engineCommit, RUNNING_ENGINE_BUILD } from '../../../src/vtt/engine-build';
+import { engineCommit, RUNNING_ENGINE_BUILD, type EngineBuild } from '../../../src/vtt/engine-build';
 import {
   EncounterSessionJournal,
   exportSavedSession,
@@ -65,8 +65,11 @@ function accepted<T>(action: () => T): T {
   return value as T;
 }
 
-function imported(bytes: string): { readonly store: MemoryBrowserSessionStore; readonly revisions: readonly SessionRevision[] } {
-  const store = new MemoryBrowserSessionStore();
+function imported(
+  bytes: string,
+  recordingEngine?: EngineBuild,
+): { readonly store: MemoryBrowserSessionStore; readonly revisions: readonly SessionRevision[] } {
+  const store = new MemoryBrowserSessionStore(recordingEngine);
   const sessionId = accepted(() => importSavedSession(store, bytes));
   return { store, revisions: store.revisions(sessionId) };
 }
@@ -310,10 +313,14 @@ describe('FOOTPRINT session v13: a save v13 cannot express is repaired and archi
     expect(refused).toBeInstanceOf(SessionHistoryArchiveError);
     expect(String(refused)).toContain('checksum mismatch');
     // (c) The archive intact, the recorded repair edited (to (15,2)) with the checksums recomputed: it loads, and
-    // the root no longer follows from its archive.
-    const recordEdited = rehashed(root, (body) => { body.transition.placementRepair[0].to = { column: 15, row: 2 }; });
-    const recordLoaded = rootOf(imported(v13Save([recordEdited])).revisions);
-    const unbound = thrown(() => verifySessionHistoryArchive(recordLoaded));
+    // the root no longer follows from its archive. The builds are stated (SAVE-COMPAT, D945 SQ5): the root is
+    // recorded by A and verified under A, the build that recorded it, so this is the archive's own error (under
+    // another build it is the cross-build refusal: save-compat-classification W10).
+    const byA: EngineBuild = { kind: 'engine_commit', commit: engineCommit('a'.repeat(40)) };
+    const rootByA = rootOf(imported(text('overhangRevisions'), byA).revisions);
+    const recordEdited = rehashed(rootByA, (body) => { body.transition.placementRepair[0].to = { column: 15, row: 2 }; });
+    const recordLoaded = rootOf(imported(v13Save([recordEdited]), byA).revisions);
+    const unbound = thrown(() => verifySessionHistoryArchive(recordLoaded, byA));
     expect(unbound).toBeInstanceOf(SessionHistoryArchiveError);
     expect(String(unbound)).toContain('does not follow from its archived history');
     // (d) The repaired state edited (the Huge at (15,2)): its branch fingerprint no longer matches, refused at load.

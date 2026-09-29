@@ -1,0 +1,16 @@
+id: session-persistence-typed-decode-throws
+language: TypeScript
+severity: error
+message: >-
+  session-persistence.ts refuses a save TYPED (SAVE-COMPAT, supervisor D943): a schema fault is schemaViolation(detail),
+  a hash fault hashMismatch(subject, revision, detail), a sequence fault sequenceViolation(detail), each a
+  SessionIntegrityError. An untyped TypeError, or a plain Error about a checksum or fingerprint mismatch, reaches
+  every load surface as an unexplained load_failed.
+files:
+  - src/vtt/session-persistence.ts
+rule:
+  any:
+    - pattern: throw new TypeError($$$ARGS)
+    - all:
+        - pattern: throw new Error($$$ARGS)
+        - regex: (?i)checksum mismatch|fingerprint mismatch
