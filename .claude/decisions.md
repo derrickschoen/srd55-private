@@ -4130,5 +4130,35 @@ The owner's answers, verbatim from the question tool:
 
 These feed unit GATE-TRIM (the no-decision fixes in D963 plus items 3–4) and unit GATE-TIER (items 1–2, plus closing the `--changed` gate hole if confirmed). Codex gpt-6.1-sol drafts one plan covering both. It goes through consensus with the §8A minimality pass before any implementation.
 
-Next free id: D965.
+### D965 — 2026-09-29 15:21 — SQLITE-PERF measured (codex); SQL-TRIM plan dispatched; SHA-SPLIT review r1 REVISE
+
+**SQLITE-PERF.** Codex gpt-6-sol, session 01a0ee5f-53f6-70e0-9dfe-a5bdb21565b7, exit 0. The clone ended clean (`git status --porcelain` empty, VERIFIED by me). The 4 `claude -p` log hits are the brief and quoted decisions text, not invocations (VERIFIED).
+Report: /home/vagrant/PhpstormProjects/dnd-probe-sqlperf-9f0886c3/.tmp/sqlperf/report.md. Numbers are codex-measured, not rerun by me.
+- **Time split per scenario** (ms: SQLite profile / wrapper residual / decode):
+
+  | Scenario | SQLite profile | Wrapper residual | Decode |
+  |---|---:|---:|---:|
+  | Cold seed | 191 | 415 | 26 |
+  | Installer | 9,566 | 12,035 | 1,674 |
+  | Class progression | 615 | 1,217 | 113 |
+  | Migrations | 314 | 802 | 48 |
+
+  Wrapper residual is JS↔wasm plus statement preparation, as an upper estimate. Indexes are not the lever.
+- **Prototypes, 3-run medians.**
+  - Content-reference join rewrite (source-content-importer.ts:120): statement 1,064 → 184 ms; installer file 41.03 → 38.45 s; identical ordered rows over 7,712 calls. It relies on the fingerprint→identity foreign key.
+  - Covering index: its statement went 2,493 → 837 ms, but it gave no file-level gain, so it is dropped.
+- **registryGraphHash** refreshed 480 times (410 in the installer), each reading two full tables of about 200k rows total. The revision query took 0.66 ms per call over 2,871 calls, which is unexplained.
+
+**SQL-TRIM plan dispatched** by resuming the same session (.tmp/runs/sqlperf/resume1.md):
+- P1: the join rewrite, with a runtime foreign-key enforcement proof;
+- P2: why registryGraphHash refreshes so often, and the smallest exact reduction;
+- P3: a prepared-statement cache prototype, dropped if it saves under 1 s on the installer;
+- P4: other measured wins of at least 1 s.
+
+**SHA-SPLIT review r1** (codex gpt-6-sol, fresh read-only session 01a0ee87-7b12-74f2-b1b0-4d304a4b296a): **REVISE, 1 P2.** VERIFIED by me in code: scripts/runtime-import-edges.mjs:294, scripts/test-affected.mjs:537 and scripts/module-state-census.mjs:151 all classify the '#sha256' package import as external. That leaves an incomplete D915 import graph, and lets the lane verdict cache (D964) miss sha256 dependents. The fix was sent to the implementer session (.tmp/runs/sha-split/resume2.md).
+The reviewer confirmed:
+- runtime selection is correct in the Vite client, both workers, Vitest, vite-node and the engine child bundle;
+- no byte-identity issue, and nothing added beyond the plan.
+
+Next free id: D966.
 
