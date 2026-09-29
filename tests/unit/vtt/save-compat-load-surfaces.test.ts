@@ -232,6 +232,32 @@ describe('SAVE-COMPAT C2: the load surfaces survive a save they refuse', () => {
     store.close();
   });
 
+  it('W34b: an autosave whose live point no longer resolves is listed load_failed and hides nothing', async () => {
+    // A live point bound to a checksum the session's revision 2 does not have (the stream it pointed into was
+    // replaced): listing it cannot resolve it, so it is refused with the store's own typed reason.
+    const indexedDb = new IDBFactory();
+    const sessionId = await seedStream(indexedDb, 'w34b', texts(s()), 'campaign', BUILD_B);
+    const storageId = `per_round:${sessionId}:000000000002:round_boundary`;
+    await putSnapshot(indexedDb, 'w34b', {
+      sessionId, fingerprint: 'f'.repeat(64), revisionCount: 2, room: null, round: 1, initialSeed: 0, storageId,
+      trigger: 'round_boundary', pool: 'per_round', name: 'Round 1', updatedAt: '2026-09-20T10:02:00.000Z',
+      retention: { kind: 'named' }, restorePoint: { kind: 'live', headChecksum: 'e'.repeat(64) },
+    });
+    const store = await openStore(indexedDb, 'w34b', BUILD_B);
+    expect(() => store.savedSessions()).not.toThrow();
+    expect(listed(store, `session:${sessionId}`)?.load).toEqual({ kind: 'loadable' });
+    expect(listed(store, storageId)?.load).toEqual({
+      kind: 'refused',
+      refusal: {
+        kind: 'load_failed',
+        errorName: 'RestorePointUnavailableError',
+        message: `Save could not be loaded: RestorePointUnavailableError: Browser autosave ${storageId} points at a `
+          + 'revision this session no longer holds.',
+      },
+    });
+    store.close();
+  });
+
   it('W45 (WR17): a stored v12 stream with a wrong v12 checksum no longer blocks open; listed undecodable; kept', async () => {
     const indexedDb = new IDBFactory();
     // The good session is S (lr-squeezed is Lx's own session id).
